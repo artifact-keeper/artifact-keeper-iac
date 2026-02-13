@@ -1,0 +1,84 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: artifact-keeper-mesh-test
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - name: mesh-main
+            namespace: ak-mesh-main
+            fullnameOverride: ak-main
+            valuesFile: values-mesh-main.yaml
+            peerName: mesh-main
+            peerEndpoint: http://ak-main-backend.ak-mesh-main.svc.cluster.local:8080
+            peerApiKey: mesh-main-api-key
+            jwtSecret: mesh-test-jwt-main
+          - name: mesh-peer-1
+            namespace: ak-mesh-peer1
+            fullnameOverride: ak-peer1
+            valuesFile: values-mesh-peer.yaml
+            peerName: mesh-peer-1
+            peerEndpoint: http://ak-peer1-backend.ak-mesh-peer1.svc.cluster.local:8080
+            peerApiKey: mesh-peer1-api-key
+            jwtSecret: mesh-test-jwt-peer1
+          - name: mesh-peer-2
+            namespace: ak-mesh-peer2
+            fullnameOverride: ak-peer2
+            valuesFile: values-mesh-peer.yaml
+            peerName: mesh-peer-2
+            peerEndpoint: http://ak-peer2-backend.ak-mesh-peer2.svc.cluster.local:8080
+            peerApiKey: mesh-peer2-api-key
+            jwtSecret: mesh-test-jwt-peer2
+          - name: mesh-peer-3
+            namespace: ak-mesh-peer3
+            fullnameOverride: ak-peer3
+            valuesFile: values-mesh-peer.yaml
+            peerName: mesh-peer-3
+            peerEndpoint: http://ak-peer3-backend.ak-mesh-peer3.svc.cluster.local:8080
+            peerApiKey: mesh-peer3-api-key
+            jwtSecret: mesh-test-jwt-peer3
+  template:
+    metadata:
+      name: "ak-{{name}}"
+      labels:
+        app.kubernetes.io/part-of: artifact-keeper
+        environment: mesh-test
+        mesh-role: "{{name}}"
+    spec:
+      project: artifact-keeper
+      source:
+        repoURL: https://github.com/artifact-keeper/artifact-keeper-iac.git
+        targetRevision: HEAD
+        path: helm
+        helm:
+          valueFiles:
+            - "{{valuesFile}}"
+          parameters:
+            - name: fullnameOverride
+              value: "{{fullnameOverride}}"
+            - name: backend.env.PEER_INSTANCE_NAME
+              value: "{{peerName}}"
+            - name: backend.env.PEER_PUBLIC_ENDPOINT
+              value: "{{peerEndpoint}}"
+            - name: backend.env.PEER_API_KEY
+              value: "{{peerApiKey}}"
+            - name: secrets.jwtSecret
+              value: "{{jwtSecret}}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{namespace}}"
+      syncPolicy:
+        automated:
+          selfHeal: true
+          prune: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 5m

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mesh-e2e-test
+  namespace: ak-mesh-main
+  labels:
+    app.kubernetes.io/part-of: ak-mesh-test
+    app.kubernetes.io/component: e2e-test

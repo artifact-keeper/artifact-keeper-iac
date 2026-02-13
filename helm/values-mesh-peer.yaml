@@ -1,0 +1,98 @@
+# Helm values for mesh-test peer instances
+# Deployed via argocd/mesh-test-applicationset.yaml
+# fullnameOverride, PEER_* env vars, and jwtSecret are set via ArgoCD parameters
+
+backend:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/artifact-keeper/artifact-keeper-backend
+    tag: dev
+    pullPolicy: Always
+  env:
+    RUST_LOG: "info,artifact_keeper=debug"
+    HOST: "0.0.0.0"
+    PORT: "8080"
+    STORAGE_PATH: "/data/storage"
+    BACKUP_PATH: "/data/backups"
+    PLUGINS_DIR: "/data/plugins"
+    ENVIRONMENT: "mesh-test"
+    ADMIN_PASSWORD: "admin"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: ""
+  scanWorkspace:
+    enabled: false
+  autoscaling:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+
+web:
+  enabled: false
+
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  auth:
+    username: registry
+    password: registry
+    database: artifact_registry
+  persistence:
+    size: 2Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  initDb:
+    enabled: true
+
+meilisearch:
+  enabled: true
+  image:
+    repository: getmeili/meilisearch
+    tag: v1.12
+  masterKey: "artifact-keeper-mesh-key"
+  env: "development"
+  persistence:
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+trivy:
+  enabled: false
+
+dependencyTrack:
+  enabled: false
+
+ingress:
+  enabled: false
+
+secrets:
+  jwtSecret: "mesh-test-jwt-peer"
+
+networkPolicy:
+  enabled: false
+
+serviceMonitor:
+  enabled: false

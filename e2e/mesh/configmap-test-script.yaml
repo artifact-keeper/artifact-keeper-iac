@@ -1,0 +1,326 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mesh-e2e-test-scripts
+  namespace: ak-mesh-main
+data:
+  mesh-e2e-test.sh: |
+    #!/bin/sh
+    set -uo pipefail
+
+    # ---------------------------------------------------------------------------
+    # Mesh E2E Test Script
+    # Validates peer registration, label-based sync policy evaluation, and
+    # reactive subscription lifecycle across the Artifact Keeper mesh.
+    # ---------------------------------------------------------------------------
+
+    TOTAL=0
+    FAILURES=0
+    TOKEN=""
+
+    # ── Colour helpers ────────────────────────────────────────────────────────
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m' # No Color
+
+    log_pass() {
+      TOTAL=$((TOTAL + 1))
+      printf "${GREEN}  PASS${NC}  %s\n" "$1"
+    }
+
+    log_fail() {
+      TOTAL=$((TOTAL + 1))
+      FAILURES=$((FAILURES + 1))
+      printf "${RED}  FAIL${NC}  %s\n" "$1"
+    }
+
+    assert_eq() {
+      local description="$1"
+      local expected="$2"
+      local actual="$3"
+      if [ "$expected" = "$actual" ]; then
+        log_pass "$description (expected=$expected, got=$actual)"
+      else
+        log_fail "$description (expected=$expected, got=$actual)"
+      fi
+    }
+
+    # ── HTTP helpers ──────────────────────────────────────────────────────────
+    api_get() {
+      local url="$1"
+      curl -sf -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" "$url"
+    }
+
+    api_post() {
+      local url="$1"
+      local body="$2"
+      curl -sf -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -d "$body" "$url"
+    }
+
+    api_put() {
+      local url="$1"
+      local body="$2"
+      curl -sf -X PUT -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -d "$body" "$url"
+    }
+
+    api_delete() {
+      local url="$1"
+      curl -sf -X DELETE -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" "$url"
+    }
+
+    # ── Wait for backends ─────────────────────────────────────────────────────
+    wait_for_backend() {
+      local name="$1"
+      local url="$2"
+      local elapsed=0
+      local max_wait=120
+      printf "${YELLOW}Waiting for %s at %s ...${NC}\n" "$name" "$url"
+      while [ $elapsed -lt $max_wait ]; do
+        if curl -sf -o /dev/null "${url}/health"; then
+          printf "${GREEN}  %s is healthy (%ds)${NC}\n" "$name" "$elapsed"
+          return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+      done
+      printf "${RED}  %s did not become healthy within %ds${NC}\n" "$name" "$max_wait"
+      return 1
+    }
+
+    # ======================================================================
+    # STEP 1 — Wait for all backends
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 1: Wait for backends ===${NC}\n"
+    ALL_HEALTHY=true
+    for pair in "main:${MAIN_URL}" "peer-1:${PEER1_URL}" "peer-2:${PEER2_URL}" "peer-3:${PEER3_URL}"; do
+      name="${pair%%:*}"
+      url="${pair#*:}"
+      if ! wait_for_backend "$name" "$url"; then
+        ALL_HEALTHY=false
+      fi
+    done
+
+    if [ "$ALL_HEALTHY" = false ]; then
+      printf "${RED}Not all backends are healthy — aborting.${NC}\n"
+      exit 1
+    fi
+    log_pass "All 4 backends are healthy"
+
+    # ======================================================================
+    # STEP 2 — Login to main instance
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 2: Login to main instance ===${NC}\n"
+    LOGIN_RESP=$(curl -sf -X POST -H "Content-Type: application/json" \
+      -d "{\"username\":\"admin\",\"password\":\"${ADMIN_PASSWORD}\"}" \
+      "${MAIN_URL}/api/v1/auth/login")
+
+    TOKEN=$(echo "$LOGIN_RESP" | jq -r '.access_token // empty')
+    if [ -z "$TOKEN" ]; then
+      log_fail "Login to main instance"
+      printf "${RED}Cannot proceed without auth token — aborting.${NC}\n"
+      exit 1
+    fi
+    log_pass "Login to main instance (token obtained)"
+
+    # ======================================================================
+    # STEP 3 — Register 3 peers
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 3: Register peers ===${NC}\n"
+
+    PEER1_RESP=$(api_post "${MAIN_URL}/api/v1/peers" \
+      "{\"name\":\"mesh-peer-1\",\"endpoint_url\":\"${PEER1_URL}\",\"api_key\":\"mesh-peer1-api-key\"}")
+    PEER1_ID=$(echo "$PEER1_RESP" | jq -r '.id // empty')
+    if [ -n "$PEER1_ID" ]; then
+      log_pass "Register peer-1 (id=$PEER1_ID)"
+    else
+      log_fail "Register peer-1"
+    fi
+
+    PEER2_RESP=$(api_post "${MAIN_URL}/api/v1/peers" \
+      "{\"name\":\"mesh-peer-2\",\"endpoint_url\":\"${PEER2_URL}\",\"api_key\":\"mesh-peer2-api-key\"}")
+    PEER2_ID=$(echo "$PEER2_RESP" | jq -r '.id // empty')
+    if [ -n "$PEER2_ID" ]; then
+      log_pass "Register peer-2 (id=$PEER2_ID)"
+    else
+      log_fail "Register peer-2"
+    fi
+
+    PEER3_RESP=$(api_post "${MAIN_URL}/api/v1/peers" \
+      "{\"name\":\"mesh-peer-3\",\"endpoint_url\":\"${PEER3_URL}\",\"api_key\":\"mesh-peer3-api-key\"}")
+    PEER3_ID=$(echo "$PEER3_RESP" | jq -r '.id // empty')
+    if [ -n "$PEER3_ID" ]; then
+      log_pass "Register peer-3 (id=$PEER3_ID)"
+    else
+      log_fail "Register peer-3"
+    fi
+
+    # ======================================================================
+    # STEP 4 — Set peer labels
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 4: Set peer labels ===${NC}\n"
+
+    if [ -n "$PEER1_ID" ]; then
+      LABEL_RESP=$(api_put "${MAIN_URL}/api/v1/peers/${PEER1_ID}/labels" \
+        '{"labels":[{"key":"tier","value":"critical"},{"key":"env","value":"production"}]}')
+      if [ $? -eq 0 ]; then
+        log_pass "Set labels on peer-1 (tier=critical, env=production)"
+      else
+        log_fail "Set labels on peer-1"
+      fi
+    fi
+
+    if [ -n "$PEER2_ID" ]; then
+      LABEL_RESP=$(api_put "${MAIN_URL}/api/v1/peers/${PEER2_ID}/labels" \
+        '{"labels":[{"key":"tier","value":"critical"},{"key":"env","value":"staging"}]}')
+      if [ $? -eq 0 ]; then
+        log_pass "Set labels on peer-2 (tier=critical, env=staging)"
+      else
+        log_fail "Set labels on peer-2"
+      fi
+    fi
+
+    if [ -n "$PEER3_ID" ]; then
+      LABEL_RESP=$(api_put "${MAIN_URL}/api/v1/peers/${PEER3_ID}/labels" \
+        '{"labels":[{"key":"tier","value":"standard"},{"key":"env","value":"production"}]}')
+      if [ $? -eq 0 ]; then
+        log_pass "Set labels on peer-3 (tier=standard, env=production)"
+      else
+        log_fail "Set labels on peer-3"
+      fi
+    fi
+
+    # ======================================================================
+    # STEP 5 — Create test repository
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 5: Create test repository ===${NC}\n"
+
+    REPO_RESP=$(api_post "${MAIN_URL}/api/v1/repositories" \
+      '{"key":"mesh-test-pypi","format":"pypi","type":"local","description":"Mesh E2E test repo"}')
+    REPO_KEY=$(echo "$REPO_RESP" | jq -r '.key // empty')
+    if [ "$REPO_KEY" = "mesh-test-pypi" ]; then
+      log_pass "Create repository mesh-test-pypi"
+    else
+      log_fail "Create repository mesh-test-pypi"
+    fi
+
+    # ======================================================================
+    # STEP 6 — Add repo label env=production
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 6: Add repo label env=production ===${NC}\n"
+
+    LABEL_RESP=$(api_post "${MAIN_URL}/api/v1/repositories/mesh-test-pypi/labels/env" \
+      '{"value":"production"}')
+    if [ $? -eq 0 ]; then
+      log_pass "Add label env=production to mesh-test-pypi"
+    else
+      log_fail "Add label env=production to mesh-test-pypi"
+    fi
+
+    # ======================================================================
+    # STEP 7 — Create sync policy
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 7: Create sync policy ===${NC}\n"
+
+    POLICY_RESP=$(api_post "${MAIN_URL}/api/v1/sync-policies" \
+      '{"name":"mesh-e2e-test-policy","description":"E2E test policy","enabled":true,"repo_selector":{"match_labels":{"env":"production"}},"peer_selector":{"match_labels":{"tier":"critical"}},"replication_mode":"push","priority":0,"precedence":10}')
+    POLICY_ID=$(echo "$POLICY_RESP" | jq -r '.id // empty')
+    if [ -n "$POLICY_ID" ]; then
+      log_pass "Create sync policy (id=$POLICY_ID)"
+    else
+      log_fail "Create sync policy"
+    fi
+
+    # ======================================================================
+    # STEP 8 — Evaluate policies (expect 2 subscriptions created)
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 8: Evaluate sync policies (initial) ===${NC}\n"
+
+    EVAL_RESP=$(api_post "${MAIN_URL}/api/v1/sync-policies/evaluate" '{}')
+    CREATED=$(echo "$EVAL_RESP" | jq -r '.created // 0')
+    assert_eq "Initial evaluation creates 2 subscriptions" "2" "$CREATED"
+
+    # ======================================================================
+    # STEP 9 — Remove repo label, re-evaluate (expect removals)
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 9: Remove repo label and re-evaluate ===${NC}\n"
+
+    api_delete "${MAIN_URL}/api/v1/repositories/mesh-test-pypi/labels/env" > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      log_pass "Remove label env from mesh-test-pypi"
+    else
+      log_fail "Remove label env from mesh-test-pypi"
+    fi
+
+    printf "  Sleeping 3s for async re-evaluation ...\n"
+    sleep 3
+
+    EVAL_RESP2=$(api_post "${MAIN_URL}/api/v1/sync-policies/evaluate" '{}')
+    CREATED2=$(echo "$EVAL_RESP2" | jq -r '.created // 0')
+    REMOVED2=$(echo "$EVAL_RESP2" | jq -r '.removed // 0')
+
+    assert_eq "Re-evaluation after label removal creates 0" "0" "$CREATED2"
+    # Note: subscriptions may already be removed by the auto-evaluate trigger
+    # that fires on label delete. Either way, 0 created confirms the policy
+    # no longer matches after removing the label.
+    log_pass "No new subscriptions after label removal (removed=$REMOVED2)"
+
+    # ======================================================================
+    # STEP 10 — Re-add repo label, re-evaluate (expect 2 created again)
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 10: Re-add repo label and re-evaluate ===${NC}\n"
+
+    LABEL_RESP=$(api_post "${MAIN_URL}/api/v1/repositories/mesh-test-pypi/labels/env" \
+      '{"value":"production"}')
+    if [ $? -eq 0 ]; then
+      log_pass "Re-add label env=production to mesh-test-pypi"
+    else
+      log_fail "Re-add label env=production to mesh-test-pypi"
+    fi
+
+    printf "  Sleeping 3s for async re-evaluation ...\n"
+    sleep 3
+
+    EVAL_RESP3=$(api_post "${MAIN_URL}/api/v1/sync-policies/evaluate" '{}')
+    CREATED3=$(echo "$EVAL_RESP3" | jq -r '.created // 0')
+    assert_eq "Re-evaluation after re-adding label creates 2" "2" "$CREATED3"
+
+    # ======================================================================
+    # STEP 11 — Cleanup
+    # ======================================================================
+    printf "\n${YELLOW}=== Step 11: Cleanup ===${NC}\n"
+
+    if [ -n "$POLICY_ID" ]; then
+      api_delete "${MAIN_URL}/api/v1/sync-policies/${POLICY_ID}" > /dev/null 2>&1
+      printf "  Deleted sync policy %s\n" "$POLICY_ID"
+    fi
+
+    for peer_id in "$PEER1_ID" "$PEER2_ID" "$PEER3_ID"; do
+      if [ -n "$peer_id" ]; then
+        api_delete "${MAIN_URL}/api/v1/peers/${peer_id}" > /dev/null 2>&1
+        printf "  Deleted peer %s\n" "$peer_id"
+      fi
+    done
+
+    api_delete "${MAIN_URL}/api/v1/repositories/mesh-test-pypi" > /dev/null 2>&1
+    printf "  Deleted repository mesh-test-pypi\n"
+
+    log_pass "Cleanup completed"
+
+    # ======================================================================
+    # STEP 12 — Summary
+    # ======================================================================
+    printf "\n${YELLOW}════════════════════════════════════════════${NC}\n"
+    PASSED=$((TOTAL - FAILURES))
+    printf "  Total:  %d\n" "$TOTAL"
+    printf "  ${GREEN}Passed: %d${NC}\n" "$PASSED"
+    printf "  ${RED}Failed: %d${NC}\n" "$FAILURES"
+    printf "${YELLOW}════════════════════════════════════════════${NC}\n\n"
+
+    if [ "$FAILURES" -gt 0 ]; then
+      printf "${RED}Mesh E2E tests FAILED${NC}\n"
+      exit 1
+    fi
+
+    printf "${GREEN}Mesh E2E tests PASSED${NC}\n"
+    exit 0

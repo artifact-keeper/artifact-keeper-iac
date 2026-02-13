@@ -1,0 +1,30 @@
+# ARC v2 Runner Scale Set for Playwright E2E Tests
+#
+# Deployed via:
+#   helm install ak-e2e-runners \
+#     --namespace arc-runners \
+#     -f argocd/arc-e2e-runners-values.yaml \
+#     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+#
+# Requires secret "github-token-secret" in arc-runners namespace with key "github_token"
+
+githubConfigUrl: "https://github.com/artifact-keeper"
+githubConfigSecret: "github-token-secret"
+runnerScaleSetName: "ak-e2e-runners"
+
+minRunners: 0
+maxRunners: 5
+
+template:
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"

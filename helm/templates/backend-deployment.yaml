@@ -51,9 +51,8 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              apk add --no-cache curl >/dev/null 2>&1
               echo "Waiting for Meilisearch..."
-              until curl -sf http://{{ include "artifact-keeper.fullname" . }}-meilisearch:7700/health >/dev/null 2>&1; do
+              until wget -qO- http://{{ include "artifact-keeper.fullname" . }}-meilisearch:7700/health >/dev/null 2>&1; do
                 sleep 3
               done
               echo "Meilisearch is ready"

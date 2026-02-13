@@ -196,7 +196,7 @@ data:
     printf "\n${YELLOW}=== Step 5: Create test repository ===${NC}\n"
 
     REPO_RESP=$(api_post "${MAIN_URL}/api/v1/repositories" \
-      '{"key":"mesh-test-pypi","format":"pypi","type":"local","description":"Mesh E2E test repo"}')
+      '{"key":"mesh-test-pypi","name":"Mesh Test PyPI","format":"pypi","repo_type":"local","description":"Mesh E2E test repo"}')
     REPO_KEY=$(echo "$REPO_RESP" | jq -r '.key // empty')
     if [ "$REPO_KEY" = "mesh-test-pypi" ]; then
       log_pass "Create repository mesh-test-pypi"

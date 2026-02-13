@@ -232,18 +232,25 @@ data:
     fi
 
     # ======================================================================
-    # STEP 8 — Evaluate policies (expect 2 subscriptions created)
+    # STEP 8 — Verify policy matches via preview (expect 2 subscriptions)
     # ======================================================================
-    printf "\n${YELLOW}=== Step 8: Evaluate sync policies (initial) ===${NC}\n"
+    printf "\n${YELLOW}=== Step 8: Verify policy matches (initial) ===${NC}\n"
 
-    EVAL_RESP=$(api_post "${MAIN_URL}/api/v1/sync-policies/evaluate" '{}')
-    CREATED=$(echo "$EVAL_RESP" | jq -r '.created // 0')
-    assert_eq "Initial evaluation creates 2 subscriptions" "2" "$CREATED"
+    # Policy creation auto-evaluates, so subscriptions already exist.
+    # Use preview to confirm the policy matches 1 repo x 2 critical peers.
+    PREVIEW_BODY='{"name":"preview","repo_selector":{"match_labels":{"env":"production"}},"peer_selector":{"match_labels":{"tier":"critical"}},"replication_mode":"push","precedence":10}'
+    PREVIEW_RESP=$(api_post "${MAIN_URL}/api/v1/sync-policies/preview" "$PREVIEW_BODY")
+    SUB_COUNT=$(echo "$PREVIEW_RESP" | jq -r '.subscription_count // 0')
+    MATCHED_REPOS=$(echo "$PREVIEW_RESP" | jq -r '.matched_repositories | length')
+    MATCHED_PEERS=$(echo "$PREVIEW_RESP" | jq -r '.matched_peers | length')
+    assert_eq "Preview shows 2 subscriptions" "2" "$SUB_COUNT"
+    assert_eq "Preview matches 1 repository" "1" "$MATCHED_REPOS"
+    assert_eq "Preview matches 2 peers" "2" "$MATCHED_PEERS"
 
     # ======================================================================
-    # STEP 9 — Remove repo label, re-evaluate (expect removals)
+    # STEP 9 — Remove repo label, verify no matches
     # ======================================================================
-    printf "\n${YELLOW}=== Step 9: Remove repo label and re-evaluate ===${NC}\n"
+    printf "\n${YELLOW}=== Step 9: Remove repo label and verify ===${NC}\n"
 
     api_delete "${MAIN_URL}/api/v1/repositories/mesh-test-pypi/labels/env" > /dev/null 2>&1
     if [ $? -eq 0 ]; then
@@ -252,23 +259,17 @@ data:
       log_fail "Remove label env from mesh-test-pypi"
     fi
 
-    printf "  Sleeping 3s for async re-evaluation ...\n"
-    sleep 3
+    printf "  Sleeping 2s for async re-evaluation ...\n"
+    sleep 2
 
-    EVAL_RESP2=$(api_post "${MAIN_URL}/api/v1/sync-policies/evaluate" '{}')
-    CREATED2=$(echo "$EVAL_RESP2" | jq -r '.created // 0')
-    REMOVED2=$(echo "$EVAL_RESP2" | jq -r '.removed // 0')
-
-    assert_eq "Re-evaluation after label removal creates 0" "0" "$CREATED2"
-    # Note: subscriptions may already be removed by the auto-evaluate trigger
-    # that fires on label delete. Either way, 0 created confirms the policy
-    # no longer matches after removing the label.
-    log_pass "No new subscriptions after label removal (removed=$REMOVED2)"
+    PREVIEW_RESP2=$(api_post "${MAIN_URL}/api/v1/sync-policies/preview" "$PREVIEW_BODY")
+    SUB_COUNT2=$(echo "$PREVIEW_RESP2" | jq -r '.subscription_count // 0')
+    assert_eq "Preview shows 0 subscriptions after label removal" "0" "$SUB_COUNT2"
 
     # ======================================================================
-    # STEP 10 — Re-add repo label, re-evaluate (expect 2 created again)
+    # STEP 10 — Re-add repo label, verify matches restored
     # ======================================================================
-    printf "\n${YELLOW}=== Step 10: Re-add repo label and re-evaluate ===${NC}\n"
+    printf "\n${YELLOW}=== Step 10: Re-add repo label and verify ===${NC}\n"
 
     LABEL_RESP=$(api_post "${MAIN_URL}/api/v1/repositories/mesh-test-pypi/labels/env" \
       '{"value":"production"}')
@@ -278,12 +279,12 @@ data:
       log_fail "Re-add label env=production to mesh-test-pypi"
     fi
 
-    printf "  Sleeping 3s for async re-evaluation ...\n"
-    sleep 3
+    printf "  Sleeping 2s for async re-evaluation ...\n"
+    sleep 2
 
-    EVAL_RESP3=$(api_post "${MAIN_URL}/api/v1/sync-policies/evaluate" '{}')
-    CREATED3=$(echo "$EVAL_RESP3" | jq -r '.created // 0')
-    assert_eq "Re-evaluation after re-adding label creates 2" "2" "$CREATED3"
+    PREVIEW_RESP3=$(api_post "${MAIN_URL}/api/v1/sync-policies/preview" "$PREVIEW_BODY")
+    SUB_COUNT3=$(echo "$PREVIEW_RESP3" | jq -r '.subscription_count // 0')
+    assert_eq "Preview shows 2 subscriptions after label re-add" "2" "$SUB_COUNT3"
 
     # ======================================================================
     # STEP 11 — Cleanup

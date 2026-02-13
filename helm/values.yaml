@@ -13,6 +13,11 @@ global:
   imagePullPolicy: Always
   storageClass: standard
 
+  # -- Scheduling: applied to ALL workloads
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+
 nameOverride: ""
 fullnameOverride: ""
 

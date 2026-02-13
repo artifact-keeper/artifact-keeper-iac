@@ -25,6 +25,18 @@ spec:
       labels:
         {{- include "artifact-keeper.meilisearch.selectorLabels" . | nindent 8 }}
     spec:
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: meilisearch
           image: "{{ .Values.meilisearch.image.repository }}:{{ .Values.meilisearch.image.tag }}"

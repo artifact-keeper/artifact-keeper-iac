@@ -25,6 +25,18 @@ spec:
       labels:
         {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 8 }}
     spec:
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if .Values.postgres.enabled }}
       initContainers:
         - name: wait-for-postgres
@@ -205,6 +217,18 @@ spec:
         {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 8 }}
     spec:
       restartPolicy: OnFailure
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: dtrack-init
           image: alpine:3.20

@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mesh-e2e-test
+  namespace: ak-mesh-main
+  labels:
+    app.kubernetes.io/part-of: ak-mesh-test
+    app.kubernetes.io/component: e2e-test
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: ak-mesh-test
+        app.kubernetes.io/component: e2e-test
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: mesh-e2e
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args: ["apk add --no-cache curl jq && /scripts/mesh-e2e-test.sh"]
+          env:
+            - name: MAIN_URL
+              value: "http://ak-main-backend.ak-mesh-main.svc.cluster.local:8080"
+            - name: PEER1_URL
+              value: "http://ak-peer1-backend.ak-mesh-peer1.svc.cluster.local:8080"
+            - name: PEER2_URL
+              value: "http://ak-peer2-backend.ak-mesh-peer2.svc.cluster.local:8080"
+            - name: PEER3_URL
+              value: "http://ak-peer3-backend.ak-mesh-peer3.svc.cluster.local:8080"
+            - name: ADMIN_PASSWORD
+              value: "admin"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: test-scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: test-scripts
+          configMap:
+            name: mesh-e2e-test-scripts
+            defaultMode: 0755

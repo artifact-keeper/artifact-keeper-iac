@@ -1,0 +1,114 @@
+# Helm values for mesh-test main instance
+# Deployed via argocd/mesh-test-applicationset.yaml
+
+fullnameOverride: ak-main
+
+backend:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/artifact-keeper/artifact-keeper-backend
+    tag: dev
+    pullPolicy: Always
+  env:
+    RUST_LOG: "info,artifact_keeper=debug"
+    HOST: "0.0.0.0"
+    PORT: "8080"
+    STORAGE_PATH: "/data/storage"
+    BACKUP_PATH: "/data/backups"
+    PLUGINS_DIR: "/data/plugins"
+    ENVIRONMENT: "mesh-test"
+    ADMIN_PASSWORD: "admin"
+    PEER_INSTANCE_NAME: "mesh-main"
+    PEER_PUBLIC_ENDPOINT: "http://ak-main-backend.ak-mesh-main.svc.cluster.local:8080"
+    PEER_API_KEY: "mesh-main-api-key"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: ""
+  scanWorkspace:
+    enabled: false
+  autoscaling:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+
+web:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/artifact-keeper/artifact-keeper-web
+    tag: dev
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  auth:
+    username: registry
+    password: registry
+    database: artifact_registry
+  persistence:
+    size: 2Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  initDb:
+    enabled: true
+
+meilisearch:
+  enabled: true
+  image:
+    repository: getmeili/meilisearch
+    tag: v1.12
+  masterKey: "artifact-keeper-mesh-key"
+  env: "development"
+  persistence:
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+trivy:
+  enabled: false
+
+dependencyTrack:
+  enabled: false
+
+ingress:
+  enabled: false
+
+secrets:
+  jwtSecret: "mesh-test-jwt-main"
+
+networkPolicy:
+  enabled: false
+
+serviceMonitor:
+  enabled: false

@@ -1,0 +1,49 @@
+# ArgoCD Helm values for single-node K8s clusters (dev/test)
+# Install: helm install argocd argo/argo-cd -n argocd --create-namespace -f argocd-values-single-node.yaml
+
+server:
+  replicas: 1
+  ingress:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+repoServer:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+applicationSet:
+  replicas: 1
+
+notifications:
+  enabled: false
+
+configs:
+  params:
+    server.insecure: true
+  repositories:
+    artifact-keeper-iac:
+      url: https://github.com/artifact-keeper/artifact-keeper-iac.git
+      name: artifact-keeper-iac
+      type: git

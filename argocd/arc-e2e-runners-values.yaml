@@ -36,6 +36,7 @@ template:
         args:
           - dockerd
           - --host=unix:///var/run/docker.sock
+          - --storage-driver=vfs
           - --group=$(DOCKER_GROUP_GID)
         env:
           - name: DOCKER_GROUP_GID

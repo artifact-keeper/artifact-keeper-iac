@@ -1,7 +1,10 @@
-# ARC v2 Runner Scale Set for Playwright E2E Tests
+# ARC v2 Runner Scale Set for E2E Tests (with Docker-in-Docker)
+#
+# Provides Docker capability so CI jobs can run docker-compose
+# based E2E test stacks (postgres + backend + test containers).
 #
 # Deployed via:
-#   helm install ak-e2e-runners \
+#   helm upgrade --install ak-e2e-runners \
 #     --namespace arc-runners \
 #     -f argocd/arc-e2e-runners-values.yaml \
 #     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
@@ -17,10 +20,27 @@ maxRunners: 5
 
 template:
   spec:
+    initContainers:
+      - name: init-dind-externals
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["cp", "-r", "-v", "/home/runner/externals/.", "/home/runner/tmpDir/"]
+        volumeMounts:
+          - name: dind-externals
+            mountPath: /home/runner/tmpDir
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
         command: ["/home/runner/run.sh"]
+        env:
+          - name: DOCKER_HOST
+            value: unix:///var/run/docker.sock
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: dind-externals
+            mountPath: /home/runner/externals
+          - name: dind-sock
+            mountPath: /var/run
         resources:
           requests:
             cpu: "2"
@@ -28,3 +48,21 @@ template:
           limits:
             cpu: "4"
             memory: "8Gi"
+      - name: dind
+        image: docker:dind
+        securityContext:
+          privileged: true
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: dind-sock
+            mountPath: /var/run
+          - name: dind-externals
+            mountPath: /home/runner/externals
+    volumes:
+      - name: work
+        emptyDir: {}
+      - name: dind-sock
+        emptyDir: {}
+      - name: dind-externals
+        emptyDir: {}

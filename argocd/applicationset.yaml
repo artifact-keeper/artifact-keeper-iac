@@ -39,6 +39,15 @@ spec:
       labels:
         app.kubernetes.io/part-of: artifact-keeper
         environment: "{{env}}"
+      annotations:
+        argocd-image-updater.argoproj.io/image-list: backend=ghcr.io/artifact-keeper/artifact-keeper-backend:dev, web=ghcr.io/artifact-keeper/artifact-keeper-web:dev
+        argocd-image-updater.argoproj.io/backend.update-strategy: digest
+        argocd-image-updater.argoproj.io/backend.helm.image-name: backend.image.repository
+        argocd-image-updater.argoproj.io/backend.helm.image-tag: backend.image.tag
+        argocd-image-updater.argoproj.io/web.update-strategy: digest
+        argocd-image-updater.argoproj.io/web.helm.image-name: web.image.repository
+        argocd-image-updater.argoproj.io/web.helm.image-tag: web.image.tag
+        argocd-image-updater.argoproj.io/write-back-method: argocd
     spec:
       project: artifact-keeper
       source:

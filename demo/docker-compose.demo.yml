@@ -2,6 +2,11 @@
 # Uses pre-built images from ghcr.io (pushed by CI on every main branch commit).
 # All write operations are blocked via DEMO_MODE.
 # Reset daily with: ./reset-demo.sh
+#
+# Version pinning: create a .env file next to this compose file with:
+#   ARTIFACT_KEEPER_VERSION=1.1.0-rc.2
+# Note: Docker tags use semver WITHOUT the 'v' prefix (git tag v1.1.0-rc.2 → Docker tag 1.1.0-rc.2).
+# If ARTIFACT_KEEPER_VERSION is unset, defaults to 'latest' (latest stable release).
 
 services:
   postgres:

@@ -1,0 +1,18 @@
+# ImageUpdater CR — watches all artifact-keeper ArgoCD Applications
+# and reads image update config from their annotations.
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: artifact-keeper
+  namespace: argocd
+spec:
+  namespace: argocd
+  commonUpdateSettings:
+    updateStrategy: digest
+  writeBackConfig:
+    method: argocd
+  applicationRefs:
+    - namePattern: "artifact-keeper-*"
+      useAnnotations: true
+    - namePattern: "ak-*"
+      useAnnotations: true

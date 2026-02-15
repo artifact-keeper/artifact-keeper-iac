@@ -12,33 +12,26 @@ metadata:
   name: artifact-keeper
   namespace: argocd
 spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
   generators:
     - list:
         elements:
           - env: dev
             namespace: artifact-keeper-dev
             valuesFile: values.yaml
-            autoSync: true
-            selfHeal: true
-            prune: true
           - env: staging
             namespace: artifact-keeper-staging
             valuesFile: values-staging.yaml
-            autoSync: true
-            selfHeal: false
-            prune: false
           - env: production
             namespace: artifact-keeper-prod
             valuesFile: values-production.yaml
-            autoSync: false
-            selfHeal: false
-            prune: false
   template:
     metadata:
-      name: "artifact-keeper-{{env}}"
+      name: "artifact-keeper-{{ .env }}"
       labels:
         app.kubernetes.io/part-of: artifact-keeper
-        environment: "{{env}}"
+        environment: "{{ .env }}"
       annotations:
         argocd-image-updater.argoproj.io/image-list: backend=ghcr.io/artifact-keeper/artifact-keeper-backend:dev, web=ghcr.io/artifact-keeper/artifact-keeper-web:dev
         argocd-image-updater.argoproj.io/backend.update-strategy: digest
@@ -56,14 +49,14 @@ spec:
         path: helm
         helm:
           valueFiles:
-            - "{{valuesFile}}"
+            - "{{ .valuesFile }}"
       destination:
         server: https://kubernetes.default.svc
-        namespace: "{{namespace}}"
+        namespace: "{{ .namespace }}"
       syncPolicy:
         automated:
-          selfHeal: "{{selfHeal}}"
-          prune: "{{prune}}"
+          selfHeal: true
+          prune: true
         syncOptions:
           - CreateNamespace=true
           - ServerSideApply=true

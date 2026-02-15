@@ -33,6 +33,17 @@ spec:
         runAsUser: 1000
         fsGroup: 1000
       initContainers:
+        {{- if .Values.cosign.enabled }}
+        - name: verify-image-signature
+          image: "{{ .Values.cosign.image.repository }}:{{ .Values.cosign.image.tag }}"
+          command: ["cosign", "verify",
+            "--certificate-oidc-issuer={{ .Values.cosign.certificateOidcIssuer }}",
+            "--certificate-identity-regexp={{ .Values.cosign.certificateIdentityRegexp }}",
+            "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"]
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+        {{- end }}
         {{- if .Values.postgres.enabled }}
         - name: wait-for-postgres
           image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}

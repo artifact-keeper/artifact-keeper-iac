@@ -17,6 +17,8 @@ metadata:
     app.kubernetes.io/component: meilisearch
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "artifact-keeper.meilisearch.selectorLabels" . | nindent 6 }}

@@ -1,0 +1,23 @@
+{{/*
+=============================================================================
+Backend DNS Alias
+=============================================================================
+The Next.js web image bakes BACKEND_URL into its rewrites at build time
+(Dockerfile ARG default: http://backend:8080). This ExternalName service
+creates a "backend" DNS alias in each namespace so the baked-in hostname
+resolves to the Helm-named backend service regardless of the release name.
+=============================================================================
+*/}}
+{{- if and .Values.backend.enabled .Values.web.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend-alias
+spec:
+  type: ExternalName
+  externalName: {{ include "artifact-keeper.fullname" . }}-backend.{{ .Release.Namespace }}.svc.cluster.local
+{{- end }}

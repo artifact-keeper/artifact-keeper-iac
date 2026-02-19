@@ -130,8 +130,8 @@ module "s3" {
   force_destroy          = false
   enable_lifecycle_rules = true
 
-  enable_replication                = var.enable_s3_replication
-  replication_role_arn              = var.s3_replication_role_arn
+  enable_replication                 = var.enable_s3_replication
+  replication_role_arn               = var.s3_replication_role_arn
   replication_destination_bucket_arn = var.s3_replication_destination_bucket_arn
 
   tags = local.common_tags

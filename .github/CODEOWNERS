@@ -1,0 +1,3 @@
+* @artifact-keeper/infrastructure
+helm/ @artifact-keeper/infrastructure
+terraform/ @artifact-keeper/infrastructure

@@ -15,6 +15,11 @@ global:
 
   # -- Scheduling constraints applied to ALL workloads by default.
   # Per-component values (e.g. backend.nodeSelector) override these.
+  #
+  # NOTE: Per-component values fully replace global, they do not merge.
+  # Setting backend.tolerations means the backend gets only those tolerations,
+  # not global + backend combined. There is currently no way to opt a single
+  # component out of global scheduling without setting its own values.
   tolerations: []
   affinity: {}
   nodeSelector: {}

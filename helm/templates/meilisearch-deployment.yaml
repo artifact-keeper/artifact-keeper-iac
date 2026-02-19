@@ -17,6 +17,8 @@ metadata:
     app.kubernetes.io/component: meilisearch
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "artifact-keeper.meilisearch.selectorLabels" . | nindent 6 }}
@@ -41,6 +43,30 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        - name: version-guard
+          image: busybox:1.37
+          command: ["sh", "-c"]
+          args:
+            - |
+              EXPECTED="{{ .Values.meilisearch.image.tag }}"
+              VERSION_FILE="/meili_data/data.ms/VERSION"
+              if [ ! -f "$VERSION_FILE" ]; then
+                echo "No existing database, fresh start"
+                exit 0
+              fi
+              CURRENT=$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")
+              echo "Current DB version: $CURRENT, expected image: $EXPECTED"
+              if echo "$CURRENT" | grep -qv "$(echo $EXPECTED | sed 's/^v//')"; then
+                echo "Version mismatch — wiping data.ms for clean re-index"
+                rm -rf /meili_data/data.ms
+                echo "Done. Backend will re-index automatically."
+              else
+                echo "Versions match, keeping existing data"
+              fi
+          volumeMounts:
+            - name: meilisearch-data
+              mountPath: /meili_data
       containers:
         - name: meilisearch
           image: "{{ .Values.meilisearch.image.repository }}:{{ .Values.meilisearch.image.tag }}"
@@ -54,6 +80,8 @@ spec:
               value: {{ .Values.meilisearch.masterKey | quote }}
             - name: MEILI_ENV
               value: {{ .Values.meilisearch.env | quote }}
+            - name: MEILI_MAX_INDEXING_THREADS
+              value: "4"
           resources:
             {{- toYaml .Values.meilisearch.resources | nindent 12 }}
           readinessProbe:

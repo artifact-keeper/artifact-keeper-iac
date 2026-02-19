@@ -23,6 +23,18 @@ global:
 nameOverride: ""
 fullnameOverride: ""
 
+# -- Cosign image signature verification
+# When enabled, an init container verifies the backend image signature
+# before the pod starts. Uses sigstore keyless verification (GitHub OIDC).
+cosign:
+  enabled: false
+  image:
+    repository: gcr.io/projectsigstore/cosign
+    tag: v2.4.1
+  # OIDC issuer and identity for keyless verification
+  certificateOidcIssuer: "https://token.actions.githubusercontent.com"
+  certificateIdentityRegexp: "https://github.com/artifact-keeper/.*"
+
 # -- Backend API server
 backend:
   enabled: true

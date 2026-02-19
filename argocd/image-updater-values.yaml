@@ -1,0 +1,30 @@
+# ArgoCD Image Updater Helm values
+# Install: helm install argocd-image-updater argo/argocd-image-updater -n argocd -f image-updater-values.yaml
+
+config:
+  registries:
+    - name: ghcr
+      api_url: https://ghcr.io
+      prefix: ghcr.io
+      credentials: secret:argocd/ghcr-creds#token
+      default: true
+
+  argocd:
+    insecure: true
+    grpcWeb: true
+    serverAddress: argocd-server.argocd.svc.cluster.local
+
+  logLevel: info
+
+authScripts:
+  enabled: false
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi

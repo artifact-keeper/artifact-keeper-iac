@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint chart
+        run: helm lint helm/
+
+      - name: Template chart (default values)
+        run: helm template artifact-keeper helm/ > /dev/null
+
+      - name: Template chart (production values)
+        run: helm template artifact-keeper helm/ -f helm/values-production.yaml > /dev/null
+
+      - name: Template chart (staging values)
+        run: helm template artifact-keeper helm/ -f helm/values-staging.yaml > /dev/null
+
+  terraform-validate:
+    name: Terraform Validate (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, staging, production]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: terraform init -backend=false
+        working-directory: terraform/environments/${{ matrix.env }}
+
+      - name: Terraform validate
+        run: terraform validate
+        working-directory: terraform/environments/${{ matrix.env }}
+
+  terraform-fmt:
+    name: Terraform Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive terraform/

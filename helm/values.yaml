@@ -13,6 +13,18 @@ global:
   imagePullPolicy: Always
   storageClass: standard
 
+  # -- Scheduling constraints applied to ALL workloads by default.
+  # Per-component values (e.g. backend.nodeSelector) override these.
+  #
+  # NOTE: Per-component values fully replace global, they do not merge.
+  # Setting backend.tolerations means the backend gets only those tolerations,
+  # not global + backend combined. There is currently no way to opt a single
+  # component out of global scheduling without setting its own values.
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
+
 nameOverride: ""
 fullnameOverride: ""
 
@@ -72,6 +84,11 @@ backend:
   podDisruptionBudget:
     enabled: false
     minAvailable: 1
+  # -- Per-component scheduling (overrides global)
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
   serviceAccount:
     create: true
     annotations: {}
@@ -99,6 +116,12 @@ web:
       cpu: "1"
       memory: 1Gi
 
+  # -- Per-component scheduling (overrides global)
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
+
 # -- Edge replication service
 edge:
   enabled: false
@@ -123,6 +146,11 @@ edge:
     limits:
       cpu: 500m
       memory: 512Mi
+  # -- Per-component scheduling (overrides global)
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
 
 # -- PostgreSQL (in-cluster, disable for external/RDS)
 postgres:
@@ -146,6 +174,11 @@ postgres:
       memory: 1Gi
   initDb:
     enabled: true
+  # -- Per-component scheduling (overrides global)
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
 
 # -- External database (used when postgres.enabled=false)
 externalDatabase:
@@ -175,6 +208,11 @@ meilisearch:
     limits:
       cpu: "1"
       memory: 1Gi
+  # -- Per-component scheduling (overrides global)
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
 
 # -- Trivy vulnerability scanner
 trivy:
@@ -192,6 +230,11 @@ trivy:
     limits:
       cpu: "1"
       memory: 2Gi
+  # -- Per-component scheduling (overrides global)
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
 
 # -- DependencyTrack SBOM analysis
 dependencyTrack:
@@ -212,6 +255,11 @@ dependencyTrack:
       memory: 6Gi
   bootstrap:
     enabled: true
+  # -- Per-component scheduling (overrides global)
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
 
 # -- Ingress configuration
 ingress:

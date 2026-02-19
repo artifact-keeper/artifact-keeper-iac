@@ -26,16 +26,20 @@ spec:
       labels:
         {{- include "artifact-keeper.postgres.selectorLabels" . | nindent 8 }}
     spec:
-      {{- with .Values.global.tolerations }}
+      {{- with (.Values.postgres.tolerations | default .Values.global.tolerations) }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.global.affinity }}
+      {{- with (.Values.postgres.affinity | default .Values.global.affinity) }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.global.nodeSelector }}
+      {{- with (.Values.postgres.nodeSelector | default .Values.global.nodeSelector) }}
       nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.postgres.topologySpreadConstraints | default .Values.global.topologySpreadConstraints) }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:

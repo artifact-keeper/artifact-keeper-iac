@@ -27,16 +27,20 @@ spec:
       labels:
         {{- include "artifact-keeper.backend.selectorLabels" . | nindent 8 }}
     spec:
-      {{- with .Values.global.tolerations }}
+      {{- with (.Values.backend.tolerations | default .Values.global.tolerations) }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.global.affinity }}
+      {{- with (.Values.backend.affinity | default .Values.global.affinity) }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.global.nodeSelector }}
+      {{- with (.Values.backend.nodeSelector | default .Values.global.nodeSelector) }}
       nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.backend.topologySpreadConstraints | default .Values.global.topologySpreadConstraints) }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "artifact-keeper.serviceAccountName" . }}

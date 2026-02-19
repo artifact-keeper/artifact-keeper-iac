@@ -25,16 +25,20 @@ spec:
       labels:
         {{- include "artifact-keeper.trivy.selectorLabels" . | nindent 8 }}
     spec:
-      {{- with .Values.global.tolerations }}
+      {{- with (.Values.trivy.tolerations | default .Values.global.tolerations) }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.global.affinity }}
+      {{- with (.Values.trivy.affinity | default .Values.global.affinity) }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.global.nodeSelector }}
+      {{- with (.Values.trivy.nodeSelector | default .Values.global.nodeSelector) }}
       nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.trivy.topologySpreadConstraints | default .Values.global.topologySpreadConstraints) }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:

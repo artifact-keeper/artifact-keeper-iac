@@ -5,6 +5,37 @@
 # reviewed and modified to match your specific infrastructure requirements,
 # security policies, and operational needs before use in production.
 # =============================================================================
+#
+# HOST REQUIREMENTS
+# -----------------
+# - vm.max_map_count >= 262144 (required by Meilisearch/LMDB)
+#     sysctl -w vm.max_map_count=262144
+#     echo "vm.max_map_count = 262144" >> /etc/sysctl.d/99-meilisearch.conf
+#
+# DEPLOYMENT STRATEGIES
+# ---------------------
+# Services that use PersistentVolumeClaims (Meilisearch, Trivy,
+# DependencyTrack) use the Recreate strategy in their templates.
+# This prevents two pods from competing for the same volume lock
+# during rolling updates. Do not change these to RollingUpdate.
+#
+# IMAGE TAGS
+# ----------
+# The "dev" tag on backend/web is a floating tag that always points to
+# the latest build from main. ArgoCD Image Updater pins these to specific
+# digests so rollouts are deterministic. If you deploy outside ArgoCD,
+# set imagePullPolicy: Always so restarts pull the latest dev build.
+#
+# RESOURCE SIZING
+# ---------------
+# These defaults target a single-node dev cluster. For production sizing,
+# see values-production.yaml. Key considerations:
+# - Meilisearch spawns one HTTP worker per CPU core (actix). On a 28-core
+#   node, that means 28 workers. The memory limit must be >= 8Gi for this.
+# - DependencyTrack needs 4Gi+ to load its vulnerability database.
+# - Backend memory scales with concurrent uploads and scan activity.
+#
+# =============================================================================
 
 # Default values for artifact-keeper (development profile)
 
@@ -41,11 +72,16 @@ cosign:
   certificateIdentityRegexp: "https://github.com/artifact-keeper/.*"
 
 # -- Backend API server
+# The backend handles all API requests, format-specific wire protocols,
+# and artifact storage. It runs as a single Rust binary (Axum).
 backend:
   enabled: true
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-backend
+    # -- "dev" is a floating tag built from main. ArgoCD Image Updater
+    # pins this to a digest automatically. For manual deploys, consider
+    # using a specific version tag (e.g. 1.1.0).
     tag: dev
     pullPolicy: Always
   service:
@@ -153,6 +189,9 @@ edge:
   topologySpreadConstraints: []
 
 # -- PostgreSQL (in-cluster, disable for external/RDS)
+# For production, set postgres.enabled=false and configure externalDatabase
+# to point at a managed database (RDS, Cloud SQL, etc.). The in-cluster
+# instance is suitable for dev/testing only.
 postgres:
   enabled: true
   image:
@@ -191,10 +230,25 @@ externalDatabase:
   existingSecretKey: "DATABASE_URL"
 
 # -- Meilisearch (full-text search engine)
+# Powers full-text artifact search. Uses LMDB for storage (requires
+# vm.max_map_count >= 262144 on the host). The template hardcodes
+# MEILI_MAX_INDEXING_THREADS=4 to limit indexing parallelism.
+#
+# Memory sizing: Meilisearch spawns one actix HTTP worker per CPU core.
+# On a 28-core host, 28 workers start up simultaneously. With the default
+# 1Gi limit this causes immediate OOMKill. Set the limit to at least 4Gi,
+# or higher if the search index is large.
+#
+# The deployment uses Recreate strategy because the PVC-backed LMDB
+# database cannot be opened by two pods at once. Do not change this to
+# RollingUpdate or new pods will crash with "Resource temporarily
+# unavailable (os error 11)".
 meilisearch:
   enabled: true
   image:
     repository: getmeili/meilisearch
+    # -- Use a major.minor tag (e.g. v1.12) for automatic patch updates,
+    # or pin to a specific patch (e.g. v1.12.8) for stability.
     tag: v1.12
   masterKey: "artifact-keeper-dev-key"
   env: "development"
@@ -207,7 +261,9 @@ meilisearch:
       memory: 512Mi
     limits:
       cpu: "2"
-      memory: 4Gi
+      # -- Must be >= 4Gi on multi-core nodes. 8Gi recommended for nodes
+      # with 16+ cores. See Memory sizing note above.
+      memory: 8Gi
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}
@@ -215,6 +271,10 @@ meilisearch:
   topologySpreadConstraints: []
 
 # -- Trivy vulnerability scanner
+# Runs as a persistent server that the backend calls for image/SBOM scans.
+# Uses a PVC for its vulnerability database cache. Like Meilisearch, the
+# deployment uses Recreate strategy because the cache directory uses a file
+# lock that prevents concurrent access from two pods.
 trivy:
   enabled: true
   image:
@@ -237,6 +297,10 @@ trivy:
   topologySpreadConstraints: []
 
 # -- DependencyTrack SBOM analysis
+# Provides SBOM ingestion, license analysis, and vulnerability correlation.
+# Requires significant memory (4Gi+) to load its internal vulnerability
+# database on startup. The bootstrap init container creates the initial
+# admin user and API key for backend integration.
 dependencyTrack:
   enabled: true
   image:
@@ -276,6 +340,8 @@ ingress:
     secretName: artifact-keeper-tls
 
 # -- Secrets
+# These are development defaults. For production, override via --set or
+# use existingSecret references. Never commit real credentials here.
 secrets:
   jwtSecret: "dev-secret-change-in-production"
   s3AccessKey: "minioadmin"

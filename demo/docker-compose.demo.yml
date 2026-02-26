@@ -1,5 +1,12 @@
 # Demo deployment for demo.artifactkeeper.com
 # Uses pre-built images from ghcr.io (pushed by CI on every main branch commit).
+#
+# Container images are available from two registries:
+#   ghcr.io (default):  ghcr.io/artifact-keeper/artifact-keeper-{backend,web,openscap}
+#   Docker Hub:         artifactkeeper/{backend,web,openscap}
+#
+# To use Docker Hub instead, replace image references below. For example:
+#   ghcr.io/artifact-keeper/artifact-keeper-backend:latest  ->  artifactkeeper/backend:latest
 # All write operations are blocked via DEMO_MODE.
 # Reset daily with: ./reset-demo.sh
 #

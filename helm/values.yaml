@@ -40,6 +40,8 @@
 # Default values for artifact-keeper (development profile)
 
 global:
+  # Container registry prefix. Default is ghcr.io.
+  # For Docker Hub, change to: docker.io/artifactkeeper
   imageRegistry: ghcr.io/artifact-keeper
   imagePullPolicy: Always
   storageClass: standard
@@ -78,7 +80,7 @@ backend:
   enabled: true
   replicaCount: 1
   image:
-    repository: ghcr.io/artifact-keeper/artifact-keeper-backend
+    repository: ghcr.io/artifact-keeper/artifact-keeper-backend  # Docker Hub: artifactkeeper/backend
     # -- "dev" is a floating tag built from main. ArgoCD Image Updater
     # pins this to a digest automatically. For manual deploys, consider
     # using a specific version tag (e.g. 1.1.0).
@@ -135,7 +137,7 @@ web:
   enabled: true
   replicaCount: 1
   image:
-    repository: ghcr.io/artifact-keeper/artifact-keeper-web
+    repository: ghcr.io/artifact-keeper/artifact-keeper-web  # Docker Hub: artifactkeeper/web
     tag: dev
     pullPolicy: Always
   service:

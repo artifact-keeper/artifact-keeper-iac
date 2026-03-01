@@ -1,0 +1,76 @@
+# RBAC for ARC E2E runners
+#
+# The ARC Helm chart creates a service account named
+# <release>-gha-rs-no-permission in the runner namespace.
+# This ClusterRole + ClusterRoleBinding grants it the permissions
+# needed by release-gate tests: create/delete test namespaces,
+# deploy Helm charts, collect pod logs, and tear down.
+#
+# Apply with:
+#   kubectl apply -f e2e/runner-rbac.yaml
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: arc-e2e-runner
+  labels:
+    app.kubernetes.io/part-of: artifact-keeper
+    app.kubernetes.io/component: e2e-runner
+rules:
+  # Namespace lifecycle (create test-* namespaces, check existence, delete)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "delete"]
+
+  # ResourceQuotas (applied per test namespace)
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["create", "get", "list", "update", "patch"]
+
+  # Secrets (image pull secrets, Helm release secrets)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "update", "patch", "delete"]
+
+  # Core workload resources (Helm chart deploys these)
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "configmaps", "persistentvolumeclaims", "serviceaccounts"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Apps (Deployments, StatefulSets managed by Helm)
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Batch (Jobs used by mesh E2E tests)
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+
+  # Networking (Services, Ingresses, NetworkPolicies from Helm chart)
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["create", "get", "list", "update", "patch", "delete"]
+
+  # RBAC (Helm chart may create Roles/RoleBindings in test namespaces)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["create", "get", "list", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: arc-e2e-runner
+  labels:
+    app.kubernetes.io/part-of: artifact-keeper
+    app.kubernetes.io/component: e2e-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: arc-e2e-runner
+subjects:
+  # Service account auto-created by ARC gha-runner-scale-set Helm chart
+  - kind: ServiceAccount
+    name: ak-e2e-runners-gha-rs-no-permission
+    namespace: arc-runners

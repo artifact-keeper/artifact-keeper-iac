@@ -33,6 +33,7 @@ spec:
     - host: {{ .Values.ingress.host }}
       http:
         paths:
+          # API and health endpoints
           - path: /api
             pathType: Prefix
             backend:
@@ -61,6 +62,26 @@ spec:
                 name: {{ include "artifact-keeper.fullname" . }}-backend
                 port:
                   number: {{ .Values.backend.service.httpPort }}
+          # OCI / Docker registry
+          - path: /v2
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "artifact-keeper.fullname" . }}-backend
+                port:
+                  number: {{ .Values.backend.service.httpPort }}
+          # Native package format handlers — route directly to backend
+          {{- $backendSvc := printf "%s-backend" (include "artifact-keeper.fullname" .) }}
+          {{- $backendPort := .Values.backend.service.httpPort }}
+          {{- range list "/maven" "/npm" "/pypi" "/nuget" "/cargo" "/gems" "/go" "/helm" "/debian" "/rpm" "/alpine" "/composer" "/conan" "/conda" "/swift" "/terraform" "/cocoapods" "/hex" "/pub" "/lfs" "/ivy" "/chef" "/puppet" "/ansible" "/cran" "/huggingface" "/jetbrains" "/vscode" "/proto" "/incus" "/ext" }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendSvc }}
+                port:
+                  number: {{ $backendPort }}
+          {{- end }}
           {{- if .Values.dependencyTrack.enabled }}
           - path: /dtrack
             pathType: Prefix
@@ -70,6 +91,7 @@ spec:
                 port:
                   number: 8080
           {{- end }}
+          # Catch-all: web frontend
           - path: /
             pathType: Prefix
             backend:

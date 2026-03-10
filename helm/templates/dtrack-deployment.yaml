@@ -142,7 +142,8 @@ spec:
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
         - name: dtrack-data
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-dtrack

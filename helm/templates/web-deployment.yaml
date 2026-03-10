@@ -91,7 +91,9 @@ spec:
               mountPath: /app/.next/cache
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
         - name: nextjs-cache
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 1Gi
 {{- end }}

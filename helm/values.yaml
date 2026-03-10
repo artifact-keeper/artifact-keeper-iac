@@ -153,6 +153,7 @@ web:
     limits:
       cpu: "1"
       memory: 1Gi
+      ephemeral-storage: 2Gi
 
   podDisruptionBudget:
     enabled: false

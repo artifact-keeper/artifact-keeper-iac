@@ -227,13 +227,15 @@ spec:
             {{- end }}
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
         - name: storage
           {{- if .Values.backend.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-storage
           {{- else }}
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 10Gi
           {{- end }}
         {{- if .Values.backend.scanWorkspace.enabled }}
         - name: scan-workspace

@@ -20,12 +20,28 @@ spec:
           - env: dev
             namespace: artifact-keeper-dev
             valuesFile: values.yaml
+            targetRevision: main
+            imageTag: dev
+            imageUpdateStrategy: digest
+            autoSync: "true"
           - env: staging
             namespace: artifact-keeper-staging
             valuesFile: values-staging.yaml
+            # Staging tracks the latest release branch. Update this when
+            # cutting a new release (e.g., release/1.2).
+            targetRevision: main
+            imageTag: dev
+            imageUpdateStrategy: digest
+            autoSync: "true"
           - env: production
             namespace: artifact-keeper-prod
             valuesFile: values-production.yaml
+            # Production tracks a specific release tag. Update this value
+            # to promote a new version (e.g., v1.2.0). Sync is manual.
+            targetRevision: v1.1.0
+            imageTag: ~1.0
+            imageUpdateStrategy: semver
+            autoSync: "false"
   template:
     metadata:
       name: "artifact-keeper-{{ .env }}"
@@ -33,11 +49,11 @@ spec:
         app.kubernetes.io/part-of: artifact-keeper
         environment: "{{ .env }}"
       annotations:
-        argocd-image-updater.argoproj.io/image-list: backend=ghcr.io/artifact-keeper/artifact-keeper-backend:dev, web=ghcr.io/artifact-keeper/artifact-keeper-web:dev
-        argocd-image-updater.argoproj.io/backend.update-strategy: digest
+        argocd-image-updater.argoproj.io/image-list: "backend=ghcr.io/artifact-keeper/artifact-keeper-backend:{{ .imageTag }}, web=ghcr.io/artifact-keeper/artifact-keeper-web:{{ .imageTag }}"
+        argocd-image-updater.argoproj.io/backend.update-strategy: "{{ .imageUpdateStrategy }}"
         argocd-image-updater.argoproj.io/backend.helm.image-name: backend.image.repository
         argocd-image-updater.argoproj.io/backend.helm.image-tag: backend.image.tag
-        argocd-image-updater.argoproj.io/web.update-strategy: digest
+        argocd-image-updater.argoproj.io/web.update-strategy: "{{ .imageUpdateStrategy }}"
         argocd-image-updater.argoproj.io/web.helm.image-name: web.image.repository
         argocd-image-updater.argoproj.io/web.helm.image-tag: web.image.tag
         argocd-image-updater.argoproj.io/write-back-method: argocd
@@ -45,7 +61,7 @@ spec:
       project: artifact-keeper
       source:
         repoURL: https://github.com/artifact-keeper/artifact-keeper-iac.git
-        targetRevision: HEAD
+        targetRevision: "{{ .targetRevision }}"
         path: helm
         helm:
           valueFiles:
@@ -54,9 +70,11 @@ spec:
         server: https://kubernetes.default.svc
         namespace: "{{ .namespace }}"
       syncPolicy:
+        {{- if eq .autoSync "true" }}
         automated:
           selfHeal: true
           prune: true
+        {{- end }}
         syncOptions:
           - CreateNamespace=true
           - ServerSideApply=true

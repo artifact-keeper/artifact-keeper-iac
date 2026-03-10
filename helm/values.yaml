@@ -154,6 +154,9 @@ web:
       cpu: "1"
       memory: 1Gi
 
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}
@@ -184,6 +187,9 @@ edge:
     limits:
       cpu: 500m
       memory: 512Mi
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}

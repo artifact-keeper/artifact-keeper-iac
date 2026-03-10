@@ -17,6 +17,8 @@ metadata:
     app.kubernetes.io/component: dependency-track
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 6 }}

@@ -71,6 +71,11 @@ jobs:
   sonarcloud:
     name: SonarCloud Scan
     runs-on: ubuntu-latest
+    # SonarCloud Automatic Analysis may be enabled at the org level.
+    # Until it is disabled in the SonarCloud UI (Administration > Analysis Method),
+    # CI-based analysis will conflict and fail. Allow this job to fail gracefully
+    # so it does not block the rest of the pipeline.
+    continue-on-error: true
     permissions:
       contents: read
     steps:

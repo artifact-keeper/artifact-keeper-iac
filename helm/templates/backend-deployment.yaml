@@ -59,10 +59,33 @@ spec:
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
         {{- end }}
         {{- if .Values.postgres.enabled }}
         - name: wait-for-postgres
           image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -75,6 +98,19 @@ spec:
         {{- if .Values.meilisearch.enabled }}
         - name: wait-for-meilisearch
           image: alpine:3.20
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -88,6 +124,12 @@ spec:
         - name: backend
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           {{- if .Values.dependencyTrack.enabled }}
           command: ["/bin/sh", "-c"]
           args:
@@ -163,6 +205,8 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 5
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: storage
               mountPath: /data/storage
               subPath: storage
@@ -182,6 +226,8 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: storage
           {{- if .Values.backend.persistence.enabled }}
           persistentVolumeClaim:

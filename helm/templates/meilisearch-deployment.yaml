@@ -43,9 +43,26 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       initContainers:
         - name: version-guard
           image: busybox:1.37
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
           command: ["sh", "-c"]
           args:
             - |
@@ -71,6 +88,12 @@ spec:
         - name: meilisearch
           image: "{{ .Values.meilisearch.image.repository }}:{{ .Values.meilisearch.image.tag }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: 7700
@@ -103,7 +126,11 @@ spec:
           volumeMounts:
             - name: meilisearch-data
               mountPath: /meili_data
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: meilisearch-data
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-meilisearch

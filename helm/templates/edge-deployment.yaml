@@ -49,6 +49,12 @@ spec:
         - name: edge
           image: "{{ .Values.edge.image.repository }}:{{ .Values.edge.image.tag }}"
           imagePullPolicy: {{ .Values.edge.image.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: 8081

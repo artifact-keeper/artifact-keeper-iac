@@ -41,12 +41,22 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        fsGroup: 10000
       containers:
         - name: trivy
           image: "{{ .Values.trivy.image.repository }}:{{ .Values.trivy.image.tag }}"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           command: ["trivy"]
-          args: ["server", "--listen", "0.0.0.0:8090"]
+          args: ["server", "--listen", "0.0.0.0:8090", "--cache-dir", "/home/trivy/.cache"]
           ports:
             - name: http
               containerPort: 8090
@@ -69,13 +79,17 @@ spec:
             failureThreshold: 3
           volumeMounts:
             - name: trivy-cache
-              mountPath: /root/.cache/trivy
+              mountPath: /home/trivy/.cache
+            - name: tmp
+              mountPath: /tmp
             {{- if .Values.backend.scanWorkspace.enabled }}
             - name: scan-workspace
               mountPath: /scan-workspace
               readOnly: true
             {{- end }}
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: trivy-cache
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-trivy-cache

@@ -2,8 +2,6 @@
 
 ![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.1.0](https://img.shields.io/badge/AppVersion-1.1.0-informational?style=flat-square)
 
-Enterprise artifact registry supporting 45+ package formats
-
 ## TL;DR
 
 ```bash
@@ -72,190 +70,39 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| global.imageRegistry | string | `"ghcr.io/artifact-keeper"` |  |
+| backend | object | `{"affinity":{},"autoscaling":{"enabled":false,"maxReplicas":10,"minReplicas":2,"targetCPUUtilization":70,"targetMemoryUtilization":80},"enabled":true,"env":{"ADMIN_PASSWORD":"admin","BACKUP_PATH":"/data/backups","ENVIRONMENT":"development","HOST":"0.0.0.0","PLUGINS_DIR":"/data/plugins","PORT":"8080","RUST_LOG":"info,artifact_keeper=debug","STORAGE_PATH":"/data/storage"},"image":{"pullPolicy":"Always","repository":"ghcr.io/artifact-keeper/artifact-keeper-backend","tag":"dev"},"nodeSelector":{},"persistence":{"enabled":true,"size":"10Gi","storageClass":""},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"replicaCount":1,"resources":{"limits":{"cpu":"2","ephemeral-storage":"1Gi","memory":"2Gi"},"requests":{"cpu":"250m","ephemeral-storage":"256Mi","memory":"256Mi"}},"scanWorkspace":{"enabled":true,"size":"2Gi"},"service":{"grpcPort":9090,"httpPort":8080,"type":"ClusterIP"},"serviceAccount":{"annotations":{},"create":true,"name":""},"tolerations":[],"topologySpreadConstraints":[]}` | Backend API server The backend handles all API requests, format-specific wire protocols, and artifact storage. It runs as a single Rust binary (Axum). |
+| backend.image.tag | string | `"dev"` | "dev" is a floating tag built from main. ArgoCD Image Updater pins this to a digest automatically. For manual deploys, consider using a specific version tag (e.g. 1.1.0). |
+| backend.tolerations | list | `[]` | Per-component scheduling (overrides global) |
+| cosign | object | `{"certificateIdentityRegexp":"https://github.com/artifact-keeper/.*","certificateOidcIssuer":"https://token.actions.githubusercontent.com","enabled":false,"image":{"repository":"gcr.io/projectsigstore/cosign","tag":"v2.4.1"}}` | Cosign image signature verification When enabled, an init container verifies the backend image signature before the pod starts. Uses sigstore keyless verification (GitHub OIDC). |
+| dependencyTrack | object | `{"adminPassword":"ArtifactKeeper2026!","affinity":{},"bootstrap":{"enabled":true},"enabled":true,"image":{"repository":"dependencytrack/apiserver","tag":"4.11.4"},"nodeSelector":{},"persistence":{"size":"5Gi","storageClass":""},"resources":{"limits":{"cpu":"2","ephemeral-storage":"1Gi","memory":"6Gi"},"requests":{"cpu":"500m","ephemeral-storage":"256Mi","memory":"4Gi"}},"tolerations":[],"topologySpreadConstraints":[]}` | DependencyTrack SBOM analysis Provides SBOM ingestion, license analysis, and vulnerability correlation. Requires significant memory (4Gi+) to load its internal vulnerability database on startup. The bootstrap init container creates the initial admin user and API key for backend integration. |
+| dependencyTrack.tolerations | list | `[]` | Per-component scheduling (overrides global) |
+| edge | object | `{"affinity":{},"enabled":false,"env":{"CACHE_SIZE_MB":"10240","EDGE_HOST":"0.0.0.0","EDGE_PORT":"8081","HEARTBEAT_INTERVAL_SECS":"30","RUST_LOG":"info,artifact_keeper_edge=debug"},"image":{"pullPolicy":"Always","repository":"ghcr.io/artifact-keeper/artifact-keeper-edge","tag":"dev"},"nodeSelector":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"replicaCount":1,"resources":{"limits":{"cpu":"500m","memory":"512Mi"},"requests":{"cpu":"50m","memory":"128Mi"}},"service":{"port":8081,"type":"ClusterIP"},"tolerations":[],"topologySpreadConstraints":[]}` | Edge replication service |
+| edge.tolerations | list | `[]` | Per-component scheduling (overrides global) |
+| externalDatabase | object | `{"database":"artifact_registry","existingSecret":"","existingSecretKey":"DATABASE_URL","host":"","password":"","port":5432,"username":""}` | External database (used when postgres.enabled=false) |
+| externalSecrets | object | `{"enabled":false,"refreshInterval":"1h","secrets":{"dbCredentials":"artifact-keeper/${ENVIRONMENT}/db-credentials","dtAdminPassword":"artifact-keeper/${ENVIRONMENT}/dt-admin-password","jwtSecret":"artifact-keeper/${ENVIRONMENT}/jwt-secret","meilisearchKey":"artifact-keeper/${ENVIRONMENT}/meilisearch-key","s3Keys":"artifact-keeper/${ENVIRONMENT}/s3-keys"},"storeKind":"ClusterSecretStore","storeName":"aws-secrets-manager"}` | External Secrets Operator When enabled, ExternalSecret CRDs replace the static Secret template. Requires External Secrets Operator installed on the cluster and a SecretStore or ClusterSecretStore configured for your provider. |
+| fullnameOverride | string | `""` |  |
+| global.affinity | object | `{}` |  |
 | global.imagePullPolicy | string | `"Always"` |  |
+| global.imageRegistry | string | `"ghcr.io/artifact-keeper"` |  |
+| global.nodeSelector | object | `{}` |  |
 | global.storageClass | string | `"standard"` |  |
 | global.tolerations | list | `[]` | Scheduling constraints applied to ALL workloads by default. Per-component values (e.g. backend.nodeSelector) override these.  NOTE: Per-component values fully replace global, they do not merge. Setting backend.tolerations means the backend gets only those tolerations, not global + backend combined. There is currently no way to opt a single component out of global scheduling without setting its own values. |
-| global.affinity | object | `{}` |  |
-| global.nodeSelector | object | `{}` |  |
 | global.topologySpreadConstraints | list | `[]` |  |
-| nameOverride | string | `""` |  |
-| fullnameOverride | string | `""` |  |
-| cosign.enabled | bool | `false` | Cosign image signature verification When enabled, an init container verifies the backend image signature before the pod starts. Uses sigstore keyless verification (GitHub OIDC). |
-| cosign.image.repository | string | `"gcr.io/projectsigstore/cosign"` |  |
-| cosign.image.tag | string | `"v2.4.1"` |  |
-| cosign.certificateOidcIssuer | string | `"https://token.actions.githubusercontent.com"` |  |
-| cosign.certificateIdentityRegexp | string | `"https://github.com/artifact-keeper/.*"` |  |
-| backend.enabled | bool | `true` | Backend API server The backend handles all API requests, format-specific wire protocols, and artifact storage. It runs as a single Rust binary (Axum). |
-| backend.replicaCount | int | `1` |  |
-| backend.image.repository | string | `"ghcr.io/artifact-keeper/artifact-keeper-backend"` |  |
-| backend.image.tag | string | `"dev"` | "dev" is a floating tag built from main. ArgoCD Image Updater pins this to a digest automatically. For manual deploys, consider using a specific version tag (e.g. 1.1.0). |
-| backend.image.pullPolicy | string | `"Always"` |  |
-| backend.service.type | string | `"ClusterIP"` |  |
-| backend.service.httpPort | int | `8080` |  |
-| backend.service.grpcPort | int | `9090` |  |
-| backend.env.RUST_LOG | string | `"info,artifact_keeper=debug"` |  |
-| backend.env.HOST | string | `"0.0.0.0"` |  |
-| backend.env.PORT | string | `"8080"` |  |
-| backend.env.STORAGE_PATH | string | `"/data/storage"` |  |
-| backend.env.BACKUP_PATH | string | `"/data/backups"` |  |
-| backend.env.PLUGINS_DIR | string | `"/data/plugins"` |  |
-| backend.env.ENVIRONMENT | string | `"development"` |  |
-| backend.env.ADMIN_PASSWORD | string | `"admin"` |  |
-| backend.resources.requests.cpu | string | `"250m"` |  |
-| backend.resources.requests.memory | string | `"256Mi"` |  |
-| backend.resources.limits.cpu | string | `"2"` |  |
-| backend.resources.limits.memory | string | `"2Gi"` |  |
-| backend.persistence.enabled | bool | `true` |  |
-| backend.persistence.size | string | `"10Gi"` |  |
-| backend.persistence.storageClass | string | `""` |  |
-| backend.scanWorkspace.enabled | bool | `true` |  |
-| backend.scanWorkspace.size | string | `"2Gi"` |  |
-| backend.autoscaling.enabled | bool | `false` |  |
-| backend.autoscaling.minReplicas | int | `2` |  |
-| backend.autoscaling.maxReplicas | int | `10` |  |
-| backend.autoscaling.targetCPUUtilization | int | `70` |  |
-| backend.autoscaling.targetMemoryUtilization | int | `80` |  |
-| backend.podDisruptionBudget.enabled | bool | `false` |  |
-| backend.podDisruptionBudget.minAvailable | int | `1` |  |
-| backend.tolerations | list | `[]` | Per-component scheduling (overrides global) |
-| backend.affinity | object | `{}` |  |
-| backend.nodeSelector | object | `{}` |  |
-| backend.topologySpreadConstraints | list | `[]` |  |
-| backend.serviceAccount.create | bool | `true` |  |
-| backend.serviceAccount.annotations | object | `{}` |  |
-| backend.serviceAccount.name | string | `""` |  |
-| web.enabled | bool | `true` | Next.js web frontend |
-| web.replicaCount | int | `1` |  |
-| web.image.repository | string | `"ghcr.io/artifact-keeper/artifact-keeper-web"` |  |
-| web.image.tag | string | `"dev"` |  |
-| web.image.pullPolicy | string | `"Always"` |  |
-| web.service.type | string | `"ClusterIP"` |  |
-| web.service.port | int | `3000` |  |
-| web.env.NEXT_PUBLIC_API_URL | string | `""` |  |
-| web.env.NODE_ENV | string | `"production"` |  |
-| web.resources.requests.cpu | string | `"250m"` |  |
-| web.resources.requests.memory | string | `"256Mi"` |  |
-| web.resources.limits.cpu | string | `"1"` |  |
-| web.resources.limits.memory | string | `"1Gi"` |  |
-| web.resources.limits.ephemeral-storage | string | `"2Gi"` |  |
-| web.podDisruptionBudget.enabled | bool | `false` |  |
-| web.podDisruptionBudget.minAvailable | int | `1` |  |
-| web.tolerations | list | `[]` | Per-component scheduling (overrides global) |
-| web.affinity | object | `{}` |  |
-| web.nodeSelector | object | `{}` |  |
-| web.topologySpreadConstraints | list | `[]` |  |
-| edge.enabled | bool | `false` | Edge replication service |
-| edge.replicaCount | int | `1` |  |
-| edge.image.repository | string | `"ghcr.io/artifact-keeper/artifact-keeper-edge"` |  |
-| edge.image.tag | string | `"dev"` |  |
-| edge.image.pullPolicy | string | `"Always"` |  |
-| edge.service.type | string | `"ClusterIP"` |  |
-| edge.service.port | int | `8081` |  |
-| edge.env.RUST_LOG | string | `"info,artifact_keeper_edge=debug"` |  |
-| edge.env.EDGE_HOST | string | `"0.0.0.0"` |  |
-| edge.env.EDGE_PORT | string | `"8081"` |  |
-| edge.env.CACHE_SIZE_MB | string | `"10240"` |  |
-| edge.env.HEARTBEAT_INTERVAL_SECS | string | `"30"` |  |
-| edge.resources.requests.cpu | string | `"50m"` |  |
-| edge.resources.requests.memory | string | `"128Mi"` |  |
-| edge.resources.limits.cpu | string | `"500m"` |  |
-| edge.resources.limits.memory | string | `"512Mi"` |  |
-| edge.podDisruptionBudget.enabled | bool | `false` |  |
-| edge.podDisruptionBudget.minAvailable | int | `1` |  |
-| edge.tolerations | list | `[]` | Per-component scheduling (overrides global) |
-| edge.affinity | object | `{}` |  |
-| edge.nodeSelector | object | `{}` |  |
-| edge.topologySpreadConstraints | list | `[]` |  |
-| postgres.enabled | bool | `true` | PostgreSQL (in-cluster, disable for external/RDS) For production, set postgres.enabled=false and configure externalDatabase to point at a managed database (RDS, Cloud SQL, etc.). The in-cluster instance is suitable for dev/testing only. |
-| postgres.image.repository | string | `"postgres"` |  |
-| postgres.image.tag | string | `"16-alpine"` |  |
-| postgres.auth.username | string | `"registry"` |  |
-| postgres.auth.password | string | `"registry"` |  |
-| postgres.auth.database | string | `"artifact_registry"` |  |
-| postgres.persistence.size | string | `"20Gi"` |  |
-| postgres.persistence.storageClass | string | `""` |  |
-| postgres.resources.requests.cpu | string | `"250m"` |  |
-| postgres.resources.requests.memory | string | `"256Mi"` |  |
-| postgres.resources.limits.cpu | string | `"1"` |  |
-| postgres.resources.limits.memory | string | `"1Gi"` |  |
-| postgres.initDb.enabled | bool | `true` |  |
-| postgres.tolerations | list | `[]` | Per-component scheduling (overrides global) |
-| postgres.affinity | object | `{}` |  |
-| postgres.nodeSelector | object | `{}` |  |
-| postgres.topologySpreadConstraints | list | `[]` |  |
-| externalDatabase.host | string | `""` | External database (used when postgres.enabled=false) |
-| externalDatabase.port | int | `5432` |  |
-| externalDatabase.username | string | `""` |  |
-| externalDatabase.password | string | `""` |  |
-| externalDatabase.database | string | `"artifact_registry"` |  |
-| externalDatabase.existingSecret | string | `""` |  |
-| externalDatabase.existingSecretKey | string | `"DATABASE_URL"` |  |
-| meilisearch.enabled | bool | `true` | Meilisearch (full-text search engine) Powers full-text artifact search. Uses LMDB for storage (requires vm.max_map_count >= 262144 on the host). The template hardcodes MEILI_MAX_INDEXING_THREADS=4 to limit indexing parallelism.  Memory sizing: Meilisearch spawns one actix HTTP worker per CPU core. On a 28-core host, 28 workers start up simultaneously. With the default 1Gi limit this causes immediate OOMKill. Set the limit to at least 4Gi, or higher if the search index is large.  The deployment uses Recreate strategy because the PVC-backed LMDB database cannot be opened by two pods at once. Do not change this to RollingUpdate or new pods will crash with "Resource temporarily unavailable (os error 11)". |
-| meilisearch.image.repository | string | `"getmeili/meilisearch"` |  |
+| ingress | object | `{"annotations":{"nginx.ingress.kubernetes.io/enable-cors":"true","nginx.ingress.kubernetes.io/proxy-body-size":"1024m","nginx.ingress.kubernetes.io/proxy-read-timeout":"300","nginx.ingress.kubernetes.io/proxy-send-timeout":"300"},"className":"nginx","enabled":true,"host":"artifacts.example.com","tls":{"enabled":false,"secretName":"artifact-keeper-tls"}}` | Ingress configuration |
+| meilisearch | object | `{"affinity":{},"enabled":true,"env":"development","image":{"repository":"getmeili/meilisearch","tag":"v1.12"},"masterKey":"artifact-keeper-dev-key","nodeSelector":{},"persistence":{"size":"5Gi","storageClass":""},"resources":{"limits":{"cpu":"2","ephemeral-storage":"512Mi","memory":"8Gi"},"requests":{"cpu":"250m","ephemeral-storage":"128Mi","memory":"512Mi"}},"tolerations":[],"topologySpreadConstraints":[]}` | Meilisearch (full-text search engine) Powers full-text artifact search. Uses LMDB for storage (requires vm.max_map_count >= 262144 on the host). The template hardcodes MEILI_MAX_INDEXING_THREADS=4 to limit indexing parallelism.  Memory sizing: Meilisearch spawns one actix HTTP worker per CPU core. On a 28-core host, 28 workers start up simultaneously. With the default 1Gi limit this causes immediate OOMKill. Set the limit to at least 4Gi, or higher if the search index is large.  The deployment uses Recreate strategy because the PVC-backed LMDB database cannot be opened by two pods at once. Do not change this to RollingUpdate or new pods will crash with "Resource temporarily unavailable (os error 11)". |
 | meilisearch.image.tag | string | `"v1.12"` | Use a major.minor tag (e.g. v1.12) for automatic patch updates, or pin to a specific patch (e.g. v1.12.8) for stability. |
-| meilisearch.masterKey | string | `"artifact-keeper-dev-key"` |  |
-| meilisearch.env | string | `"development"` |  |
-| meilisearch.persistence.size | string | `"5Gi"` |  |
-| meilisearch.persistence.storageClass | string | `""` |  |
-| meilisearch.resources.requests.cpu | string | `"250m"` |  |
-| meilisearch.resources.requests.memory | string | `"512Mi"` |  |
-| meilisearch.resources.limits.cpu | string | `"2"` |  |
 | meilisearch.resources.limits.memory | string | `"8Gi"` | Must be >= 4Gi on multi-core nodes. 8Gi recommended for nodes with 16+ cores. See Memory sizing note above. |
 | meilisearch.tolerations | list | `[]` | Per-component scheduling (overrides global) |
-| meilisearch.affinity | object | `{}` |  |
-| meilisearch.nodeSelector | object | `{}` |  |
-| meilisearch.topologySpreadConstraints | list | `[]` |  |
-| trivy.enabled | bool | `true` | Trivy vulnerability scanner Runs as a persistent server that the backend calls for image/SBOM scans. Uses a PVC for its vulnerability database cache. Like Meilisearch, the deployment uses Recreate strategy because the cache directory uses a file lock that prevents concurrent access from two pods. |
-| trivy.image.repository | string | `"aquasec/trivy"` |  |
-| trivy.image.tag | string | `"latest"` |  |
-| trivy.persistence.size | string | `"5Gi"` |  |
-| trivy.persistence.storageClass | string | `""` |  |
-| trivy.resources.requests.cpu | string | `"250m"` |  |
-| trivy.resources.requests.memory | string | `"256Mi"` |  |
-| trivy.resources.limits.cpu | string | `"1"` |  |
-| trivy.resources.limits.memory | string | `"2Gi"` |  |
+| nameOverride | string | `""` |  |
+| networkPolicy | object | `{"enabled":false}` | Network policies |
+| postgres | object | `{"affinity":{},"auth":{"database":"artifact_registry","password":"registry","username":"registry"},"enabled":true,"image":{"repository":"postgres","tag":"16-alpine"},"initDb":{"enabled":true},"nodeSelector":{},"persistence":{"size":"20Gi","storageClass":""},"resources":{"limits":{"cpu":"1","ephemeral-storage":"512Mi","memory":"1Gi"},"requests":{"cpu":"250m","ephemeral-storage":"128Mi","memory":"256Mi"}},"tolerations":[],"topologySpreadConstraints":[]}` | PostgreSQL (in-cluster, disable for external/RDS) For production, set postgres.enabled=false and configure externalDatabase to point at a managed database (RDS, Cloud SQL, etc.). The in-cluster instance is suitable for dev/testing only. |
+| postgres.tolerations | list | `[]` | Per-component scheduling (overrides global) |
+| secrets | object | `{"jwtSecret":"dev-secret-change-in-production","s3AccessKey":"minioadmin","s3SecretKey":"minioadmin-secret"}` | Secrets These are development defaults. For production, override via --set or use existingSecret references. Never commit real credentials here. |
+| serviceMonitor | object | `{"enabled":false,"interval":"30s","scrapeTimeout":"10s"}` | Prometheus ServiceMonitor |
+| trivy | object | `{"affinity":{},"enabled":true,"image":{"repository":"aquasec/trivy","tag":"0.62.1"},"nodeSelector":{},"persistence":{"size":"5Gi","storageClass":""},"resources":{"limits":{"cpu":"1","ephemeral-storage":"1Gi","memory":"2Gi"},"requests":{"cpu":"250m","ephemeral-storage":"128Mi","memory":"256Mi"}},"tolerations":[],"topologySpreadConstraints":[]}` | Trivy vulnerability scanner Runs as a persistent server that the backend calls for image/SBOM scans. Uses a PVC for its vulnerability database cache. Like Meilisearch, the deployment uses Recreate strategy because the cache directory uses a file lock that prevents concurrent access from two pods. |
 | trivy.tolerations | list | `[]` | Per-component scheduling (overrides global) |
-| trivy.affinity | object | `{}` |  |
-| trivy.nodeSelector | object | `{}` |  |
-| trivy.topologySpreadConstraints | list | `[]` |  |
-| dependencyTrack.enabled | bool | `true` | DependencyTrack SBOM analysis Provides SBOM ingestion, license analysis, and vulnerability correlation. Requires significant memory (4Gi+) to load its internal vulnerability database on startup. The bootstrap init container creates the initial admin user and API key for backend integration. |
-| dependencyTrack.image.repository | string | `"dependencytrack/apiserver"` |  |
-| dependencyTrack.image.tag | string | `"4.11.4"` |  |
-| dependencyTrack.adminPassword | string | `"ArtifactKeeper2026!"` |  |
-| dependencyTrack.persistence.size | string | `"5Gi"` |  |
-| dependencyTrack.persistence.storageClass | string | `""` |  |
-| dependencyTrack.resources.requests.cpu | string | `"500m"` |  |
-| dependencyTrack.resources.requests.memory | string | `"4Gi"` |  |
-| dependencyTrack.resources.limits.cpu | string | `"2"` |  |
-| dependencyTrack.resources.limits.memory | string | `"6Gi"` |  |
-| dependencyTrack.bootstrap.enabled | bool | `true` |  |
-| dependencyTrack.tolerations | list | `[]` | Per-component scheduling (overrides global) |
-| dependencyTrack.affinity | object | `{}` |  |
-| dependencyTrack.nodeSelector | object | `{}` |  |
-| dependencyTrack.topologySpreadConstraints | list | `[]` |  |
-| ingress.enabled | bool | `true` | Ingress configuration |
-| ingress.className | string | `"nginx"` |  |
-| ingress.annotations | object | `{"nginx.ingress.kubernetes.io/enable-cors":"true","nginx.ingress.kubernetes.io/proxy-body-size":"1024m","nginx.ingress.kubernetes.io/proxy-read-timeout":"300","nginx.ingress.kubernetes.io/proxy-send-timeout":"300"}` |  |
-| ingress.host | string | `"artifacts.example.com"` |  |
-| ingress.tls.enabled | bool | `false` |  |
-| ingress.tls.secretName | string | `"artifact-keeper-tls"` |  |
-| secrets.jwtSecret | string | `"dev-secret-change-in-production"` | Secrets These are development defaults. For production, override via --set or use existingSecret references. Never commit real credentials here. |
-| secrets.s3AccessKey | string | `"minioadmin"` |  |
-| secrets.s3SecretKey | string | `"minioadmin-secret"` |  |
-| externalSecrets.enabled | bool | `false` | External Secrets Operator When enabled, ExternalSecret CRDs replace the static Secret template. Requires External Secrets Operator installed on the cluster and a SecretStore or ClusterSecretStore configured for your provider. |
-| externalSecrets.storeName | string | `"aws-secrets-manager"` |  |
-| externalSecrets.storeKind | string | `"ClusterSecretStore"` |  |
-| externalSecrets.refreshInterval | string | `"1h"` |  |
-| externalSecrets.secrets.jwtSecret | string | `"artifact-keeper/${ENVIRONMENT}/jwt-secret"` |  |
-| externalSecrets.secrets.dbCredentials | string | `"artifact-keeper/${ENVIRONMENT}/db-credentials"` |  |
-| externalSecrets.secrets.s3Keys | string | `"artifact-keeper/${ENVIRONMENT}/s3-keys"` |  |
-| externalSecrets.secrets.meilisearchKey | string | `"artifact-keeper/${ENVIRONMENT}/meilisearch-key"` |  |
-| externalSecrets.secrets.dtAdminPassword | string | `"artifact-keeper/${ENVIRONMENT}/dt-admin-password"` |  |
-| networkPolicy.enabled | bool | `false` | Network policies |
-| serviceMonitor.enabled | bool | `false` | Prometheus ServiceMonitor |
-| serviceMonitor.interval | string | `"30s"` |  |
-| serviceMonitor.scrapeTimeout | string | `"10s"` |  |
+| web | object | `{"affinity":{},"enabled":true,"env":{"NEXT_PUBLIC_API_URL":"","NODE_ENV":"production"},"image":{"pullPolicy":"Always","repository":"ghcr.io/artifact-keeper/artifact-keeper-web","tag":"dev"},"nodeSelector":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"replicaCount":1,"resources":{"limits":{"cpu":"1","ephemeral-storage":"2Gi","memory":"1Gi"},"requests":{"cpu":"250m","ephemeral-storage":"256Mi","memory":"256Mi"}},"service":{"port":3000,"type":"ClusterIP"},"tolerations":[],"topologySpreadConstraints":[]}` | Next.js web frontend |
+| web.tolerations | list | `[]` | Per-component scheduling (overrides global) |
 
 ## Deployment Profiles
 

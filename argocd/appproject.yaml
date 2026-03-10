@@ -63,6 +63,8 @@ spec:
       kind: HorizontalPodAutoscaler
     - group: monitoring.coreos.com
       kind: ServiceMonitor
+    - group: external-secrets.io
+      kind: ExternalSecret
   roles:
     - name: admin
       description: Full access to all environments

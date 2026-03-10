@@ -1,0 +1,37 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    reviewers:
+      - "artifact-keeper/infrastructure"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore"
+
+  - package-ecosystem: "terraform"
+    directory: "/terraform/modules/eks"
+    schedule:
+      interval: "weekly"
+    reviewers:
+      - "artifact-keeper/infrastructure"
+    labels:
+      - "dependencies"
+      - "terraform"
+    commit-message:
+      prefix: "chore"
+
+  - package-ecosystem: "terraform"
+    directory: "/terraform/modules/vpc"
+    schedule:
+      interval: "weekly"
+    reviewers:
+      - "artifact-keeper/infrastructure"
+    labels:
+      - "dependencies"
+      - "terraform"
+    commit-message:
+      prefix: "chore"

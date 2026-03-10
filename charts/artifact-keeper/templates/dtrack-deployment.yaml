@@ -43,6 +43,7 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -61,9 +62,11 @@ spec:
             requests:
               cpu: 10m
               memory: 16Mi
+              ephemeral-storage: 32Mi
             limits:
               cpu: 100m
               memory: 64Mi
+              ephemeral-storage: 64Mi
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -251,6 +254,7 @@ spec:
         {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 8 }}
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       {{- with (.Values.dependencyTrack.tolerations | default .Values.global.tolerations) }}
       tolerations:
         {{- toYaml . | nindent 8 }}
@@ -283,9 +287,11 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
+              ephemeral-storage: 64Mi
             limits:
               cpu: 200m
               memory: 128Mi
+              ephemeral-storage: 128Mi
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -295,7 +301,10 @@ spec:
             - name: DEPENDENCY_TRACK_URL
               value: "http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080"
             - name: DEPENDENCY_TRACK_ADMIN_PASSWORD
-              value: {{ .Values.dependencyTrack.adminPassword | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  key: DEPENDENCY_TRACK_ADMIN_PASSWORD
           volumeMounts:
             - name: init-script
               mountPath: /scripts

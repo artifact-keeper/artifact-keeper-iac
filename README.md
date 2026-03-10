@@ -61,7 +61,7 @@ graph TB
 
 ```
 artifact-keeper-iac/
-├── helm/                          # Helm Chart
+├── charts/artifact-keeper/        # Helm Chart
 │   ├── Chart.yaml
 │   ├── values.yaml                # Development defaults
 │   ├── values-staging.yaml        # Staging overlay
@@ -120,13 +120,13 @@ git clone https://github.com/artifact-keeper/artifact-keeper-iac.git
 cd artifact-keeper-iac
 
 # Development (all services in-cluster)
-helm install ak helm/ \
+helm install ak charts/artifact-keeper/ \
   --namespace artifact-keeper \
   --create-namespace
 
 # Production (external RDS, TLS, autoscaling)
-helm install ak helm/ \
-  -f helm/values-production.yaml \
+helm install ak charts/artifact-keeper/ \
+  -f charts/artifact-keeper/values-production.yaml \
   --namespace artifact-keeper \
   --create-namespace \
   --set ingress.host=registry.example.com \

@@ -16,7 +16,7 @@ home: https://artifactkeeper.com
 sources:
   - https://github.com/artifact-keeper/artifact-keeper
 maintainers:
-  - name: khan
+  - name: brandonrc
 keywords:
   - artifact-registry
   - package-manager

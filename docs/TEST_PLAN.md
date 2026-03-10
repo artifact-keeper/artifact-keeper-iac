@@ -17,8 +17,8 @@ The artifact-keeper IaC repo contains Helm charts, Terraform configurations, and
 
 ### Helm
 ```bash
-helm lint helm/artifact-keeper/
-helm template artifact-keeper helm/artifact-keeper/ | kubectl apply --dry-run=client -f -
+helm lint charts/artifact-keeper/
+helm template artifact-keeper charts/artifact-keeper/ | kubectl apply --dry-run=client -f -
 ```
 
 ### Terraform

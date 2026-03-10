@@ -1,0 +1,83 @@
+# CI test values for chart-testing (ct install)
+# Minimizes resource requirements to prevent OOM in Kind clusters
+
+global:
+  imageRegistry: ghcr.io/artifact-keeper
+  imagePullPolicy: IfNotPresent
+  storageClass: standard
+
+# Backend - minimal resources for testing
+backend:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    size: 1Gi
+
+# Web - minimal resources
+web:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# Edge - minimal resources
+edge:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# PostgreSQL - minimal resources
+postgres:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    size: 1Gi
+
+# Meilisearch - disabled to avoid OOM (requires 4Gi+ memory)
+meilisearch:
+  enabled: false
+
+# Trivy - disabled to reduce resource usage
+trivy:
+  enabled: false
+
+# DependencyTrack - disabled (requires 4Gi+ memory)
+dependencyTrack:
+  enabled: false
+
+# Ingress - disabled for testing
+ingress:
+  enabled: false
+
+# ExternalSecrets - disabled for testing
+externalSecrets:
+  enabled: false
+
+# NetworkPolicy - keep enabled to test policy generation
+networkPolicy:
+  enabled: true
+
+# ServiceMonitor - disabled for testing
+serviceMonitor:
+  enabled: false

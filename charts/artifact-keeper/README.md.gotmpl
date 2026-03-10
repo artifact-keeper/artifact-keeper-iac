@@ -1,0 +1,397 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+{{ template "chart.description" . }}
+
+## TL;DR
+
+```bash
+helm repo add artifact-keeper https://artifact-keeper.github.io/artifact-keeper-iac/
+helm repo update
+helm install my-artifact-keeper artifact-keeper/artifact-keeper
+```
+
+## Introduction
+
+This chart bootstraps an [Artifact Keeper](https://github.com/artifact-keeper/artifact-keeper) deployment on a [Kubernetes](https://kubernetes.io) cluster using the [Helm](https://helm.sh) package manager.
+
+Artifact Keeper is an enterprise artifact registry supporting 45+ package formats including:
+- Container images (Docker, OCI)
+- Language packages (npm, Maven, PyPI, NuGet, etc.)
+- Binaries and generic artifacts
+- Integrated security scanning (Trivy, DependencyTrack)
+
+## Prerequisites
+
+- Kubernetes 1.24+
+- Helm 3.8+
+- PV provisioner support in the underlying infrastructure (for persistent storage)
+- **Host kernel requirement**: `vm.max_map_count >= 262144` (required by Meilisearch)
+
+```bash
+# On cluster nodes:
+sysctl -w vm.max_map_count=262144
+echo "vm.max_map_count = 262144" >> /etc/sysctl.d/99-meilisearch.conf
+```
+
+## Installing the Chart
+
+### From Helm Repository
+
+```bash
+helm repo add artifact-keeper https://artifact-keeper.github.io/artifact-keeper-iac/
+helm repo update
+helm install my-artifact-keeper artifact-keeper/artifact-keeper
+```
+
+### From Source
+
+```bash
+git clone https://github.com/artifact-keeper/artifact-keeper-iac.git
+cd artifact-keeper-iac
+helm install my-artifact-keeper ./charts/artifact-keeper
+```
+
+### With Custom Values
+
+```bash
+helm install my-artifact-keeper artifact-keeper/artifact-keeper \
+  --set ingress.host=artifacts.mycompany.com \
+  --set backend.replicaCount=3 \
+  --set postgres.enabled=false \
+  --set externalDatabase.host=postgres.example.com
+```
+
+Or using a values file:
+
+```bash
+helm install my-artifact-keeper artifact-keeper/artifact-keeper -f my-values.yaml
+```
+
+## Uninstalling the Chart
+
+```bash
+helm uninstall my-artifact-keeper
+```
+
+This removes all the Kubernetes resources associated with the chart and deletes the release.
+
+**Note**: PersistentVolumeClaims are not automatically deleted. To remove them:
+
+```bash
+kubectl delete pvc -l app.kubernetes.io/instance=my-artifact-keeper
+```
+
+## Configuration
+
+The following table lists the configurable parameters of the Artifact Keeper chart and their default values.
+
+{{ template "chart.valuesSection" . }}
+
+## Deployment Profiles
+
+The chart includes several pre-configured value files for different deployment scenarios:
+
+### Development (values.yaml)
+- Single replica deployments
+- In-cluster PostgreSQL
+- Minimal resource requests
+- Suitable for local testing
+
+```bash
+helm install my-artifact-keeper artifact-keeper/artifact-keeper
+```
+
+### Staging (values-staging.yaml)
+- 2 replicas for HA testing
+- External database recommended
+- Moderate resource limits
+- Monitoring enabled
+
+```bash
+helm install my-artifact-keeper artifact-keeper/artifact-keeper -f values-staging.yaml
+```
+
+### Production (values-production.yaml)
+- High availability (3+ replicas)
+- External managed database required
+- Production-grade resource limits
+- Full monitoring and security features
+- Pod Disruption Budgets enabled
+- HorizontalPodAutoscaler configured
+
+```bash
+helm install my-artifact-keeper artifact-keeper/artifact-keeper -f values-production.yaml
+```
+
+### Mesh Networking
+For multi-region or edge deployments:
+
+**Main Hub (values-mesh-main.yaml)**:
+```bash
+helm install artifact-keeper-main artifact-keeper/artifact-keeper -f values-mesh-main.yaml
+```
+
+**Peer/Edge Node (values-mesh-peer.yaml)**:
+```bash
+helm install artifact-keeper-peer artifact-keeper/artifact-keeper -f values-mesh-peer.yaml
+```
+
+## Architecture
+
+The chart deploys the following components:
+
+- **Backend**: Core API server handling artifact storage and retrieval (Rust/Axum)
+- **Web**: Next.js frontend for the web UI
+- **PostgreSQL**: Metadata and configuration database (optional, external database recommended for production)
+- **Meilisearch**: Full-text search engine for artifact discovery
+- **Trivy**: Vulnerability scanner for containers and SBOMs
+- **DependencyTrack**: SBOM analysis and license compliance
+- **Edge** (optional): Edge replication service for distributed deployments
+
+## Storage
+
+The chart creates PersistentVolumeClaims for:
+
+- **Backend artifacts**: Default 10Gi (configurable via `backend.persistence.size`)
+- **PostgreSQL data**: Default 20Gi (configurable via `postgres.persistence.size`)
+- **Meilisearch index**: Default 5Gi (configurable via `meilisearch.persistence.size`)
+- **Trivy cache**: Default 5Gi (configurable via `trivy.persistence.size`)
+- **DependencyTrack data**: Default 5Gi (configurable via `dependencyTrack.persistence.size`)
+
+Specify a custom `storageClass` globally or per-component:
+
+```yaml
+global:
+  storageClass: "fast-ssd"
+
+# Or per-component:
+backend:
+  persistence:
+    storageClass: "fast-ssd"
+```
+
+## Ingress
+
+The chart includes an Ingress resource that can be enabled:
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  host: artifacts.example.com
+  tls:
+    enabled: true
+    secretName: artifact-keeper-tls
+```
+
+For TLS, create the secret before installing:
+
+```bash
+kubectl create secret tls artifact-keeper-tls \
+  --cert=path/to/tls.crt \
+  --key=path/to/tls.key
+```
+
+## Security
+
+### Image Signature Verification
+
+Enable Cosign verification to validate signed images:
+
+```yaml
+cosign:
+  enabled: true
+  certificateOidcIssuer: "https://token.actions.githubusercontent.com"
+  certificateIdentityRegexp: "https://github.com/artifact-keeper/.*"
+```
+
+### Network Policies
+
+Enable network policies to restrict pod-to-pod communication:
+
+```yaml
+networkPolicy:
+  enabled: true
+```
+
+### Secrets Management
+
+For production, use Kubernetes secrets or external secret managers:
+
+```yaml
+secrets:
+  jwtSecret: "your-secure-jwt-secret"
+  
+externalDatabase:
+  existingSecret: "postgres-credentials"
+  existingSecretKey: "DATABASE_URL"
+```
+
+## Monitoring
+
+Enable Prometheus ServiceMonitor for metrics collection:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 30s
+```
+
+Metrics are exposed on `/metrics` endpoint for each service.
+
+## High Availability
+
+For production HA deployments:
+
+```yaml
+backend:
+  replicaCount: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilization: 70
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+  
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - artifact-keeper
+            topologyKey: kubernetes.io/hostname
+```
+
+## Upgrading
+
+### Upgrading the Chart
+
+```bash
+helm repo update
+helm upgrade my-artifact-keeper artifact-keeper/artifact-keeper
+```
+
+### Upgrading with New Values
+
+```bash
+helm upgrade my-artifact-keeper artifact-keeper/artifact-keeper -f updated-values.yaml
+```
+
+### Rolling Back
+
+```bash
+helm rollback my-artifact-keeper
+```
+
+## Troubleshooting
+
+### Meilisearch OOMKilled
+
+If Meilisearch pods are killed due to OOM:
+
+```yaml
+meilisearch:
+  resources:
+    limits:
+      memory: 8Gi  # Increase based on node CPU cores
+```
+
+### Backend Storage Issues
+
+Check PVC status:
+
+```bash
+kubectl get pvc -l app.kubernetes.io/instance=my-artifact-keeper
+kubectl describe pvc <pvc-name>
+```
+
+### Database Connection Issues
+
+Verify database connectivity:
+
+```bash
+kubectl logs -l app.kubernetes.io/component=backend -f
+```
+
+### Viewing Logs
+
+```bash
+# Backend logs
+kubectl logs -l app.kubernetes.io/component=backend -f
+
+# Web frontend logs
+kubectl logs -l app.kubernetes.io/component=web -f
+
+# All components
+kubectl logs -l app.kubernetes.io/instance=my-artifact-keeper --all-containers -f
+```
+
+## Development
+
+### Local Testing
+
+```bash
+# Lint the chart
+helm lint charts/artifact-keeper/
+
+# Template and verify
+helm template my-artifact-keeper charts/artifact-keeper/ --debug
+
+# Dry-run install
+helm install my-artifact-keeper charts/artifact-keeper/ --dry-run --debug
+
+# Install in a test namespace
+kubectl create namespace artifact-keeper-test
+helm install my-artifact-keeper charts/artifact-keeper/ -n artifact-keeper-test
+```
+
+### Updating Documentation
+
+This README is auto-generated using [helm-docs](https://github.com/norwoodj/helm-docs).
+
+To regenerate after changing values:
+
+```bash
+# Install helm-docs
+brew install norwoodj/tap/helm-docs  # macOS
+# or
+go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest
+
+# Generate documentation
+helm-docs charts/artifact-keeper/
+```
+
+The documentation is automatically generated on PR by GitHub Actions.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes to the `charts/artifact-keeper/` directory
+4. **Bump the version** in `charts/artifact-keeper/Chart.yaml` (required for releases)
+5. Run `helm-docs charts/artifact-keeper/` to update the README
+6. Test your changes locally
+7. Submit a pull request
+
+All PRs undergo:
+- Helm lint validation
+- Chart installation testing in kind
+- Security scanning
+- Version bump verification
+
+{{ template "chart.homepageLine" . }}
+
+{{ template "chart.sourcesSection" . }}
+
+{{ template "chart.maintainersSection" . }}
+
+{{ template "helm-docs.versionFooter" . }}

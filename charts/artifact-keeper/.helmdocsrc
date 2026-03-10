@@ -1,0 +1,13 @@
+# helm-docs configuration
+# https://github.com/norwoodj/helm-docs
+
+# Template files to ignore
+ignore-file: .helmdocsignore
+
+# Sort values by required first, then alphabetically
+sort-values-order: file
+
+# Values table settings
+values:
+  # Don't auto-wrap values table
+  autoWrap: false

@@ -1,0 +1,6 @@
+# Chart Releaser Configuration
+# https://github.com/helm/chart-releaser
+
+owner: artifact-keeper
+git-repo: artifact-keeper-iac
+charts-repo-url: https://artifact-keeper.github.io/artifact-keeper-iac/

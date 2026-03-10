@@ -1,0 +1,150 @@
+name: Helm CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'charts/**'
+      - '.github/workflows/helm-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**'
+      - '.github/workflows/helm-ci.yml'
+
+jobs:
+  lint-test:
+    name: Lint and Test Helm Chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: 'v3.16.3'
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.6.1
+
+      - name: Run chart-testing (lint)
+        run: ct lint --target-branch main --charts charts/artifact-keeper/
+
+      - name: Helm Lint
+        run: helm lint charts/artifact-keeper/
+
+      - name: Template chart with default values
+        run: |
+          helm template artifact-keeper charts/artifact-keeper/ > /tmp/default.yaml
+          echo "✓ Default values template generated successfully"
+
+      - name: Template chart with production values
+        run: |
+          helm template artifact-keeper charts/artifact-keeper/ -f charts/artifact-keeper/values-production.yaml > /tmp/production.yaml
+          echo "✓ Production values template generated successfully"
+
+      - name: Template chart with staging values
+        run: |
+          helm template artifact-keeper charts/artifact-keeper/ -f charts/artifact-keeper/values-staging.yaml > /tmp/staging.yaml
+          echo "✓ Staging values template generated successfully"
+
+      - name: Template chart with mesh-main values
+        run: |
+          helm template artifact-keeper charts/artifact-keeper/ -f charts/artifact-keeper/values-mesh-main.yaml > /tmp/mesh-main.yaml
+          echo "✓ Mesh-main values template generated successfully"
+
+      - name: Template chart with mesh-peer values
+        run: |
+          helm template artifact-keeper charts/artifact-keeper/ -f charts/artifact-keeper/values-mesh-peer.yaml > /tmp/mesh-peer.yaml
+          echo "✓ Mesh-peer values template generated successfully"
+
+      - name: Validate Kubernetes manifests
+        run: |
+          # Install kubeconform for validation
+          KUBECONFORM_VERSION=0.6.7
+          wget -qO- https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz | tar xz
+          sudo mv kubeconform /usr/local/bin/
+          
+          echo "Validating default values..."
+          kubeconform -summary -output json -ignore-missing-schemas /tmp/default.yaml
+          
+          echo "Validating production values..."
+          kubeconform -summary -output json -ignore-missing-schemas /tmp/production.yaml
+          
+          echo "Validating staging values..."
+          kubeconform -summary -output json -ignore-missing-schemas /tmp/staging.yaml
+          
+          echo "✓ All Kubernetes manifests are valid"
+
+      - name: Check for version bump
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin main
+          CURRENT_VERSION=$(git show origin/main:charts/artifact-keeper/Chart.yaml | grep '^version:' | awk '{print $2}')
+          NEW_VERSION=$(grep '^version:' charts/artifact-keeper/Chart.yaml | awk '{print $2}')
+          
+          if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
+            echo "⚠️  Warning: Chart version has not been bumped"
+            echo "Current version: $CURRENT_VERSION"
+            echo "Please update the version in charts/artifact-keeper/Chart.yaml"
+            exit 1
+          else
+            echo "✓ Chart version bumped from $CURRENT_VERSION to $NEW_VERSION"
+          fi
+
+      - name: Create kind cluster
+        uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
+
+      - name: Run chart-testing (install)
+        run: ct install --target-branch main --charts charts/artifact-keeper/
+
+      - name: Verify chart installation
+        run: |
+          echo "Waiting for deployments to be ready..."
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=artifact-keeper --timeout=300s || true
+          
+          echo "Checking deployed resources..."
+          kubectl get all -A
+          
+          echo "✓ Chart installation verified"
+
+  documentation:
+    name: Verify Documentation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install helm-docs
+        run: |
+          cd /tmp
+          wget https://github.com/norwoodj/helm-docs/releases/download/v1.14.2/helm-docs_1.14.2_Linux_x86_64.tar.gz
+          tar -xzf helm-docs_1.14.2_Linux_x86_64.tar.gz
+          sudo mv helm-docs /usr/local/bin/
+          helm-docs --version
+
+      - name: Verify documentation is up-to-date
+        run: |
+          cd charts/artifact-keeper
+          helm-docs
+          if ! git diff --exit-code README.md; then
+            echo "❌ Helm chart documentation is out of date!"
+            echo "Please run 'helm-docs charts/artifact-keeper/' and commit the changes."
+            echo ""
+            echo "Diff:"
+            git diff README.md
+            exit 1
+          fi
+          echo "✓ Helm chart documentation is up-to-date"

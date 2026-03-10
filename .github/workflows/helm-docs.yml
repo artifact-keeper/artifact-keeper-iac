@@ -1,0 +1,82 @@
+name: Helm Docs
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'charts/**'
+      - '.github/workflows/helm-docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**'
+      - '.github/workflows/helm-docs.yml'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate:
+    name: Generate Helm Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install helm-docs
+        run: |
+          cd /tmp
+          wget https://github.com/norwoodj/helm-docs/releases/download/v1.14.2/helm-docs_1.14.2_Linux_x86_64.tar.gz
+          tar -xzf helm-docs_1.14.2_Linux_x86_64.tar.gz
+          sudo mv helm-docs /usr/local/bin/
+          helm-docs --version
+
+      - name: Generate documentation
+        run: |
+          cd charts/artifact-keeper
+          helm-docs
+
+      - name: Check for changes
+        id: git-check
+        run: |
+          git diff --exit-code charts/artifact-keeper/README.md || echo "changed=true" >> $GITHUB_OUTPUT
+
+      - name: Commit documentation changes
+        if: steps.git-check.outputs.changed == 'true' && github.event_name == 'pull_request'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add charts/artifact-keeper/README.md
+          git commit -m "docs: auto-generate Helm chart documentation"
+          git push
+
+      - name: Verify documentation is up-to-date
+        if: github.event_name == 'pull_request' && steps.git-check.outputs.changed != 'true'
+        run: |
+          echo "✓ Helm chart documentation is up-to-date"
+
+      - name: Comment on PR
+        if: steps.git-check.outputs.changed == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '📝 Helm chart documentation has been automatically updated by helm-docs.'
+            })
+
+      - name: Commit and push (main branch)
+        if: steps.git-check.outputs.changed == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add charts/artifact-keeper/README.md
+          git commit -m "docs: auto-generate Helm chart documentation [skip ci]"
+          git push

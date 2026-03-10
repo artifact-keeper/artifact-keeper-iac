@@ -1,0 +1,22 @@
+# Patterns to ignore when packaging Helm charts
+
+# README template (used by helm-docs to generate README.md)
+README.md.gotmpl
+
+# Git files
+.git/
+.gitignore
+
+# CI/CD files
+.github/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temp files
+*.tmp
+.DS_Store

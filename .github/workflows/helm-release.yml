@@ -1,0 +1,428 @@
+name: Helm Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/**'
+      - '.github/workflows/helm-release.yml'
+
+jobs:
+  setup-pages:
+    name: Setup GitHub Pages Branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Check if gh-pages exists
+        id: check-branch
+        run: |
+          if git ls-remote --exit-code --heads origin gh-pages; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✓ gh-pages branch already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  gh-pages branch does not exist, will create it"
+          fi
+
+      - name: Create gh-pages branch
+        if: steps.check-branch.outputs.exists == 'false'
+        run: |
+          git checkout --orphan gh-pages
+          git rm -rf .
+          echo "# Artifact Keeper Helm Repository" > README.md
+          cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Artifact Keeper Helm Repository</title>
+              <style>
+                  :root {
+                      --primary: #0066cc;
+                      --bg: #f5f5f5;
+                      --card-bg: #ffffff;
+                      --text: #333333;
+                      --border: #e0e0e0;
+                  }
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                      line-height: 1.6;
+                      color: var(--text);
+                      background: var(--bg);
+                  }
+                  .container {
+                      max-width: 900px;
+                      margin: 0 auto;
+                      padding: 2rem 1rem;
+                  }
+                  header {
+                      text-align: center;
+                      padding: 2rem 0;
+                      background: var(--card-bg);
+                      border-radius: 8px;
+                      margin-bottom: 2rem;
+                      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                  }
+                  h1 {
+                      color: var(--primary);
+                      margin-bottom: 0.5rem;
+                  }
+                  .badge {
+                      display: inline-block;
+                      padding: 0.25rem 0.75rem;
+                      margin: 0.25rem;
+                      background: var(--primary);
+                      color: white;
+                      border-radius: 4px;
+                      font-size: 0.875rem;
+                  }
+                  .card {
+                      background: var(--card-bg);
+                      padding: 2rem;
+                      border-radius: 8px;
+                      margin-bottom: 1.5rem;
+                      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                  }
+                  h2 {
+                      color: var(--primary);
+                      margin-bottom: 1rem;
+                      padding-bottom: 0.5rem;
+                      border-bottom: 2px solid var(--border);
+                  }
+                  pre {
+                      background: #f8f8f8;
+                      padding: 1rem;
+                      border-radius: 4px;
+                      overflow-x: auto;
+                      border-left: 4px solid var(--primary);
+                  }
+                  code {
+                      font-family: 'Monaco', 'Courier New', monospace;
+                      font-size: 0.875rem;
+                  }
+                  a {
+                      color: var(--primary);
+                      text-decoration: none;
+                  }
+                  a:hover {
+                      text-decoration: underline;
+                  }
+                  ul {
+                      margin-left: 2rem;
+                  }
+                  li {
+                      margin: 0.5rem 0;
+                  }
+                  footer {
+                      text-align: center;
+                      padding: 2rem 0;
+                      color: #666;
+                      font-size: 0.875rem;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <header>
+                      <h1>🎯 Artifact Keeper Helm Repository</h1>
+                      <p>Enterprise artifact registry supporting 45+ package formats</p>
+                  </header>
+
+                  <div class="card">
+                      <h2>Quick Start</h2>
+                      <p>Add this Helm repository and install the chart:</p>
+                      <pre><code>helm repo add artifact-keeper https://artifact-keeper.github.io/artifact-keeper-iac/
+          helm repo update
+          helm install my-artifact-keeper artifact-keeper/artifact-keeper</code></pre>
+                  </div>
+
+                  <div class="card">
+                      <h2>Available Charts</h2>
+                      <ul>
+                          <li><strong>artifact-keeper</strong> - Enterprise artifact registry</li>
+                      </ul>
+                      <p>View all versions in the <a href="https://github.com/artifact-keeper/artifact-keeper-iac/releases">releases page</a>.</p>
+                  </div>
+
+                  <div class="card">
+                      <h2>Documentation</h2>
+                      <ul>
+                          <li><a href="https://github.com/artifact-keeper/artifact-keeper-iac">GitHub Repository</a></li>
+                          <li><a href="https://github.com/artifact-keeper/artifact-keeper-iac/tree/main/charts/artifact-keeper">Chart Documentation</a></li>
+                          <li><a href="https://github.com/artifact-keeper/artifact-keeper">Artifact Keeper Project</a></li>
+                      </ul>
+                  </div>
+
+                  <footer>
+                      <p>Generated by <a href="https://github.com/artifact-keeper/artifact-keeper-iac">artifact-keeper-iac</a></p>
+                  </footer>
+              </div>
+          </body>
+          </html>
+          EOF
+          
+          git add README.md index.html
+          git commit -m "Initialize gh-pages branch"
+          git push origin gh-pages
+          echo "✓ gh-pages branch created and initialized"
+
+  release:
+    name: Release Helm Chart
+    runs-on: ubuntu-latest
+    needs: setup-pages
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: 'latest'
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@a917fd15b20e8b64b94d9158ad54cd6345335584 # v1.6.0
+        with:
+          charts_dir: charts
+          config: .github/cr.yaml
+          skip_existing: true
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+  update-index:
+    name: Update Helm Repository Index
+    needs: release
+    runs-on: ubuntu-latest
+    if: success()
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Checkout gh-pages
+        run: |
+          git fetch origin gh-pages
+          git checkout gh-pages
+
+      - name: Update index page
+        run: |
+          # Get chart version and info from main branch
+          CHART_VERSION=$(git show origin/main:charts/artifact-keeper/Chart.yaml | grep '^version:' | awk '{print $2}')
+          CHART_DESC=$(git show origin/main:charts/artifact-keeper/Chart.yaml | grep '^description:' | sed 's/description: //')
+          APP_VERSION=$(git show origin/main:charts/artifact-keeper/Chart.yaml | grep '^appVersion:' | awk '{print $2}' | tr -d '"')
+          
+          # Create updated index.html
+          cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Artifact Keeper Helm Repository</title>
+              <style>
+                  :root {
+                      --primary: #0066cc;
+                      --bg: #f5f5f5;
+                      --card-bg: #ffffff;
+                      --text: #333333;
+                      --border: #e0e0e0;
+                  }
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                      line-height: 1.6;
+                      color: var(--text);
+                      background: var(--bg);
+                  }
+                  .container {
+                      max-width: 900px;
+                      margin: 0 auto;
+                      padding: 2rem 1rem;
+                  }
+                  header {
+                      text-align: center;
+                      padding: 2rem 0;
+                      background: var(--card-bg);
+                      border-radius: 8px;
+                      margin-bottom: 2rem;
+                      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                  }
+                  h1 {
+                      color: var(--primary);
+                      margin-bottom: 0.5rem;
+                  }
+                  .badge {
+                      display: inline-block;
+                      padding: 0.25rem 0.75rem;
+                      margin: 0.25rem;
+                      background: var(--primary);
+                      color: white;
+                      border-radius: 4px;
+                      font-size: 0.875rem;
+                  }
+                  .card {
+                      background: var(--card-bg);
+                      padding: 2rem;
+                      border-radius: 8px;
+                      margin-bottom: 1.5rem;
+                      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                  }
+                  h2 {
+                      color: var(--primary);
+                      margin-bottom: 1rem;
+                      padding-bottom: 0.5rem;
+                      border-bottom: 2px solid var(--border);
+                  }
+                  pre {
+                      background: #f8f8f8;
+                      padding: 1rem;
+                      border-radius: 4px;
+                      overflow-x: auto;
+                      border-left: 4px solid var(--primary);
+                  }
+                  code {
+                      font-family: 'Monaco', 'Courier New', monospace;
+                      font-size: 0.875rem;
+                  }
+                  a {
+                      color: var(--primary);
+                      text-decoration: none;
+                  }
+                  a:hover {
+                      text-decoration: underline;
+                  }
+                  ul {
+                      margin-left: 2rem;
+                  }
+                  li {
+                      margin: 0.5rem 0;
+                  }
+                  footer {
+                      text-align: center;
+                      padding: 2rem 0;
+                      color: #666;
+                      font-size: 0.875rem;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <header>
+                      <h1>🎯 Artifact Keeper Helm Repository</h1>
+                      <p>Enterprise artifact registry supporting 45+ package formats</p>
+                      <div style="margin-top: 1rem;">
+                          <span class="badge">Version: CHART_VERSION_PLACEHOLDER</span>
+                          <span class="badge">App Version: APP_VERSION_PLACEHOLDER</span>
+                      </div>
+                  </header>
+
+                  <div class="card">
+                      <h2>Quick Start</h2>
+                      <p>Add this Helm repository and install the chart:</p>
+                      <pre><code>helm repo add artifact-keeper https://artifact-keeper.github.io/artifact-keeper-iac/
+          helm repo update
+          helm install my-artifact-keeper artifact-keeper/artifact-keeper</code></pre>
+                  </div>
+
+                  <div class="card">
+                      <h2>Available Charts</h2>
+                      <ul>
+                          <li><strong>artifact-keeper</strong> - CHART_DESC_PLACEHOLDER</li>
+                      </ul>
+                      <p>View all versions in the <a href="https://github.com/artifact-keeper/artifact-keeper-iac/releases">releases page</a>.</p>
+                  </div>
+
+                  <div class="card">
+                      <h2>Repository Index</h2>
+                      <p>The Helm repository index is available at: <a href="index.yaml">index.yaml</a></p>
+                  </div>
+
+                  <div class="card">
+                      <h2>Installation Options</h2>
+                      <pre><code># Install with custom values
+          helm install my-artifact-keeper artifact-keeper/artifact-keeper -f my-values.yaml
+
+          # Install specific version
+          helm install my-artifact-keeper artifact-keeper/artifact-keeper --version CHART_VERSION_PLACEHOLDER
+
+          # Install production configuration
+          helm install my-artifact-keeper artifact-keeper/artifact-keeper \\
+            --set ingress.host=artifacts.example.com \\
+            --set postgres.enabled=false \\
+            --set externalDatabase.host=your-db-host</code></pre>
+                  </div>
+
+                  <div class="card">
+                      <h2>Documentation</h2>
+                      <ul>
+                          <li><a href="https://github.com/artifact-keeper/artifact-keeper-iac">GitHub Repository</a></li>
+                          <li><a href="https://github.com/artifact-keeper/artifact-keeper-iac/tree/main/charts/artifact-keeper">Chart Documentation</a></li>
+                          <li><a href="https://github.com/artifact-keeper/artifact-keeper">Artifact Keeper Project</a></li>
+                      </ul>
+                  </div>
+
+                  <footer>
+                      <p>Generated by <a href="https://github.com/artifact-keeper/artifact-keeper-iac">artifact-keeper-iac</a></p>
+                  </footer>
+              </div>
+          </body>
+          </html>
+          EOF
+          
+          # Replace placeholders
+          sed -i.bak "s/CHART_VERSION_PLACEHOLDER/$CHART_VERSION/g" index.html
+          sed -i.bak "s/APP_VERSION_PLACEHOLDER/$APP_VERSION/g" index.html
+          sed -i.bak "s/CHART_DESC_PLACEHOLDER/$CHART_DESC/g" index.html
+          rm index.html.bak
+          
+          # Commit if there are changes
+          git add index.html
+          if git diff --staged --quiet; then
+            echo "No changes to index.html"
+          else
+            git commit -m "Update index page with chart version $CHART_VERSION"
+            git push origin gh-pages
+          fi
+
+      - name: Notify release completion
+        run: |
+          CHART_VERSION=$(git show origin/main:charts/artifact-keeper/Chart.yaml | grep '^version:' | awk '{print $2}')
+          echo "✓ Helm chart artifact-keeper version $CHART_VERSION released successfully"
+          echo "📦 GitHub Release: https://github.com/${{ github.repository }}/releases"
+          echo "📄 Helm Repository: https://${{ github.repository_owner }}.github.io/artifact-keeper-iac/"
+          echo ""
+          echo "To use this chart:"
+          echo "  helm repo add artifact-keeper https://${{ github.repository_owner }}.github.io/artifact-keeper-iac/"
+          echo "  helm repo update"
+          echo "  helm install my-release artifact-keeper/artifact-keeper --version $CHART_VERSION"

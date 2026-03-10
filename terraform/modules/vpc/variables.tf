@@ -23,6 +23,18 @@ variable "single_nat_gateway" {
   default     = true
 }
 
+variable "enable_flow_logs" {
+  description = "Enable VPC Flow Logs to CloudWatch for network traffic auditing"
+  type        = bool
+  default     = true
+}
+
+variable "flow_log_retention_days" {
+  description = "Number of days to retain VPC Flow Logs in CloudWatch"
+  type        = number
+  default     = 30
+}
+
 variable "tags" {
   description = "Additional tags to apply to all resources"
   type        = map(string)

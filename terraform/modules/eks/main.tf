@@ -90,6 +90,8 @@ resource "aws_eks_cluster" "this" {
   version  = var.kubernetes_version
   role_arn = aws_iam_role.cluster.arn
 
+  enabled_cluster_log_types = var.enabled_cluster_log_types
+
   vpc_config {
     subnet_ids              = var.subnet_ids
     security_group_ids      = [aws_security_group.cluster.id]

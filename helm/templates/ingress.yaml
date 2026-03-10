@@ -55,13 +55,8 @@ spec:
                 name: {{ include "artifact-keeper.fullname" . }}-backend
                 port:
                   number: {{ .Values.backend.service.httpPort }}
-          - path: /metrics
-            pathType: Exact
-            backend:
-              service:
-                name: {{ include "artifact-keeper.fullname" . }}-backend
-                port:
-                  number: {{ .Values.backend.service.httpPort }}
+          # /metrics is not exposed publicly. Use the ServiceMonitor
+          # (servicemonitor.yaml) for Prometheus scraping via ClusterIP.
           # OCI / Docker registry
           - path: /v2
             pathType: Prefix

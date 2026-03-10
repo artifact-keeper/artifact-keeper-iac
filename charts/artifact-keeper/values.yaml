@@ -103,9 +103,11 @@ backend:
     requests:
       cpu: 250m
       memory: 256Mi
+      ephemeral-storage: 256Mi
     limits:
       cpu: "2"
       memory: 2Gi
+      ephemeral-storage: 1Gi
   persistence:
     enabled: true
     size: 10Gi
@@ -150,6 +152,7 @@ web:
     requests:
       cpu: 250m
       memory: 256Mi
+      ephemeral-storage: 256Mi
     limits:
       cpu: "1"
       memory: 1Gi
@@ -217,9 +220,11 @@ postgres:
     requests:
       cpu: 250m
       memory: 256Mi
+      ephemeral-storage: 128Mi
     limits:
       cpu: "1"
       memory: 1Gi
+      ephemeral-storage: 512Mi
   initDb:
     enabled: true
   # -- Per-component scheduling (overrides global)
@@ -268,11 +273,13 @@ meilisearch:
     requests:
       cpu: 250m
       memory: 512Mi
+      ephemeral-storage: 128Mi
     limits:
       cpu: "2"
       # -- Must be >= 4Gi on multi-core nodes. 8Gi recommended for nodes
       # with 16+ cores. See Memory sizing note above.
       memory: 8Gi
+      ephemeral-storage: 512Mi
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}
@@ -288,7 +295,7 @@ trivy:
   enabled: true
   image:
     repository: aquasec/trivy
-    tag: latest
+    tag: "0.62.1"
   persistence:
     size: 5Gi
     storageClass: ""
@@ -296,9 +303,11 @@ trivy:
     requests:
       cpu: 250m
       memory: 256Mi
+      ephemeral-storage: 128Mi
     limits:
       cpu: "1"
       memory: 2Gi
+      ephemeral-storage: 1Gi
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}
@@ -323,9 +332,11 @@ dependencyTrack:
     requests:
       cpu: 500m
       memory: 4Gi
+      ephemeral-storage: 256Mi
     limits:
       cpu: "2"
       memory: 6Gi
+      ephemeral-storage: 1Gi
   bootstrap:
     enabled: true
   # -- Per-component scheduling (overrides global)

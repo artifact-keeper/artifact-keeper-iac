@@ -62,7 +62,7 @@ spec:
       source:
         repoURL: https://github.com/artifact-keeper/artifact-keeper-iac.git
         targetRevision: "{{ .targetRevision }}"
-        path: helm
+        path: charts/artifact-keeper
         helm:
           valueFiles:
             - "{{ .valuesFile }}"

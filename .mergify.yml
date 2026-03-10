@@ -6,7 +6,7 @@ queue_rules:
 pull_request_rules:
   - name: Label Helm chart changes
     conditions:
-      - "files~=^helm/"
+      - "files~=^charts/"
     actions:
       label:
         add:

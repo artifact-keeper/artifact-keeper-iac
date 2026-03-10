@@ -1,0 +1,170 @@
+name: Helm CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "charts/**"
+      - ".github/workflows/helm-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/**"
+      - ".github/workflows/helm-ci.yml"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v3.16.3
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.6.1
+
+      - name: Run chart-testing lint
+        run: ct lint --target-branch main --charts charts/artifact-keeper/
+
+      - name: Run helm lint
+        run: helm lint charts/artifact-keeper/
+
+  template-validation:
+    name: "Template & Validate (${{ matrix.variant }})"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: default
+            values_args: ""
+          - variant: production
+            values_args: "-f charts/artifact-keeper/values-production.yaml"
+          - variant: staging
+            values_args: "-f charts/artifact-keeper/values-staging.yaml"
+          - variant: mesh-main
+            values_args: "-f charts/artifact-keeper/values-mesh-main.yaml"
+          - variant: mesh-peer
+            values_args: "-f charts/artifact-keeper/values-mesh-peer.yaml"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v3.16.3
+
+      - name: "Render template (${{ matrix.variant }})"
+        run: |
+          helm template artifact-keeper charts/artifact-keeper/ \
+            ${{ matrix.values_args }} \
+            > /tmp/rendered-${{ matrix.variant }}.yaml
+          echo "Template rendered successfully for ${{ matrix.variant }} values"
+
+      - name: Install kubeconform
+        run: |
+          KUBECONFORM_VERSION=0.6.7
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar xz -C /usr/local/bin kubeconform
+
+      - name: "Validate manifests (${{ matrix.variant }})"
+        run: |
+          kubeconform \
+            -summary \
+            -strict \
+            -ignore-missing-schemas \
+            -kubernetes-version 1.31.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /tmp/rendered-${{ matrix.variant }}.yaml
+
+  version-check:
+    name: Chart Version Check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Compare chart version against main
+        run: |
+          MAIN_VERSION=$(git show origin/main:charts/artifact-keeper/Chart.yaml 2>/dev/null \
+            | grep '^version:' | awk '{print $2}' || echo "")
+
+          if [ -z "$MAIN_VERSION" ]; then
+            echo "Chart does not exist on main yet, skipping version check"
+            exit 0
+          fi
+
+          PR_VERSION=$(grep '^version:' charts/artifact-keeper/Chart.yaml | awk '{print $2}')
+
+          if [ "$MAIN_VERSION" = "$PR_VERSION" ]; then
+            echo "::warning::Chart version ($PR_VERSION) was not bumped. Consider updating the version in charts/artifact-keeper/Chart.yaml if this PR changes the chart."
+          else
+            echo "Chart version bumped: $MAIN_VERSION -> $PR_VERSION"
+          fi
+
+  install-test:
+    name: Install Test (kind)
+    runs-on: ubuntu-latest
+    needs: [lint, template-validation]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v3.16.3
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.6.1
+
+      - name: Create kind cluster
+        uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
+
+      - name: Run chart-testing install
+        run: ct install --target-branch main --charts charts/artifact-keeper/
+
+      - name: Show cluster state on failure
+        if: failure()
+        run: |
+          echo "=== Pod status ==="
+          kubectl get pods -A
+          echo ""
+          echo "=== Events ==="
+          kubectl get events --sort-by='.lastTimestamp' -A | tail -40
+          echo ""
+          echo "=== Describe failing pods ==="
+          kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded -o name \
+            | xargs -I{} kubectl describe {} -n default 2>/dev/null || true

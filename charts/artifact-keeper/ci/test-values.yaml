@@ -1,0 +1,88 @@
+# CI test values for chart-testing (ct install) in kind clusters.
+# Disables heavy components and uses minimal resources so the chart
+# can be installed in a resource-constrained environment.
+
+backend:
+  replicaCount: 1
+  image:
+    tag: dev
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  persistence:
+    enabled: true
+    size: 1Gi
+  scanWorkspace:
+    enabled: false
+  autoscaling:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+
+web:
+  enabled: true
+  replicaCount: 1
+  image:
+    tag: dev
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+      ephemeral-storage: 512Mi
+
+edge:
+  enabled: false
+
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  auth:
+    username: registry
+    password: registry
+    database: artifact_registry
+  persistence:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  initDb:
+    enabled: true
+
+meilisearch:
+  enabled: false
+
+trivy:
+  enabled: false
+
+dependencyTrack:
+  enabled: false
+
+ingress:
+  enabled: false
+
+cosign:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
+externalSecrets:
+  enabled: false

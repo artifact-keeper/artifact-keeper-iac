@@ -52,8 +52,191 @@ spec:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
   egress:
-    - {} # Allow all egress (DB, S3, external registries)
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # PostgreSQL (in-cluster or external)
+    - ports:
+        - port: 5432
+          protocol: TCP
+    # Meilisearch
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.meilisearch.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 7700
+          protocol: TCP
+    # Trivy
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.trivy.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8090
+          protocol: TCP
+    # DependencyTrack
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    # HTTPS (S3, external registries, OIDC providers)
+    - ports:
+        - port: 443
+          protocol: TCP
 ---
+# Web: accept traffic from ingress controller and Prometheus only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-web
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.web.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - port: {{ .Values.web.service.port }}
+          protocol: TCP
+    # Allow Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - port: {{ .Values.web.service.port }}
+          protocol: TCP
+  egress:
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Backend API
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.backend.service.httpPort }}
+          protocol: TCP
+---
+# Meilisearch: accept traffic from backend only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-meilisearch
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.meilisearch.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 7700
+          protocol: TCP
+---
+# Trivy: accept traffic from backend only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-trivy
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.trivy.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8090
+          protocol: TCP
+  egress:
+    # DNS resolution (for vuln DB updates)
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # HTTPS (download vulnerability databases)
+    - ports:
+        - port: 443
+          protocol: TCP
+---
+# DependencyTrack: accept traffic from backend and dtrack-init Job
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-dtrack
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+        # dtrack-init Job uses dtrack selector labels
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # PostgreSQL
+    - ports:
+        - port: 5432
+          protocol: TCP
+    # HTTPS (NVD mirror, vulnerability data feeds)
+    - ports:
+        - port: 443
+          protocol: TCP
+---
+# PostgreSQL: accept traffic from backend and DependencyTrack
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

@@ -61,9 +61,11 @@ spec:
             requests:
               cpu: 10m
               memory: 16Mi
+              ephemeral-storage: 32Mi
             limits:
               cpu: 100m
               memory: 64Mi
+              ephemeral-storage: 64Mi
           command: ["sh", "-c"]
           args:
             - |

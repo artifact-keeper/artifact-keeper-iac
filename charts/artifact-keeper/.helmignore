@@ -1,0 +1,29 @@
+# Patterns to ignore when building packages.
+# This supports shell glob matching, relative path matching, and
+# negation (prefixed with !). Only one pattern per line.
+
+# helm-docs template (not part of the chart)
+README.md.gotmpl
+
+# helm-docs config
+.helmdocsrc
+
+# Version control
+.git/
+.gitignore
+
+# GitHub
+.github/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temp and build files
+*.tmp
+*.bak
+*.orig

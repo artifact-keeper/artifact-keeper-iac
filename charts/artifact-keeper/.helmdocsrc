@@ -1,0 +1,6 @@
+---
+# helm-docs configuration
+# https://github.com/norwoodj/helm-docs
+
+chart-search-root: .
+sort-values-order: file

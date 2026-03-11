@@ -1,0 +1,44 @@
+name: Helm Docs
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'charts/**'
+      - '.github/workflows/helm-docs.yml'
+
+jobs:
+  verify:
+    name: Verify helm-docs output
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install helm-docs
+        run: |
+          HELM_DOCS_VERSION=1.14.2
+          curl -sSL --proto =https "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz" \
+            | tar xz -C /tmp
+          sudo mv /tmp/helm-docs /usr/local/bin/helm-docs
+          helm-docs --version
+
+      - name: Run helm-docs
+        run: |
+          cd charts/artifact-keeper
+          helm-docs
+
+      - name: Check for drift
+        run: |
+          if ! git diff --exit-code charts/artifact-keeper/README.md; then
+            echo ""
+            echo "ERROR: charts/artifact-keeper/README.md is out of date."
+            echo ""
+            echo "Run the following locally and commit the result:"
+            echo ""
+            echo "    cd charts/artifact-keeper && helm-docs"
+            echo ""
+            exit 1
+          fi

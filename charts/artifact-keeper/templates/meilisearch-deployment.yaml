@@ -92,7 +92,7 @@ spec:
           image: "{{ .Values.meilisearch.image.repository }}:{{ .Values.meilisearch.image.tag }}"
           imagePullPolicy: IfNotPresent
           securityContext:
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false
             allowPrivilegeEscalation: false
             capabilities:
               drop:

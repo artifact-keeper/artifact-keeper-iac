@@ -179,7 +179,10 @@ spec:
             - name: MEILISEARCH_URL
               value: "http://{{ include "artifact-keeper.fullname" . }}-meilisearch:7700"
             - name: MEILISEARCH_API_KEY
-              value: {{ .Values.meilisearch.masterKey | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  key: MEILISEARCH_API_KEY
             {{- end }}
             {{- if .Values.trivy.enabled }}
             - name: TRIVY_URL
@@ -195,19 +198,24 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
-              path: /health
+              path: /livez
               port: http
-            initialDelaySeconds: 30
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 5
           readinessProbe:
             httpGet:
-              path: /health
+              path: /readyz
               port: http
-            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 5

@@ -162,6 +162,11 @@ spec:
             - name: grpc
               containerPort: {{ .Values.backend.service.grpcPort }}
               protocol: TCP
+            {{- if .Values.backend.metricsListener.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.backend.metricsListener.port }}
+              protocol: TCP
+            {{- end }}
           env:
             {{- range $key, $value := .Values.backend.env }}
             - name: {{ $key }}
@@ -224,6 +229,10 @@ spec:
                 secretKeyRef:
                   name: {{ include "artifact-keeper.fullname" . }}-secrets
                   key: SMTP_PASSWORD
+            {{- end }}
+            {{- if .Values.backend.metricsListener.enabled }}
+            - name: METRICS_PORT
+              value: {{ .Values.backend.metricsListener.port | quote }}
             {{- end }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}

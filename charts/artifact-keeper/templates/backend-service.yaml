@@ -26,6 +26,12 @@ spec:
       port: {{ .Values.backend.service.grpcPort }}
       targetPort: grpc
       protocol: TCP
+    {{- if .Values.backend.metricsListener.enabled }}
+    - name: metrics
+      port: {{ .Values.backend.metricsListener.port }}
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}
   selector:
     {{- include "artifact-keeper.backend.selectorLabels" . | nindent 4 }}
 {{- end }}

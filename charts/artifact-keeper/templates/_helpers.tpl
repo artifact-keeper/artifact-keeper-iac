@@ -148,3 +148,11 @@ ServiceAccount name
 {{- default "default" .Values.backend.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{- define "artifact-keeper.validateSecrets" -}}
+{{- if not .Values.externalSecrets.enabled -}}
+{{- if eq .Values.secrets.jwtSecret "" -}}
+{{- fail "secrets.jwtSecret is required when externalSecrets is not enabled. Set it with --set secrets.jwtSecret=<value>" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

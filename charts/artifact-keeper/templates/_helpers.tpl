@@ -154,5 +154,11 @@ ServiceAccount name
 {{- if eq .Values.secrets.jwtSecret "" -}}
 {{- fail "secrets.jwtSecret is required when externalSecrets is not enabled. Set it with --set secrets.jwtSecret=<value>" -}}
 {{- end -}}
+{{- if and .Values.postgres.enabled (eq .Values.postgres.auth.password "") -}}
+{{- fail "postgres.auth.password is required when postgres is enabled. Set it with --set postgres.auth.password=<value>" -}}
+{{- end -}}
+{{- if and .Values.opensearch.enabled (not .Values.opensearch.disableSecurityPlugin) (eq .Values.opensearch.auth.password "") -}}
+{{- fail "opensearch.auth.password is required when opensearch is enabled and disableSecurityPlugin is false. Set it with --set opensearch.auth.password=<value>" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}

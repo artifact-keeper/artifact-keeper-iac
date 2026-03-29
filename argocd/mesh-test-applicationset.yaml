@@ -18,32 +18,24 @@ spec:
             valuesFile: values-mesh-main.yaml
             peerName: mesh-main
             peerEndpoint: http://ak-main-backend.ak-mesh-main.svc.cluster.local:8080
-            peerApiKey: "REPLACE_WITH_K8S_SECRET_REF"
-            jwtSecret: "REPLACE_WITH_K8S_SECRET_REF"
           - name: mesh-peer-1
             namespace: ak-mesh-peer1
             fullnameOverride: ak-peer1
             valuesFile: values-mesh-peer.yaml
             peerName: mesh-peer-1
             peerEndpoint: http://ak-peer1-backend.ak-mesh-peer1.svc.cluster.local:8080
-            peerApiKey: "REPLACE_WITH_K8S_SECRET_REF"
-            jwtSecret: "REPLACE_WITH_K8S_SECRET_REF"
           - name: mesh-peer-2
             namespace: ak-mesh-peer2
             fullnameOverride: ak-peer2
             valuesFile: values-mesh-peer.yaml
             peerName: mesh-peer-2
             peerEndpoint: http://ak-peer2-backend.ak-mesh-peer2.svc.cluster.local:8080
-            peerApiKey: "REPLACE_WITH_K8S_SECRET_REF"
-            jwtSecret: "REPLACE_WITH_K8S_SECRET_REF"
           - name: mesh-peer-3
             namespace: ak-mesh-peer3
             fullnameOverride: ak-peer3
             valuesFile: values-mesh-peer.yaml
             peerName: mesh-peer-3
             peerEndpoint: http://ak-peer3-backend.ak-mesh-peer3.svc.cluster.local:8080
-            peerApiKey: "REPLACE_WITH_K8S_SECRET_REF"
-            jwtSecret: "REPLACE_WITH_K8S_SECRET_REF"
   template:
     metadata:
       name: "ak-{{name}}"

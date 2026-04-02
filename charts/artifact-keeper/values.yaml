@@ -98,11 +98,9 @@ backend:
   # serving only `GET /metrics` with no authentication. Intended for
   # Prometheus scrapers that cannot present credentials. Disabled by default.
   #
-  # NOTE: if gRPC is also enabled, ensure `metricsPort` differs from
-  # `service.grpcPort` (default 9090).
   metricsListener:
     enabled: false
-    port: 9090
+    port: 9091
   env:
     RUST_LOG: "info,artifact_keeper=debug"
     HOST: "0.0.0.0"

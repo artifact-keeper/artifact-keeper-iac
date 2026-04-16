@@ -213,6 +213,17 @@ spec:
               value: "http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080"
             - name: DEPENDENCY_TRACK_ENABLED
               value: "true"
+            {{- if not (hasKey .Values.backend.env "ALLOW_HTTP_INTEGRATIONS") }}
+            - name: ALLOW_HTTP_INTEGRATIONS
+              value: "1"
+            {{- end }}
+            {{- end }}
+            {{- if .Values.secrets.smtpPassword }}
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  key: SMTP_PASSWORD
             {{- end }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}

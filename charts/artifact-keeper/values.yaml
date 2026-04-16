@@ -102,6 +102,138 @@ backend:
     PLUGINS_DIR: "/data/plugins"
     ENVIRONMENT: "development"
     ADMIN_PASSWORD: "admin"
+
+    # -- Server
+    # GRPC_PORT: "9090"
+    # SKIP_MIGRATIONS: "false"
+    # CORS_ORIGINS: ""
+    # DEMO_MODE: "false"
+    # ALLOW_LOCAL_ADMIN_LOGIN: "false"
+
+    # -- Storage
+    # STORAGE_BACKEND: "filesystem"
+    # STORAGE_PATH_FORMAT: "native"
+    # S3_BUCKET: ""
+    # S3_REGION: "us-east-1"
+    # S3_ENDPOINT: ""
+    # S3_PREFIX: ""
+    # S3_REDIRECT_DOWNLOADS: "false"
+    # S3_PRESIGN_EXPIRY_SECS: "3600"
+    # S3_CA_CERT_PATH: ""
+    # S3_INSECURE_TLS: "false"
+    # GCS_BUCKET: ""
+    # GCS_PROJECT_ID: ""
+    # GCS_SERVICE_ACCOUNT_EMAIL: ""
+    # GCS_PRIVATE_KEY_PATH: ""
+    # GCS_REDIRECT_DOWNLOADS: "false"
+    # GCS_SIGNED_URL_EXPIRY: "3600"
+    # AZURE_STORAGE_ACCOUNT: ""
+    # AZURE_STORAGE_CONTAINER: ""
+    # AZURE_STORAGE_ACCESS_KEY: ""
+    # AZURE_REDIRECT_DOWNLOADS: "false"
+    # AZURE_SAS_EXPIRY: "3600"
+
+    # -- Presigned Downloads
+    # PRESIGNED_DOWNLOADS_ENABLED: "false"
+    # PRESIGNED_DOWNLOAD_EXPIRY_SECS: "300"
+
+    # -- CloudFront CDN (S3 storage backends)
+    # CLOUDFRONT_DISTRIBUTION_URL: ""
+    # CLOUDFRONT_KEY_PAIR_ID: ""
+    # CLOUDFRONT_PRIVATE_KEY_PATH: ""
+
+    # -- Database Connection Pool
+    # DATABASE_MAX_CONNECTIONS: "20"
+    # DATABASE_MIN_CONNECTIONS: "5"
+    # DATABASE_ACQUIRE_TIMEOUT_SECS: "30"
+    # DATABASE_IDLE_TIMEOUT_SECS: "600"
+    # DATABASE_MAX_LIFETIME_SECS: "1800"
+
+    # -- Authentication
+    # JWT_EXPIRATION_SECS: "86400"
+    # JWT_ACCESS_TOKEN_EXPIRY_MINUTES: "30"
+    # JWT_REFRESH_TOKEN_EXPIRY_DAYS: "7"
+    # SKIP_ADMIN_PROVISIONING: "false"
+    # SSO_ENCRYPTION_KEY: ""
+
+    # -- OIDC
+    # OIDC_ISSUER: ""
+    # OIDC_CLIENT_ID: ""
+    # OIDC_CLIENT_SECRET: ""
+
+    # -- LDAP
+    # LDAP_URL: ""
+    # LDAP_BASE_DN: ""
+    # LDAP_BIND_DN: ""
+    # LDAP_BIND_PASSWORD: ""
+    # LDAP_USER_FILTER: "(uid={username})"
+    # LDAP_USERNAME_ATTR: "uid"
+    # LDAP_EMAIL_ATTR: "mail"
+    # LDAP_DISPLAY_NAME_ATTR: "cn"
+    # LDAP_GROUPS_ATTR: "memberOf"
+    # LDAP_GROUP_ROLE_MAP: ""
+    # LDAP_ADMIN_GROUP_DN: ""
+    # LDAP_USE_STARTTLS: "false"
+    # LDAP_CA_CERT_PATH: ""
+    # LDAP_INSECURE_TLS: "false"
+
+    # -- Password & Account Security
+    # ACCOUNT_LOCKOUT_THRESHOLD: "5"
+    # ACCOUNT_LOCKOUT_DURATION_MINUTES: "30"
+    # PASSWORD_HISTORY_COUNT: "0"
+    # PASSWORD_EXPIRY_DAYS: "0"
+    # PASSWORD_MIN_LENGTH: "8"
+    # PASSWORD_MAX_LENGTH: "128"
+    # PASSWORD_REQUIRE_UPPERCASE: "false"
+    # PASSWORD_REQUIRE_LOWERCASE: "false"
+    # PASSWORD_REQUIRE_DIGIT: "false"
+    # PASSWORD_REQUIRE_SPECIAL: "false"
+    # PASSWORD_MIN_STRENGTH: "0"
+
+    # -- Rate Limiting
+    # RATE_LIMIT_AUTH_PER_MIN: "120"
+    # RATE_LIMIT_API_PER_MIN: "5000"
+    # RATE_LIMIT_WINDOW_SECS: "60"
+    # RATE_LIMIT_EXEMPT_USERNAMES: ""
+    # RATE_LIMIT_EXEMPT_SERVICE_ACCOUNTS: "false"
+
+    # -- Security Scanning
+    # OPENSCAP_PROFILE: "xccdf_org.ssgproject.content_profile_standard"
+    # GITHUB_TOKEN: ""
+    # QUARANTINE_ENABLED: "false"
+    # QUARANTINE_DURATION_MINUTES: "60"
+
+    # -- Network Security
+    # ALLOW_HTTP_INTEGRATIONS: "false"
+    # CUSTOM_CA_CERT_PATH: ""
+
+    # -- Peer Mesh
+    # PEER_INSTANCE_NAME: ""
+    # PEER_PUBLIC_ENDPOINT: ""
+    # PEER_API_KEY: ""
+    # SYNC_CHUNKED_THRESHOLD_BYTES: "104857600"
+    # SYNC_CHUNK_SIZE_BYTES: "52428800"
+
+    # -- OpenTelemetry
+    # OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    # OTEL_SERVICE_NAME: "artifact-keeper"
+
+    # -- Observability
+    # METRICS_PORT: ""
+
+    # -- Upload Limits
+    # MAX_UPLOAD_SIZE: "10737418240"
+
+    # -- Scheduled Tasks
+    # GC_SCHEDULE: "0 0 * * * *"
+    # LIFECYCLE_CHECK_INTERVAL_SECS: "60"
+
+    # -- SMTP Email Delivery (disabled when SMTP_HOST is unset)
+    # SMTP_HOST: ""
+    # SMTP_PORT: "587"
+    # SMTP_USERNAME: ""
+    # SMTP_FROM_ADDRESS: "noreply@artifact-keeper.local"
+    # SMTP_TLS_MODE: "starttls"
   resources:
     requests:
       cpu: 250m
@@ -394,6 +526,8 @@ secrets:
   jwtSecret: "dev-secret-change-in-production"
   s3AccessKey: "minioadmin"
   s3SecretKey: "minioadmin-secret"
+  # SMTP password (only used when backend.env.SMTP_HOST is set)
+  smtpPassword: ""
 
 # -- External Secrets Operator
 # When enabled, ExternalSecret CRDs replace the static Secret template.
@@ -415,6 +549,7 @@ externalSecrets:
     s3Keys: artifact-keeper/${ENVIRONMENT}/s3-keys
     opensearchAuth: artifact-keeper/${ENVIRONMENT}/opensearch-auth
     dtAdminPassword: artifact-keeper/${ENVIRONMENT}/dt-admin-password
+    smtpPassword: artifact-keeper/${ENVIRONMENT}/smtp-password
 
 # -- Network policies
 networkPolicy:

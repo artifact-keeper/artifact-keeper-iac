@@ -10,7 +10,7 @@ on:
 jobs:
   version-check:
     name: Check Version
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     permissions:
       contents: read
     outputs:
@@ -37,7 +37,7 @@ jobs:
     name: Setup GitHub Pages
     needs: version-check
     if: needs.version-check.outputs.changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     permissions:
       contents: write
     steps:
@@ -76,7 +76,7 @@ jobs:
     name: Release Chart
     needs: [version-check, setup-pages]
     if: needs.version-check.outputs.changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     permissions:
       contents: write
     steps:

@@ -15,7 +15,7 @@ on:
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     permissions:
       contents: read
     steps:
@@ -45,7 +45,7 @@ jobs:
 
   template-validation:
     name: "Template & Validate (${{ matrix.variant }})"
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     permissions:
       contents: read
     strategy:
@@ -98,7 +98,7 @@ jobs:
   version-check:
     name: Chart Version Check
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     permissions:
       contents: read
     steps:
@@ -127,7 +127,7 @@ jobs:
 
   install-test:
     name: Install Test (kind)
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     needs: [lint, template-validation]
     permissions:
       contents: read

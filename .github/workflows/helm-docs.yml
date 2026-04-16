@@ -10,7 +10,7 @@ on:
 jobs:
   verify:
     name: Verify helm-docs output
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     permissions:
       contents: read
     steps:

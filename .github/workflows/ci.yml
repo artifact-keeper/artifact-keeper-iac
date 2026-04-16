@@ -12,7 +12,7 @@ jobs:
 
   terraform-validate:
     name: Terraform Validate (${{ matrix.env }})
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     permissions:
       contents: read
     strategy:
@@ -35,7 +35,7 @@ jobs:
 
   terraform-fmt:
     name: Terraform Format Check
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     permissions:
       contents: read
     steps:
@@ -49,7 +49,7 @@ jobs:
 
   sonarcloud:
     name: SonarCloud Scan
-    runs-on: ubuntu-latest
+    runs-on: ak-ci-runners
     # SonarCloud Automatic Analysis may be enabled at the org level.
     # Until it is disabled in the SonarCloud UI (Administration > Analysis Method),
     # CI-based analysis will conflict and fail. Allow this job to fail gracefully

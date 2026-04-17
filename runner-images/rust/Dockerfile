@@ -2,10 +2,10 @@ FROM ghcr.io/actions/actions-runner:latest
 
 USER root
 
-# System dependencies
+# System dependencies (includes mingw-w64 for Windows cross-compilation)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential pkg-config libssl-dev curl git jq zip unzip \
-    ca-certificates \
+    ca-certificates mingw-w64 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install protoc from GitHub releases (includes well-known types like google/protobuf/timestamp.proto)
@@ -21,6 +21,7 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --default-toolchain stable --component clippy,rustfmt,llvm-tools --profile minimal && \
+    rustup target add x86_64-pc-windows-gnu && \
     rustup --version && rustc --version && cargo --version
 
 # Install sccache

@@ -34,6 +34,9 @@ RUN curl -LsSf https://github.com/taiki-e/cargo-llvm-cov/releases/latest/downloa
 RUN curl -LsSf https://github.com/rustsec/rustsec/releases/latest/download/cargo-audit-x86_64-unknown-linux-gnu-v0.21.2.tgz | \
     tar xzf - -C /usr/local/cargo/bin 2>/dev/null || cargo install cargo-audit --locked
 
+# Install sqlx-cli for database migrations (coverage job needs this)
+RUN cargo install sqlx-cli --no-default-features --features native-tls,postgres --locked && sqlx --version
+
 # Install Docker Compose plugin
 RUN mkdir -p /usr/local/lib/docker/cli-plugins && \
     curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \

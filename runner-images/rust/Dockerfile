@@ -5,8 +5,15 @@ USER root
 # System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential pkg-config libssl-dev curl git jq zip unzip \
-    protobuf-compiler ca-certificates \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Install protoc from GitHub releases (includes well-known types like google/protobuf/timestamp.proto)
+ENV PROTOC_VERSION=28.3
+RUN curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" && \
+    unzip "protoc-${PROTOC_VERSION}-linux-x86_64.zip" -d /usr/local && \
+    rm "protoc-${PROTOC_VERSION}-linux-x86_64.zip" && \
+    protoc --version
 
 # Install Rust stable with clippy and rustfmt
 ENV RUSTUP_HOME=/usr/local/rustup \

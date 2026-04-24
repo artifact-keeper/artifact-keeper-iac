@@ -62,13 +62,13 @@ spec:
     - ports:
         - port: 5432
           protocol: TCP
-    # Meilisearch
+    # OpenSearch
     - to:
         - podSelector:
             matchLabels:
-              {{- include "artifact-keeper.meilisearch.selectorLabels" . | nindent 14 }}
+              {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 14 }}
       ports:
-        - port: 7700
+        - port: 9200
           protocol: TCP
     # Trivy
     - to:
@@ -138,17 +138,18 @@ spec:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
 ---
-# Meilisearch: accept traffic from backend only
+# OpenSearch: accept traffic from backend on 9200 and from peer OpenSearch
+# pods on 9300 (transport for multi-node clustering).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "artifact-keeper.fullname" . }}-meilisearch
+  name: {{ include "artifact-keeper.fullname" . }}-opensearch
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "artifact-keeper.meilisearch.selectorLabels" . | nindent 6 }}
+      {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:
@@ -157,7 +158,14 @@ spec:
             matchLabels:
               {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
       ports:
-        - port: 7700
+        - port: 9200
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 9300
           protocol: TCP
 ---
 # Trivy: accept traffic from backend only

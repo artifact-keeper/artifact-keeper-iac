@@ -8,16 +8,18 @@
 #
 # HOST REQUIREMENTS
 # -----------------
-# - vm.max_map_count >= 262144 (required by Meilisearch/LMDB)
+# - vm.max_map_count >= 262144 (recommended by OpenSearch/Lucene)
 #     sysctl -w vm.max_map_count=262144
-#     echo "vm.max_map_count = 262144" >> /etc/sysctl.d/99-meilisearch.conf
+#     echo "vm.max_map_count = 262144" >> /etc/sysctl.d/99-opensearch.conf
 #
 # DEPLOYMENT STRATEGIES
 # ---------------------
-# Services that use PersistentVolumeClaims (Meilisearch, Trivy,
-# DependencyTrack) use the Recreate strategy in their templates.
-# This prevents two pods from competing for the same volume lock
-# during rolling updates. Do not change these to RollingUpdate.
+# Single-replica OpenSearch uses a Deployment with Recreate strategy to
+# prevent two pods from competing for the same data volume. When
+# opensearch.replicaCount > 1 the chart switches to a StatefulSet with
+# per-pod PVCs (via volumeClaimTemplates), which supports multi-node
+# clustering. Trivy and DependencyTrack keep the Recreate strategy for
+# the same single-writer PVC reason.
 #
 # IMAGE TAGS
 # ----------
@@ -30,8 +32,9 @@
 # ---------------
 # These defaults target a single-node dev cluster. For production sizing,
 # see values-production.yaml. Key considerations:
-# - Meilisearch spawns one HTTP worker per CPU core (actix). On a 28-core
-#   node, that means 28 workers. The memory limit must be >= 8Gi for this.
+# - OpenSearch JVM heap is fixed via OPENSEARCH_JAVA_OPTS (-Xms/-Xmx).
+#   The container memory limit must be roughly 2x the heap to leave room
+#   for off-heap/Lucene page cache.
 # - DependencyTrack needs 4Gi+ to load its vulnerability database.
 # - Backend memory scales with concurrent uploads and scan activity.
 #
@@ -243,42 +246,67 @@ externalDatabase:
   existingSecret: ""
   existingSecretKey: "DATABASE_URL"
 
-# -- Meilisearch (full-text search engine)
-# Powers full-text artifact search. Uses LMDB for storage (requires
-# vm.max_map_count >= 262144 on the host). The template hardcodes
-# MEILI_MAX_INDEXING_THREADS=4 to limit indexing parallelism.
+# -- OpenSearch (full-text search engine)
+# Powers full-text artifact search. The backend auto-reindexes from
+# Postgres on first boot, so there is no data migration required when
+# enabling OpenSearch on a fresh install.
 #
-# Memory sizing: Meilisearch spawns one actix HTTP worker per CPU core.
-# On a 28-core host, 28 workers start up simultaneously. With the default
-# 1Gi limit this causes immediate OOMKill. Set the limit to at least 4Gi,
-# or higher if the search index is large.
+# Deployment mode:
+# - replicaCount: 1 (default) renders a single-node Deployment with
+#   discovery.type=single-node, suitable for dev and small installs.
+# - replicaCount: >= 2 renders a StatefulSet with per-pod PVCs and sets
+#   cluster.initial_cluster_manager_nodes for multi-node bootstrapping.
+#   Use this for staging/production.
 #
-# The deployment uses Recreate strategy because the PVC-backed LMDB
-# database cannot be opened by two pods at once. Do not change this to
-# RollingUpdate or new pods will crash with "Resource temporarily
-# unavailable (os error 11)".
-meilisearch:
+# Security:
+# - disableSecurityPlugin: true is the simplest option and is the default
+#   for the example template. The backend talks plain HTTP on port 9200.
+# - disableSecurityPlugin: false enables the OpenSearch Security plugin.
+#   You must then provide auth.username/auth.password and configure real
+#   TLS certificates. The default demo config is always disabled
+#   (DISABLE_INSTALL_DEMO_CONFIG=true) so you do not ship demo certs
+#   into production by accident.
+opensearch:
   enabled: true
+  replicaCount: 1
+  clusterName: artifact-keeper
   image:
-    repository: getmeili/meilisearch
-    # -- Use a major.minor tag (e.g. v1.12) for automatic patch updates,
-    # or pin to a specific patch (e.g. v1.12.8) for stability.
-    tag: v1.12
-  masterKey: "artifact-keeper-dev-key"
-  env: "development"
+    repository: opensearchproject/opensearch
+    # -- Pin to a specific patch for stability. 2.19.1 matches the
+    # version the backend is tested against.
+    tag: 2.19.1
+  # -- JVM heap sizing. Keep Xms == Xmx. The container memory limit
+  # should be roughly 2x the heap to leave room for off-heap and page cache.
+  javaOpts: "-Xms512m -Xmx512m"
+  # -- When true, the Security plugin is disabled and the backend talks
+  # plain HTTP. Set to false for staging/production (see README for
+  # cert-manager setup).
+  disableSecurityPlugin: true
+  # -- Backend-side TLS verification toggle. Leave true for self-signed
+  # certs in development; set to false once real certs are in place.
+  allowInvalidCerts: true
+  # -- Admin credentials used when disableSecurityPlugin is false.
+  # Ignored otherwise. Override via --set or externalSecrets in production.
+  auth:
+    username: "admin"
+    # -- OpenSearch 2.12+ requires a strong initial admin password.
+    password: "ArtifactKeeper2026!Strong"
   persistence:
+    # -- When false and replicaCount == 1, data lives in an emptyDir
+    # sized according to `size`. Set to true (and configure storageClass)
+    # for any install that must survive pod restarts.
+    enabled: true
     size: 5Gi
     storageClass: ""
   resources:
     requests:
       cpu: 250m
-      memory: 512Mi
+      memory: 1Gi
       ephemeral-storage: 128Mi
     limits:
       cpu: "2"
-      # -- Must be >= 4Gi on multi-core nodes. 8Gi recommended for nodes
-      # with 16+ cores. See Memory sizing note above.
-      memory: 8Gi
+      # -- Must be roughly 2x the JVM heap in javaOpts.
+      memory: 2Gi
       ephemeral-storage: 512Mi
   # -- Per-component scheduling (overrides global)
   tolerations: []
@@ -288,9 +316,9 @@ meilisearch:
 
 # -- Trivy vulnerability scanner
 # Runs as a persistent server that the backend calls for image/SBOM scans.
-# Uses a PVC for its vulnerability database cache. Like Meilisearch, the
-# deployment uses Recreate strategy because the cache directory uses a file
-# lock that prevents concurrent access from two pods.
+# Uses a PVC for its vulnerability database cache. The deployment uses
+# Recreate strategy because the cache directory uses a file lock that
+# prevents concurrent access from two pods.
 trivy:
   enabled: true
   image:
@@ -385,7 +413,7 @@ externalSecrets:
     jwtSecret: artifact-keeper/${ENVIRONMENT}/jwt-secret
     dbCredentials: artifact-keeper/${ENVIRONMENT}/db-credentials
     s3Keys: artifact-keeper/${ENVIRONMENT}/s3-keys
-    meilisearchKey: artifact-keeper/${ENVIRONMENT}/meilisearch-key
+    opensearchAuth: artifact-keeper/${ENVIRONMENT}/opensearch-auth
     dtAdminPassword: artifact-keeper/${ENVIRONMENT}/dt-admin-password
 
 # -- Network policies

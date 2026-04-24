@@ -23,13 +23,13 @@ All files in this chart are provided as example configurations. Review and modif
 - Kubernetes 1.26+
 - Helm 3.12+
 - PV provisioner support in the underlying infrastructure
-- `vm.max_map_count >= 262144` on nodes running Meilisearch (required by LMDB)
+- `vm.max_map_count >= 262144` on nodes running OpenSearch (recommended by Lucene)
 
 To set `vm.max_map_count` on your nodes:
 
 ```bash
 sysctl -w vm.max_map_count=262144
-echo "vm.max_map_count = 262144" >> /etc/sysctl.d/99-meilisearch.conf
+echo "vm.max_map_count = 262144" >> /etc/sysctl.d/99-opensearch.conf
 ```
 
 ## Installing the Chart
@@ -126,7 +126,7 @@ The chart deploys the following components:
 | **Web** | Next.js 15 frontend | Enabled |
 | **Edge** | Edge replication service for distributed deployments | Disabled |
 | **PostgreSQL** | In-cluster database (disable for external/managed DB) | Enabled |
-| **Meilisearch** | Full-text search engine for artifact discovery | Enabled |
+| **OpenSearch** | Full-text search engine for artifact discovery | Enabled |
 | **Trivy** | Vulnerability scanner for container images and SBOMs | Enabled |
 | **DependencyTrack** | SBOM analysis platform for license and vulnerability correlation | Enabled |
 
@@ -139,14 +139,14 @@ Ingress
   +-- /*     --> Web (port 3000)
 
 Backend --> PostgreSQL (port 5432)
-Backend --> Meilisearch (port 7700)
+Backend --> OpenSearch (port 9200)
 Backend --> Trivy (port 8090)
 Backend --> DependencyTrack (port 8080)
 ```
 
 ## Storage
 
-Services that use PersistentVolumeClaims (Meilisearch, Trivy, DependencyTrack) run with the Recreate deployment strategy. This prevents two pods from competing for the same volume lock during rolling updates. Do not change these to RollingUpdate.
+Services that use PersistentVolumeClaims run with the Recreate deployment strategy (or a StatefulSet with per-pod PVCs, in the case of multi-node OpenSearch). This prevents two pods from competing for the same volume lock during rolling updates.
 
 The backend uses two PVCs: one for artifact storage and one for scan workspace (temp files during security scans). Both can be sized independently.
 
@@ -155,7 +155,7 @@ The backend uses two PVCs: one for artifact storage and one for scan workspace (
 | Backend storage | 10Gi | Artifact file storage |
 | Backend scan workspace | 2Gi | Temporary scan files |
 | PostgreSQL | 20Gi | Database files |
-| Meilisearch | 5Gi | Search index (LMDB) |
+| OpenSearch | 5Gi | Search index (Lucene) |
 | Trivy | 5Gi | Vulnerability database cache |
 | DependencyTrack | 5Gi | Internal vulnerability database |
 
@@ -183,7 +183,7 @@ When `cosign.enabled` is set to `true`, an init container verifies the backend i
 
 ### Network Policies
 
-When `networkPolicy.enabled` is set to `true`, the chart creates NetworkPolicy resources that restrict traffic between components. Only the required communication paths are allowed (for example, backend to PostgreSQL, backend to Meilisearch).
+When `networkPolicy.enabled` is set to `true`, the chart creates NetworkPolicy resources that restrict traffic between components. Only the required communication paths are allowed (for example, backend to PostgreSQL, backend to OpenSearch on port 9200, and OpenSearch-to-OpenSearch transport on port 9300).
 
 ### Secrets Management
 
@@ -210,7 +210,8 @@ For production deployments:
 - Enable `backend.podDisruptionBudget` to ensure at least N replicas remain available during voluntary disruptions.
 - Use `backend.affinity` with pod anti-affinity to spread replicas across nodes.
 - Disable in-cluster PostgreSQL (`postgres.enabled: false`) and point `externalDatabase` at a managed, multi-AZ database like Amazon RDS.
-- Meilisearch and DependencyTrack run as single replicas due to PVC lock constraints. Plan maintenance windows for upgrades.
+- Set `opensearch.replicaCount: 3` to switch OpenSearch from single-node Deployment mode to a StatefulSet with cluster bootstrapping. The chart sets `cluster.initial_cluster_manager_nodes` automatically.
+- DependencyTrack runs as a single replica due to PVC lock constraints. Plan maintenance windows for upgrades.
 
 ## Upgrading
 
@@ -226,13 +227,22 @@ Images are published to `ghcr.io/artifact-keeper/artifact-keeper-{backend,web}` 
 
 ## Troubleshooting
 
-### Meilisearch OOMKill
+### OpenSearch OOMKill
 
-Meilisearch spawns one HTTP worker per CPU core. On a 28-core node, 28 workers start simultaneously, easily exceeding a 1Gi memory limit. Set `meilisearch.resources.limits.memory` to at least 4Gi. The chart defaults to 8Gi.
+OpenSearch JVM heap is set via `opensearch.javaOpts` (`-Xms`/`-Xmx`). The container memory limit must be roughly 2x the heap size to leave room for off-heap, Lucene page cache, and native threads. If the pod is OOMKilled, raise both values together.
 
-### Meilisearch "Resource temporarily unavailable"
+### OpenSearch "max_map_count" warning
 
-This error (os error 11) means two pods are trying to open the same LMDB database. The Meilisearch deployment uses the Recreate strategy to prevent this. Do not change it to RollingUpdate.
+OpenSearch recommends `vm.max_map_count >= 262144`. This is a host-level sysctl and cannot be set from inside the pod. Apply it on every node:
+
+```bash
+sysctl -w vm.max_map_count=262144
+echo "vm.max_map_count = 262144" >> /etc/sysctl.d/99-opensearch.conf
+```
+
+### OpenSearch cluster will not form (multi-node)
+
+When `replicaCount >= 2`, the chart renders a StatefulSet with `cluster.initial_cluster_manager_nodes` set to the pod names (`ak-opensearch-0`, `ak-opensearch-1`, ...). If pods cannot reach each other, check that the headless service `<release>-opensearch-headless` exists and the NetworkPolicy (if enabled) allows traffic between OpenSearch pods on port 9300.
 
 ### DependencyTrack Slow Startup
 

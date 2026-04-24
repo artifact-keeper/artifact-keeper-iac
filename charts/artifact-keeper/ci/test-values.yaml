@@ -63,7 +63,7 @@ postgres:
   initDb:
     enabled: true
 
-meilisearch:
+opensearch:
   enabled: false
 
 trivy:

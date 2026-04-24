@@ -1,0 +1,278 @@
+{{/*
+=============================================================================
+EXAMPLE CONFIGURATION - Getting Started Template
+=============================================================================
+This file is provided as a starting point for deployments. It should be
+reviewed and modified to match your specific infrastructure requirements,
+security policies, and operational needs before use in production.
+=============================================================================
+*/}}
+{{- if .Values.opensearch.enabled }}
+{{- $fullName := include "artifact-keeper.fullname" . -}}
+{{- $replicaCount := int .Values.opensearch.replicaCount -}}
+{{- $singleNode := eq $replicaCount 1 -}}
+apiVersion: apps/v1
+kind: {{ if $singleNode }}Deployment{{ else }}StatefulSet{{ end }}
+metadata:
+  name: {{ $fullName }}-opensearch
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: opensearch
+spec:
+  {{- if $singleNode }}
+  replicas: 1
+  strategy:
+    type: Recreate
+  {{- else }}
+  serviceName: {{ $fullName }}-opensearch-headless
+  replicas: {{ $replicaCount }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with (.Values.opensearch.tolerations | default .Values.global.tolerations) }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.opensearch.affinity | default .Values.global.affinity) }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.opensearch.nodeSelector | default .Values.global.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.opensearch.topologySpreadConstraints | default .Values.global.topologySpreadConstraints) }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: fix-ownership
+          image: busybox:1.37
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - FOWNER
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+              ephemeral-storage: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+              ephemeral-storage: 64Mi
+          command: ["sh", "-c", "chown -R 1000:1000 /usr/share/opensearch/data"]
+          volumeMounts:
+            - name: opensearch-data
+              mountPath: /usr/share/opensearch/data
+        - name: sysctl-check
+          image: busybox:1.37
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+              ephemeral-storage: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+              ephemeral-storage: 64Mi
+          command: ["sh", "-c"]
+          args:
+            - |
+              CURRENT=$(cat /proc/sys/vm/max_map_count 2>/dev/null || echo 0)
+              if [ "$CURRENT" -lt 262144 ]; then
+                echo "WARNING: vm.max_map_count is $CURRENT, OpenSearch recommends >= 262144."
+                echo "Set this on the host: sysctl -w vm.max_map_count=262144"
+              else
+                echo "vm.max_map_count = $CURRENT (ok)"
+              fi
+      containers:
+        - name: opensearch
+          image: "{{ .Values.opensearch.image.repository }}:{{ .Values.opensearch.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 9200
+              protocol: TCP
+            - name: transport
+              containerPort: 9300
+              protocol: TCP
+          env:
+            - name: cluster.name
+              value: {{ .Values.opensearch.clusterName | quote }}
+            - name: node.name
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- if $singleNode }}
+            - name: discovery.type
+              value: "single-node"
+            {{- else }}
+            - name: discovery.seed_hosts
+              value: "{{ $fullName }}-opensearch-headless"
+            - name: cluster.initial_cluster_manager_nodes
+              value: {{ include "artifact-keeper.opensearch.initialMasterNodes" . | quote }}
+            {{- end }}
+            - name: bootstrap.memory_lock
+              value: "false"
+            - name: OPENSEARCH_JAVA_OPTS
+              value: {{ .Values.opensearch.javaOpts | quote }}
+            - name: DISABLE_INSTALL_DEMO_CONFIG
+              value: "true"
+            - name: DISABLE_SECURITY_PLUGIN
+              value: {{ .Values.opensearch.disableSecurityPlugin | quote }}
+            {{- if not .Values.opensearch.disableSecurityPlugin }}
+            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  key: OPENSEARCH_PASSWORD
+            {{- end }}
+          resources:
+            {{- toYaml .Values.opensearch.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health?local=true
+              port: 9200
+              {{- if not .Values.opensearch.disableSecurityPlugin }}
+              scheme: HTTPS
+              {{- end }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9200
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: opensearch-data
+              mountPath: /usr/share/opensearch/data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        {{- if and $singleNode (not .Values.opensearch.persistence.enabled) }}
+        - name: opensearch-data
+          emptyDir:
+            sizeLimit: {{ .Values.opensearch.persistence.size }}
+        {{- else if $singleNode }}
+        - name: opensearch-data
+          persistentVolumeClaim:
+            claimName: {{ $fullName }}-opensearch
+        {{- end }}
+  {{- if not $singleNode }}
+  volumeClaimTemplates:
+    - metadata:
+        name: opensearch-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.opensearch.persistence.size }}
+        {{- if .Values.opensearch.persistence.storageClass }}
+        storageClassName: {{ .Values.opensearch.persistence.storageClass | quote }}
+        {{- end }}
+  {{- end }}
+{{- if and $singleNode .Values.opensearch.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullName }}-opensearch
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: opensearch
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.opensearch.persistence.size }}
+  {{- if .Values.opensearch.persistence.storageClass }}
+  storageClassName: {{ .Values.opensearch.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullName }}-opensearch
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: opensearch
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 9200
+      targetPort: http
+      protocol: TCP
+    - name: transport
+      port: 9300
+      targetPort: transport
+      protocol: TCP
+  selector:
+    {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 4 }}
+{{- if not $singleNode }}
+---
+# Headless service for StatefulSet peer discovery
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullName }}-opensearch-headless
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: opensearch
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: transport
+      port: 9300
+      targetPort: transport
+      protocol: TCP
+  selector:
+    {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 4 }}
+{{- end }}
+{{- end }}

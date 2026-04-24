@@ -77,23 +77,26 @@ postgres:
   initDb:
     enabled: true
 
-meilisearch:
+opensearch:
   enabled: true
+  replicaCount: 1
   image:
-    repository: getmeili/meilisearch
-    tag: v1.12
-  masterKey: "artifact-keeper-mesh-key"
-  env: "development"
+    repository: opensearchproject/opensearch
+    tag: 2.19.1
+  disableSecurityPlugin: true
+  allowInvalidCerts: true
+  javaOpts: "-Xms512m -Xmx512m"
   persistence:
-    size: 1Gi
+    enabled: true
+    size: 2Gi
     storageClass: ""
   resources:
     requests:
       cpu: 250m
-      memory: 256Mi
+      memory: 1Gi
     limits:
-      cpu: "4"
-      memory: 2Gi
+      cpu: "2"
+      memory: 1500Mi
 
 trivy:
   enabled: false

@@ -171,6 +171,10 @@ web:
   topologySpreadConstraints: []
 
 # -- Edge replication service
+# NOTE: The ghcr.io/artifact-keeper/artifact-keeper-edge image is not yet
+# published. Setting edge.enabled: true will fail because the image cannot be
+# pulled. Airgap operators should exclude this component from pre-pull lists
+# until the edge image ships. Tracking: issue #56.
 edge:
   enabled: false
   replicaCount: 1

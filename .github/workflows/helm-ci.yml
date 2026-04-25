@@ -132,7 +132,10 @@ jobs:
 
   install-test:
     name: Install Test (kind)
-    runs-on: ak-ci-runners
+    # Runs on GitHub-hosted runners because helm/kind-action needs privileged
+    # Docker-in-Docker to bootstrap a kubeadm control-plane, which ARC runners
+    # don't provide. The rest of helm-ci stays on ak-ci-runners.
+    runs-on: ubuntu-latest
     needs: [lint, template-validation]
     permissions:
       contents: read

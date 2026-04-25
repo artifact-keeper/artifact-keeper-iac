@@ -10,9 +10,29 @@ on:
 jobs:
   # Helm CI moved to .github/workflows/helm-ci.yml
 
+  detect-changes:
+    name: Detect Changes
+    runs-on: ak-ci-runners
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      terraform: ${{ steps.filter.outputs.terraform }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
+        id: filter
+        with:
+          filters: |
+            terraform:
+              - 'terraform/**'
+              - '.github/workflows/ci.yml'
+
   terraform-validate:
     name: Terraform Validate (${{ matrix.env }})
     runs-on: ak-ci-runners
+    needs: detect-changes
+    if: needs.detect-changes.outputs.terraform == 'true'
     permissions:
       contents: read
     strategy:
@@ -41,6 +61,8 @@ jobs:
   terraform-fmt:
     name: Terraform Format Check
     runs-on: ak-ci-runners
+    needs: detect-changes
+    if: needs.detect-changes.outputs.terraform == 'true'
     permissions:
       contents: read
     steps:

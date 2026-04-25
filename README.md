@@ -303,3 +303,7 @@ The deployment includes two open-source security scanning tools:
 | [artifact-keeper-web](https://github.com/artifact-keeper/artifact-keeper-web) | Web frontend (Next.js) |
 | [artifact-keeper-api](https://github.com/artifact-keeper/artifact-keeper-api) | OpenAPI spec + generated SDKs |
 | [artifact-keeper-site](https://github.com/artifact-keeper/artifact-keeper-site) | Documentation site |
+
+## License
+
+This repository is licensed under the [MIT License](LICENSE), matching the main [artifact-keeper](https://github.com/artifact-keeper/artifact-keeper) project.

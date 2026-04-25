@@ -20,8 +20,15 @@ spec:
     matchLabels:
       {{- include "artifact-keeper.backend.selectorLabels" . | nindent 6 }}
   endpoints:
-    - port: http
+    {{- if .Values.backend.metricsListener.enabled }}
+    - port: metrics
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}
       scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+    {{- else }}
+    - port: http
+      path: /api/v1/admin/metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+    {{- end }}
 {{- end }}

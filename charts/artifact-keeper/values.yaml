@@ -93,6 +93,14 @@ backend:
     type: ClusterIP
     httpPort: 8080
     grpcPort: 9090
+  # -- Unauthenticated Prometheus metrics listener.
+  # When enabled, the backend starts a second TCP listener on `metricsPort`
+  # serving only `GET /metrics` with no authentication. Intended for
+  # Prometheus scrapers that cannot present credentials. Disabled by default.
+  #
+  metricsListener:
+    enabled: false
+    port: 9091
   env:
     RUST_LOG: "info,artifact_keeper=debug"
     HOST: "0.0.0.0"

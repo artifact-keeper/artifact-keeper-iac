@@ -325,6 +325,11 @@ dependencyTrack:
     repository: dependencytrack/apiserver
     tag: "4.11.4"
   adminPassword: "ArtifactKeeper2026!"
+  existingSecret: ""
+  existingSecretDbPasswordKey: "POSTGRES_PASSWORD"
+  existingSecretHostKey: "POSTGRES_HOST"
+  existingSecretUsernameKey: "POSTGRES_USERNAME"
+  existingSecretAdminPasswordKey: "DEPENDENCY_TRACK_ADMIN_PASSWORD"
   persistence:
     size: 5Gi
     storageClass: ""

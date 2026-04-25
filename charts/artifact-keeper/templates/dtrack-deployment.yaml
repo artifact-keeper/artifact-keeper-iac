@@ -93,25 +93,37 @@ spec:
           env:
             - name: ALPINE_DATABASE_MODE
               value: "external"
-            - name: ALPINE_DATABASE_URL
-              {{- if .Values.postgres.enabled }}
-              value: "jdbc:postgresql://{{ include "artifact-keeper.fullname" . }}-postgres:5432/dependency_track"
-              {{- else }}
-              value: "jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port }}/dependency_track"
-              {{- end }}
             - name: ALPINE_DATABASE_DRIVER
               value: "org.postgresql.Driver"
+            {{- if .Values.postgres.enabled }}
+            - name: ALPINE_DATABASE_URL
+              value: "jdbc:postgresql://{{ include "artifact-keeper.fullname" . }}-postgres:5432/dependency_track"
             - name: ALPINE_DATABASE_USERNAME
-              {{- if .Values.postgres.enabled }}
               value: {{ .Values.postgres.auth.username | quote }}
-              {{- else }}
+            {{- else if .Values.dependencyTrack.existingSecret }}
+            - name: DT_PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dependencyTrack.existingSecret }}
+                  key: {{ .Values.dependencyTrack.existingSecretHostKey | default "PG_HOST" }}
+            - name: ALPINE_DATABASE_URL
+              value: "jdbc:postgresql://$(DT_PG_HOST):{{ .Values.externalDatabase.port | default 5432 }}/dependency_track"
+            - name: ALPINE_DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dependencyTrack.existingSecret }}
+                  key: {{ .Values.dependencyTrack.existingSecretUsernameKey | default "PG_USER" }}
+            {{- else }}
+            - name: ALPINE_DATABASE_URL
+              value: "jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port }}/dependency_track"
+            - name: ALPINE_DATABASE_USERNAME
               value: {{ .Values.externalDatabase.username | quote }}
-              {{- end }}
+            {{- end }}
             - name: ALPINE_DATABASE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
-                  key: POSTGRES_PASSWORD
+                  name: {{ .Values.dependencyTrack.existingSecret | default (printf "%s-secrets" (include "artifact-keeper.fullname" .)) }}
+                  key: {{ .Values.dependencyTrack.existingSecretDbPasswordKey | default "POSTGRES_PASSWORD" }}
             - name: ALPINE_DATA_DIRECTORY
               value: "/data"
             - name: ALPINE_ENFORCE_AUTHENTICATION
@@ -303,8 +315,8 @@ spec:
             - name: DEPENDENCY_TRACK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
-                  key: DEPENDENCY_TRACK_ADMIN_PASSWORD
+                  name: {{ .Values.dependencyTrack.existingSecret | default (printf "%s-secrets" (include "artifact-keeper.fullname" .)) }}
+                  key: {{ .Values.dependencyTrack.existingSecretAdminPasswordKey | default "DEPENDENCY_TRACK_ADMIN_PASSWORD" }}
           volumeMounts:
             - name: init-script
               mountPath: /scripts

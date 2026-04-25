@@ -183,14 +183,23 @@ jobs:
       - name: Create k3d cluster
         run: |
           # Single-server cluster, no LoadBalancer (not needed for chart-testing
-          # install checks). --wait blocks until the apiserver is reachable.
+          # install checks).
+          #
+          # --snapshotter=native: the beefy runner's DinD sidecar uses overlayfs
+          # as its storage driver. k3s runs its own embedded containerd inside
+          # the k3d node container, and containerd defaults to overlayfs too.
+          # Nested overlayfs is unsupported by the kernel, so containerd fails
+          # with "failed to mount overlay: invalid argument" and the k3s node
+          # never registers. The `native` snapshotter uses plain file copies
+          # instead; slower but works in nested environments.
           k3d cluster create chart-testing \
             --agents 0 \
             --no-lb \
             --k3s-arg "--disable=traefik@server:0" \
             --k3s-arg "--disable=metrics-server@server:0" \
+            --k3s-arg "--snapshotter=native@server:0" \
             --wait \
-            --timeout 120s
+            --timeout 300s
           kubectl cluster-info
           kubectl get nodes
 

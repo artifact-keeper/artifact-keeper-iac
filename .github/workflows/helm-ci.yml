@@ -132,17 +132,14 @@ jobs:
 
   install-test:
     name: Install Test (k3d)
-    # DISABLED: The k3d cluster comes up fine on ARC runners, but installing
-    # the full artifact-keeper chart (backend, web, postgres, trivy, opensearch,
-    # dtrack) runs into `context deadline exceeded` because the pods do not
-    # fit + initialise within chart-testing's default timeout on a 4 CPU / 8 Gi
-    # runner pod. Chart correctness is still validated by `helm lint` and the
-    # multi-overlay `helm template` jobs above, so this install smoke test is
-    # redundant for release validation. Re-enable once the runner pods have
-    # more resources or chart-testing can install only a subset of components.
-    # Tracking: https://github.com/artifact-keeper/artifact-keeper-iac/issues
-    if: false
-    runs-on: ak-ci-runners
+    # Runs on the ak-beefy-runners ARC scale set (8 CPU / 16 Gi limit) so the
+    # k3d cluster + full artifact-keeper chart (backend, web, postgres, trivy,
+    # opensearch, dtrack) can stand up inside chart-testing's timeout window.
+    # The regular ak-ci-runners pool (4 CPU / 8 Gi) is too tight.
+    #
+    # Requires argocd/arc-beefy-runners-values.yaml to be deployed to the
+    # cluster.
+    runs-on: ak-beefy-runners
     needs: [lint, template-validation]
     permissions:
       contents: read

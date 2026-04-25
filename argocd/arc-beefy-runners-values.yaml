@@ -1,0 +1,82 @@
+# ARC v2 Runner Scale Set for heavy jobs (with Docker-in-Docker)
+#
+# Purpose
+# -------
+# Some CI jobs (helm install smoke tests against k3d, full docker-compose
+# stacks, Docker image builds with large dep trees) do not fit inside the
+# 4 CPU / 8 Gi envelope of ak-ci-runners or ak-e2e-runners. This scale set
+# gives those jobs a larger pod to run in without slowing down the rest of
+# CI or saturating the regular pools.
+#
+# Opt jobs in by setting `runs-on: ak-beefy-runners` in the workflow.
+#
+# Deployed via:
+#   helm upgrade --install ak-beefy-runners \
+#     --namespace arc-runners \
+#     -f argocd/arc-beefy-runners-values.yaml \
+#     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+#
+# Requires secret "github-token-secret" in arc-runners namespace with key "github_token"
+#
+# Capacity check
+# --------------
+# Per-pod: 4 CPU request / 8 CPU limit, 8 Gi request / 16 Gi limit.
+# maxRunners: 5 -> peak 20 CPU / 40 Gi requested across this pool, well
+# within Rocky's 88 CPU / 164 Gi allocatable even with ak-ci-runners and
+# ak-e2e-runners fully saturated.
+
+githubConfigUrl: "https://github.com/artifact-keeper"
+githubConfigSecret: "github-token-secret"
+runnerScaleSetName: "ak-beefy-runners"
+
+minRunners: 0
+maxRunners: 5
+
+template:
+  spec:
+    initContainers:
+      - name: init-dind-externals
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["cp", "-r", "-v", "/home/runner/externals/.", "/home/runner/tmpDir/"]
+        volumeMounts:
+          - name: dind-externals
+            mountPath: /home/runner/tmpDir
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        env:
+          - name: DOCKER_HOST
+            value: unix:///var/run/docker.sock
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: dind-externals
+            mountPath: /home/runner/externals
+          - name: dind-sock
+            mountPath: /var/run
+        resources:
+          requests:
+            cpu: "4"
+            memory: "8Gi"
+          limits:
+            cpu: "8"
+            memory: "16Gi"
+      - name: dind
+        image: docker:dind
+        securityContext:
+          privileged: true
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: dind-sock
+            mountPath: /var/run
+          - name: dind-externals
+            mountPath: /home/runner/externals
+    volumes:
+      - name: work
+        emptyDir: {}
+      - name: dind-sock
+        emptyDir: {}
+      - name: dind-externals
+        emptyDir: {}

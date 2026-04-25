@@ -1,4 +1,4 @@
-# ARC v2 Runner Scale Set for heavy jobs (with Docker-in-Docker)
+# ARC v2 Runner Scale Set for heavy jobs (with privileged DinD sidecar)
 #
 # Purpose
 # -------
@@ -13,10 +13,24 @@
 # Deployed via:
 #   helm upgrade --install ak-beefy-runners \
 #     --namespace arc-runners \
+#     --version 0.13.1 \
 #     -f argocd/arc-beefy-runners-values.yaml \
 #     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 #
+# NOTE: pin --version 0.13.1 to match the ARC controller version already
+# running on the cluster (arc-systems namespace). Chart 0.14.x renders an
+# incompatible AutoscalingRunnerSet CR that the 0.13.x controller silently
+# drops.
+#
 # Requires secret "github-token-secret" in arc-runners namespace with key "github_token"
+#
+# Shape mirrors ak-ci-runners (known working) with doubled resources:
+#   - dind sidecar placed in initContainers with restartPolicy: Always
+#     (K8s native sidecar pattern, required for the 0.13 chart)
+#   - dockerd explicit args: --storage-driver=vfs (nested containers) and
+#     --group=123 (for /var/run/docker.sock ACL to the runner user)
+#   - dind-var mounted at /var/run in both runner and sidecar so the runner
+#     can talk to the socket
 #
 # Capacity check
 # --------------
@@ -34,27 +48,25 @@ maxRunners: 5
 
 template:
   spec:
-    initContainers:
-      - name: init-dind-externals
-        image: ghcr.io/actions/actions-runner:latest
-        command: ["cp", "-r", "-v", "/home/runner/externals/.", "/home/runner/tmpDir/"]
-        volumeMounts:
-          - name: dind-externals
-            mountPath: /home/runner/tmpDir
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
-        command: ["/home/runner/run.sh"]
+        command:
+          - /bin/bash
+          - -c
+          - umask 0000 && /home/runner/run.sh
         env:
           - name: DOCKER_HOST
             value: unix:///var/run/docker.sock
+          - name: RUNNER_WAIT_FOR_DOCKER_IN_SECONDS
+            value: "120"
         volumeMounts:
           - name: work
             mountPath: /home/runner/_work
+          - name: dind-var
+            mountPath: /var/run
           - name: dind-externals
             mountPath: /home/runner/externals
-          - name: dind-sock
-            mountPath: /var/run
         resources:
           requests:
             cpu: "4"
@@ -62,21 +74,46 @@ template:
           limits:
             cpu: "8"
             memory: "16Gi"
+    initContainers:
+      - name: init-dind-externals
+        image: ghcr.io/actions/actions-runner:latest
+        command:
+          - cp
+          - -r
+          - /home/runner/externals/.
+          - /home/runner/tmpDir/
+        volumeMounts:
+          - name: dind-externals
+            mountPath: /home/runner/tmpDir
       - name: dind
-        image: docker:dind
+        image: docker:27-dind
+        args:
+          - dockerd
+          - --host=unix:///var/run/docker.sock
+          - --storage-driver=vfs
+          - --group=123
+        restartPolicy: Always
         securityContext:
           privileged: true
+        startupProbe:
+          exec:
+            command:
+              - docker
+              - info
+          failureThreshold: 30
+          initialDelaySeconds: 3
+          periodSeconds: 3
         volumeMounts:
           - name: work
             mountPath: /home/runner/_work
-          - name: dind-sock
+          - name: dind-var
             mountPath: /var/run
           - name: dind-externals
             mountPath: /home/runner/externals
     volumes:
       - name: work
         emptyDir: {}
-      - name: dind-sock
+      - name: dind-var
         emptyDir: {}
       - name: dind-externals
         emptyDir: {}

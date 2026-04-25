@@ -7,6 +7,13 @@ backend:
   image:
     tag: dev
     pullPolicy: IfNotPresent
+  # Override the default ADMIN_PASSWORD ("admin" from values.yaml) so the
+  # backend does not detect a default-password install and lock its /readyz
+  # endpoint. Without this, chart-testing's helm --wait times out because
+  # the pod never becomes Ready (startup probe against /readyz returns 503
+  # for as long as the admin lock is active).
+  env:
+    ADMIN_PASSWORD: "CI-test-password-not-for-prod"
   resources:
     requests:
       cpu: 50m

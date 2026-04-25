@@ -195,7 +195,16 @@ jobs:
           kubectl get nodes
 
       - name: Run chart-testing install
-        run: ct install --target-branch main --charts charts/artifact-keeper/
+        # Bump helm's install timeout from the default 5m. Inside k3s in
+        # DinD, image pulls are serial (backend, web, postgres, opensearch,
+        # dtrack, trivy) and cold can easily take 8-10 minutes. chart-testing
+        # forwards anything in --helm-extra-args to the underlying
+        # `helm upgrade --install` invocation.
+        run: |
+          ct install \
+            --target-branch main \
+            --charts charts/artifact-keeper/ \
+            --helm-extra-args "--timeout=20m"
 
       - name: Delete k3d cluster
         if: always()

@@ -155,6 +155,13 @@ jobs:
       - name: Set up chart-testing
         uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.6.1
 
+      - name: Install wget for kind-action
+        run: |
+          if ! command -v wget >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y wget
+          fi
+
       - name: Create kind cluster
         uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
 

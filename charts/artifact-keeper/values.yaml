@@ -101,7 +101,7 @@ backend:
     BACKUP_PATH: "/data/backups"
     PLUGINS_DIR: "/data/plugins"
     ENVIRONMENT: "development"
-    ADMIN_PASSWORD: "admin"
+    ADMIN_PASSWORD: ""
 
     # -- Server
     # GRPC_PORT: "9090"
@@ -350,7 +350,7 @@ postgres:
     tag: "16-alpine"
   auth:
     username: registry
-    password: registry
+    password: ""
     database: artifact_registry
   persistence:
     size: 20Gi
@@ -488,7 +488,7 @@ dependencyTrack:
   image:
     repository: dependencytrack/apiserver
     tag: "4.11.4"
-  adminPassword: "ArtifactKeeper2026!"
+  adminPassword: ""
   persistence:
     size: 5Gi
     storageClass: ""
@@ -520,16 +520,16 @@ ingress:
     nginx.ingress.kubernetes.io/enable-cors: "true"
   host: artifacts.example.com
   tls:
-    enabled: false
+    enabled: true
     secretName: artifact-keeper-tls
 
 # -- Secrets
 # These are development defaults. For production, override via --set or
 # use existingSecret references. Never commit real credentials here.
 secrets:
-  jwtSecret: "dev-secret-change-in-production"
-  s3AccessKey: "minioadmin"
-  s3SecretKey: "minioadmin-secret"
+  jwtSecret: ""
+  s3AccessKey: ""
+  s3SecretKey: ""
   # SMTP password (only used when backend.env.SMTP_HOST is set)
   smtpPassword: ""
 
@@ -557,7 +557,7 @@ externalSecrets:
 
 # -- Network policies
 networkPolicy:
-  enabled: false
+  enabled: true
 
 # -- Prometheus ServiceMonitor
 serviceMonitor:

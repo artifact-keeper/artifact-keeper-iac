@@ -41,7 +41,7 @@ jobs:
         run: ct lint --target-branch main --charts charts/artifact-keeper/
 
       - name: Run helm lint
-        run: helm lint charts/artifact-keeper/
+        run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=ci-test --set postgres.auth.password=ci-test --set meilisearch.masterKey=ci-test
 
   template-validation:
     name: "Template & Validate (${{ matrix.variant }})"
@@ -53,11 +53,11 @@ jobs:
       matrix:
         include:
           - variant: default
-            values_args: ""
+            values_args: "--set secrets.jwtSecret=ci-test --set postgres.auth.password=ci-test --set meilisearch.masterKey=ci-test"
           - variant: production
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
-            values_args: "-f charts/artifact-keeper/values-staging.yaml"
+            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-test --set postgres.auth.password=ci-test --set meilisearch.masterKey=ci-test"
           - variant: mesh-main
             values_args: "-f charts/artifact-keeper/values-mesh-main.yaml"
           - variant: mesh-peer

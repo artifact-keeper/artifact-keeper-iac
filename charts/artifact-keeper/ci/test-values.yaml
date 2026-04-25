@@ -93,3 +93,8 @@ serviceMonitor:
 
 externalSecrets:
   enabled: false
+
+secrets:
+  jwtSecret: "ci-test-jwt-secret"
+  s3AccessKey: "ci-test-access"
+  s3SecretKey: "ci-test-secret"

@@ -81,6 +81,11 @@ jobs:
   sonarcloud:
     name: SonarCloud Scan
     runs-on: ak-ci-runners
+    # Skip on dependabot PRs: GitHub withholds secrets from dependabot
+    # runs for security reasons, so SONAR_TOKEN is empty and the scan
+    # always fails. SonarCloud provides no useful signal on dependency
+    # bumps anyway. Push events to main and human PRs still run it.
+    if: github.actor != 'dependabot[bot]'
     # SonarCloud Automatic Analysis may be enabled at the org level.
     # Until it is disabled in the SonarCloud UI (Administration > Analysis Method),
     # CI-based analysis will conflict and fail. Allow this job to fail gracefully

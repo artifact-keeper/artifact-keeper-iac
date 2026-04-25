@@ -4,13 +4,17 @@
 
 ## TL;DR
 
+Install from a cloned checkout:
+
 ```bash
-helm repo add artifact-keeper https://artifact-keeper.github.io/artifact-keeper-iac/
-helm repo update
-helm install ak artifact-keeper/artifact-keeper \
+git clone https://github.com/artifact-keeper/artifact-keeper-iac.git
+cd artifact-keeper-iac
+helm install ak charts/artifact-keeper/ \
   --namespace artifact-keeper \
   --create-namespace
 ```
+
+A published Helm repository at `https://artifact-keeper.github.io/artifact-keeper-iac/` is planned but not yet live. See [issue #51](https://github.com/artifact-keeper/artifact-keeper-iac/issues/51) for tracking.
 
 ## Introduction
 

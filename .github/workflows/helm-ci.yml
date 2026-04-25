@@ -160,10 +160,15 @@ jobs:
       - name: Set up chart-testing
         uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.6.1
 
+      - name: Install kubectl
+        uses: azure/setup-kubectl@901a10e89ea615cf61f57ac05cecdf23e7de06d8 # v4.0.1
+        with:
+          version: v1.29.3
+
       - name: Install k3d
         run: |
           # k3d installs k3s inside Docker (uses the DinD sidecar).
-          # Pin version for reproducibility. Extract tarball to $HOME/.local/bin
+          # Pin version for reproducibility. Extract binary to $HOME/.local/bin
           # because the runner pod cannot write to /usr/local/bin.
           K3D_VERSION=v5.7.5
           mkdir -p "$HOME/.local/bin"

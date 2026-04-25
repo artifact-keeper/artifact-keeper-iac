@@ -100,8 +100,8 @@ spec:
               done
               echo "PostgreSQL is ready"
         {{- end }}
-        {{- if .Values.meilisearch.enabled }}
-        - name: wait-for-meilisearch
+        {{- if .Values.opensearch.enabled }}
+        - name: wait-for-opensearch
           image: alpine:3.20
           securityContext:
             readOnlyRootFilesystem: true
@@ -121,11 +121,20 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              echo "Waiting for Meilisearch..."
-              until wget -qO- http://{{ include "artifact-keeper.fullname" . }}-meilisearch:7700/health >/dev/null 2>&1; do
+              echo "Waiting for OpenSearch..."
+              # Accept green or yellow cluster status. When security is enabled
+              # the probe talks to HTTPS with -k; otherwise plain HTTP.
+              {{- if .Values.opensearch.disableSecurityPlugin }}
+              URL="http://{{ include "artifact-keeper.fullname" . }}-opensearch:9200/_cluster/health"
+              CURL_ARGS=""
+              {{- else }}
+              URL="https://{{ include "artifact-keeper.fullname" . }}-opensearch:9200/_cluster/health"
+              CURL_ARGS="-k"
+              {{- end }}
+              until wget -qO- $URL 2>/dev/null | grep -q '"status":"\(green\|yellow\)"'; do
                 sleep 3
               done
-              echo "Meilisearch is ready"
+              echo "OpenSearch is ready"
         {{- end }}
       containers:
         - name: backend
@@ -175,14 +184,23 @@ spec:
                 secretKeyRef:
                   name: {{ include "artifact-keeper.fullname" . }}-secrets
                   key: JWT_SECRET
-            {{- if .Values.meilisearch.enabled }}
-            - name: MEILISEARCH_URL
-              value: "http://{{ include "artifact-keeper.fullname" . }}-meilisearch:7700"
-            - name: MEILISEARCH_API_KEY
+            {{- if .Values.opensearch.enabled }}
+            - name: OPENSEARCH_URL
+              value: "{{ if .Values.opensearch.disableSecurityPlugin }}http{{ else }}https{{ end }}://{{ include "artifact-keeper.fullname" . }}-opensearch:9200"
+            {{- if not .Values.opensearch.disableSecurityPlugin }}
+            - name: OPENSEARCH_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: {{ include "artifact-keeper.fullname" . }}-secrets
-                  key: MEILISEARCH_API_KEY
+                  key: OPENSEARCH_USERNAME
+            - name: OPENSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  key: OPENSEARCH_PASSWORD
+            - name: OPENSEARCH_ALLOW_INVALID_CERTS
+              value: {{ .Values.opensearch.allowInvalidCerts | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.trivy.enabled }}
             - name: TRIVY_URL

@@ -14,20 +14,31 @@ services:
       timeout: 5s
       retries: 5
 
-  meilisearch:
-    image: getmeili/meilisearch:v1.12
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
     restart: always
     environment:
-      MEILI_ENV: production
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
-      MEILI_HTTP_ADDR: 0.0.0.0:7700
+      cluster.name: artifact-keeper
+      node.name: opensearch
+      discovery.type: single-node
+      bootstrap.memory_lock: "false"
+      OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
-      - /data/meilisearch:/meili_data
+      - /data/opensearch:/usr/share/opensearch/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health | grep -q '\"status\":\"\\(green\\|yellow\\)\"'"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   trivy:
     image: aquasec/trivy:latest
@@ -45,8 +56,8 @@ services:
       STORAGE_BACKEND: filesystem
       STORAGE_PATH: /data/storage
       JWT_SECRET: ${JWT_SECRET}
-      MEILISEARCH_URL: http://meilisearch:7700
-      MEILISEARCH_API_KEY: ${MEILI_MASTER_KEY}
+      OPENSEARCH_URL: http://opensearch:9200
+      OPENSEARCH_ALLOW_INVALID_CERTS: "true"
       TRIVY_URL: http://trivy:8090
       RUST_LOG: info
     ports:
@@ -56,7 +67,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      meilisearch:
+      opensearch:
         condition: service_healthy
 
   web:

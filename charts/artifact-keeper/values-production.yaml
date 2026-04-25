@@ -90,18 +90,43 @@ externalDatabase:
   existingSecret: artifact-keeper-rds
   existingSecretKey: DATABASE_URL
 
-meilisearch:
-  masterKey: ""
-  env: "production"
+opensearch:
+  enabled: true
+  # -- Three-node cluster for HA. Renders a StatefulSet with per-pod PVCs
+  # and cluster.initial_cluster_manager_nodes = ak-opensearch-0,1,2.
+  replicaCount: 3
+  clusterName: artifact-keeper-prod
+  # -- 2 GiB JVM heap. Container memory limit must be roughly 2x this.
+  javaOpts: "-Xms2g -Xmx2g"
+  # -- For production, disable the demo security plugin and provision
+  # TLS certs (see charts/artifact-keeper/README.md). Until real certs
+  # are in place, leaving disableSecurityPlugin=true is still safer than
+  # shipping demo certs/keys.
+  disableSecurityPlugin: true
+  allowInvalidCerts: false
+  auth:
+    username: "admin"
+    # -- Override via --set or External Secrets in production.
+    password: ""
   persistence:
-    size: 20Gi
+    enabled: true
+    size: 50Gi
   resources:
     requests:
       cpu: 500m
-      memory: 1Gi
+      memory: 4Gi
     limits:
       cpu: "2"
       memory: 4Gi
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: opensearch
+            topologyKey: kubernetes.io/hostname
 
 trivy:
   persistence:
@@ -155,7 +180,7 @@ externalSecrets:
     jwtSecret: artifact-keeper/production/jwt-secret
     dbCredentials: artifact-keeper/production/db-credentials
     s3Keys: artifact-keeper/production/s3-keys
-    meilisearchKey: artifact-keeper/production/meilisearch-key
+    opensearchAuth: artifact-keeper/production/opensearch-auth
     dtAdminPassword: artifact-keeper/production/dt-admin-password
 
 networkPolicy:

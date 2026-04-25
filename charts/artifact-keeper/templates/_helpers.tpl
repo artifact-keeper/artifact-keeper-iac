@@ -90,11 +90,25 @@ app.kubernetes.io/component: postgres
 {{- end }}
 
 {{/*
-Meilisearch selector labels
+OpenSearch selector labels
 */}}
-{{- define "artifact-keeper.meilisearch.selectorLabels" -}}
+{{- define "artifact-keeper.opensearch.selectorLabels" -}}
 {{ include "artifact-keeper.selectorLabels" . }}
-app.kubernetes.io/component: meilisearch
+app.kubernetes.io/component: opensearch
+{{- end }}
+
+{{/*
+OpenSearch initial cluster manager nodes (comma-separated list of pod names)
+Used only when replicaCount > 1 to bootstrap a multi-node cluster.
+*/}}
+{{- define "artifact-keeper.opensearch.initialMasterNodes" -}}
+{{- $fullName := include "artifact-keeper.fullname" . -}}
+{{- $replicaCount := int .Values.opensearch.replicaCount -}}
+{{- $nodes := list -}}
+{{- range $i, $_ := until $replicaCount -}}
+{{- $nodes = append $nodes (printf "%s-opensearch-%d" $fullName $i) -}}
+{{- end -}}
+{{- join "," $nodes -}}
 {{- end }}
 
 {{/*

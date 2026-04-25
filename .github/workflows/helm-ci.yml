@@ -81,8 +81,13 @@ jobs:
       - name: Install kubeconform
         run: |
           KUBECONFORM_VERSION=0.6.7
+          # ARC runners run as a non-root user that cannot write to
+          # /usr/local/bin, so extract to /tmp first then sudo mv.
+          # Matches the helm-docs install pattern in helm-docs.yml.
           curl -sSL --proto =https "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
-            | tar xz -C /usr/local/bin kubeconform
+            | tar xz -C /tmp kubeconform
+          sudo mv /tmp/kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
 
       - name: "Validate manifests (${{ matrix.variant }})"
         run: |
@@ -126,8 +131,15 @@ jobs:
           fi
 
   install-test:
-    name: Install Test (kind)
-    runs-on: ak-ci-runners
+    name: Install Test (k3d)
+    # Runs on the ak-beefy-runners ARC scale set (8 CPU / 16 Gi limit) so the
+    # k3d cluster + full artifact-keeper chart (backend, web, postgres, trivy,
+    # opensearch, dtrack) can stand up inside chart-testing's timeout window.
+    # The regular ak-ci-runners pool (4 CPU / 8 Gi) is too tight.
+    #
+    # Requires argocd/arc-beefy-runners-values.yaml to be deployed to the
+    # cluster.
+    runs-on: ak-beefy-runners
     needs: [lint, template-validation]
     permissions:
       contents: read
@@ -150,11 +162,63 @@ jobs:
       - name: Set up chart-testing
         uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
 
-      - name: Create kind cluster
-        uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
+      - name: Install kubectl
+        uses: azure/setup-kubectl@901a10e89ea615cf61f57ac05cecdf23e7de06d8 # v4.0.1
+        with:
+          version: v1.29.3
+
+      - name: Install k3d
+        run: |
+          # k3d installs k3s inside Docker (uses the DinD sidecar).
+          # Pin version for reproducibility. Extract binary to $HOME/.local/bin
+          # because the runner pod cannot write to /usr/local/bin.
+          K3D_VERSION=v5.7.5
+          mkdir -p "$HOME/.local/bin"
+          curl -sL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \
+            -o "$HOME/.local/bin/k3d"
+          chmod +x "$HOME/.local/bin/k3d"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/k3d" version
+
+      - name: Create k3d cluster
+        run: |
+          # Single-server cluster, no LoadBalancer (not needed for chart-testing
+          # install checks).
+          #
+          # --snapshotter=native: the beefy runner's DinD sidecar uses overlayfs
+          # as its storage driver. k3s runs its own embedded containerd inside
+          # the k3d node container, and containerd defaults to overlayfs too.
+          # Nested overlayfs is unsupported by the kernel, so containerd fails
+          # with "failed to mount overlay: invalid argument" and the k3s node
+          # never registers. The `native` snapshotter uses plain file copies
+          # instead; slower but works in nested environments.
+          k3d cluster create chart-testing \
+            --agents 0 \
+            --no-lb \
+            --k3s-arg "--disable=traefik@server:0" \
+            --k3s-arg "--disable=metrics-server@server:0" \
+            --k3s-arg "--snapshotter=native@server:0" \
+            --wait \
+            --timeout 300s
+          kubectl cluster-info
+          kubectl get nodes
 
       - name: Run chart-testing install
-        run: ct install --target-branch main --charts charts/artifact-keeper/
+        # Bump helm's install timeout from the default 5m. Inside k3s in
+        # DinD, image pulls are serial (backend, web, postgres, opensearch,
+        # dtrack, trivy) and cold can easily take 8-10 minutes. chart-testing
+        # forwards anything in --helm-extra-args to the underlying
+        # `helm upgrade --install` invocation.
+        run: |
+          ct install \
+            --target-branch main \
+            --charts charts/artifact-keeper/ \
+            --helm-extra-args "--timeout=20m"
+
+      - name: Delete k3d cluster
+        if: always()
+        run: |
+          k3d cluster delete chart-testing 2>/dev/null || true
 
       - name: Show cluster state on failure
         if: failure()

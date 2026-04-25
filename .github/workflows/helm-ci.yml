@@ -131,11 +131,13 @@ jobs:
           fi
 
   install-test:
-    name: Install Test (kind)
-    # Runs on GitHub-hosted runners because helm/kind-action needs privileged
-    # Docker-in-Docker to bootstrap a kubeadm control-plane, which ARC runners
-    # don't provide. The rest of helm-ci stays on ak-ci-runners.
-    runs-on: ubuntu-latest
+    name: Install Test (k3d)
+    # Runs on the ARC self-hosted runners using k3d (k3s in Docker) instead of
+    # kind. The previous kind-in-DinD setup timed out at kubeadm init because of
+    # the deep container nesting (K8s pod -> DinD -> kind node -> kubelet +
+    # static pods). k3s uses embedded containerd and boots without kubeadm, so
+    # it handles constrained environments like ours cleanly.
+    runs-on: ak-ci-runners
     needs: [lint, template-validation]
     permissions:
       contents: read
@@ -158,18 +160,40 @@ jobs:
       - name: Set up chart-testing
         uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.6.1
 
-      - name: Install wget for kind-action
+      - name: Install k3d
         run: |
-          if ! command -v wget >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y wget
-          fi
+          # k3d installs k3s inside Docker (uses the DinD sidecar).
+          # Pin version for reproducibility. Extract tarball to $HOME/.local/bin
+          # because the runner pod cannot write to /usr/local/bin.
+          K3D_VERSION=v5.7.5
+          mkdir -p "$HOME/.local/bin"
+          curl -sL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \
+            -o "$HOME/.local/bin/k3d"
+          chmod +x "$HOME/.local/bin/k3d"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/k3d" version
 
-      - name: Create kind cluster
-        uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
+      - name: Create k3d cluster
+        run: |
+          # Single-server cluster, no LoadBalancer (not needed for chart-testing
+          # install checks). --wait blocks until the apiserver is reachable.
+          k3d cluster create chart-testing \
+            --agents 0 \
+            --no-lb \
+            --k3s-arg "--disable=traefik@server:0" \
+            --k3s-arg "--disable=metrics-server@server:0" \
+            --wait \
+            --timeout 120s
+          kubectl cluster-info
+          kubectl get nodes
 
       - name: Run chart-testing install
         run: ct install --target-branch main --charts charts/artifact-keeper/
+
+      - name: Delete k3d cluster
+        if: always()
+        run: |
+          k3d cluster delete chart-testing 2>/dev/null || true
 
       - name: Show cluster state on failure
         if: failure()

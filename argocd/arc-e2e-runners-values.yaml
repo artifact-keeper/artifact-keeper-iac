@@ -3,7 +3,17 @@
 # Provides Docker capability so CI jobs can run docker-compose
 # based E2E test stacks (postgres + backend + test containers).
 #
+# DOCKER HUB PULL-THROUGH CACHE:
+# DinD here is configured with a registry-mirror pointing at the
+# in-cluster artifact-keeper registry-cache instance. Every docker.io
+# pull is routed through the cache, which solves the anonymous-pull
+# rate-limit problem we hit in CI. ghcr.io and other registries are
+# left untouched. The mirror config lives in the configmap
+# `dind-registry-mirror` (see e2e/dind-registry-mirror-configmap.yaml);
+# apply that BEFORE upgrading this release.
+#
 # Deployed via:
+#   kubectl apply -f e2e/dind-registry-mirror-configmap.yaml
 #   helm upgrade --install ak-e2e-runners \
 #     --namespace arc-runners \
 #     -f argocd/arc-e2e-runners-values.yaml \
@@ -59,6 +69,14 @@ template:
             mountPath: /var/run
           - name: dind-externals
             mountPath: /home/runner/externals
+          # Inject /etc/docker/daemon.json from the dind-registry-mirror
+          # configmap so dockerd routes docker.io pulls through the
+          # in-cluster artifact-keeper cache instead of hitting Docker
+          # Hub anonymously.
+          - name: dind-config
+            mountPath: /etc/docker/daemon.json
+            subPath: daemon.json
+            readOnly: true
     volumes:
       - name: work
         emptyDir: {}
@@ -66,3 +84,9 @@ template:
         emptyDir: {}
       - name: dind-externals
         emptyDir: {}
+      - name: dind-config
+        configMap:
+          name: dind-registry-mirror
+          items:
+            - key: daemon.json
+              path: daemon.json

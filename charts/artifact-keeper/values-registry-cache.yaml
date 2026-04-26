@@ -1,0 +1,101 @@
+# =============================================================================
+# Registry-cache overlay: artifact-keeper as a Docker Hub pull-through cache
+# =============================================================================
+#
+# Purpose: solve the "Docker Hub anonymous pull rate limit" problem on the
+# CI/CD runner cluster by routing all docker.io image pulls through an
+# in-cluster artifact-keeper instance configured as a remote/proxy repo.
+#
+# Stability ladder: this instance is intentionally pinned to a stable release
+# and updated MANUALLY only after smoke testing. Do NOT point it at :dev or
+# :latest, and do not enable image-updater for this Application. If the
+# cache breaks, every CI pull breaks.
+#
+# Storage: this overlay assumes static hostPath PVs already exist on the
+# runner host's persistent volume (typical clusters provision the default
+# `local-path` storage class on the root filesystem, which is too small
+# for a 100Gi+ image cache). The companion file
+# `e2e/registry-cache-pvs.yaml` provisions the static PVs.
+#
+# Bootstrap procedure: see docs/registry-cache.md.
+#
+# Failure mode: cache pod down → CI pulls fail. Mitigations:
+#   - Configure Docker Hub authentication on the runners as a secondary
+#     fallback (containerd's mirror config supports `endpoint` fallback).
+#   - Run two replicas of the cache once it has proven stable.
+# =============================================================================
+
+# Pin to a known-good stable release. Bump only after smoke testing.
+# Do NOT use 'dev' or 'latest' here. Document upgrades in CHANGELOG.
+backend:
+  image:
+    tag: "1.1.8"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  env:
+    RUST_LOG: "info"
+    ENVIRONMENT: "production"
+    AK_GUEST_ACCESS_ENABLED: "false"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  persistence:
+    enabled: true
+    # Bound to the static PV ak-cache-artifact-storage-pv created by
+    # e2e/registry-cache-pvs.yaml (hostPath on the runner host's
+    # persistent volume).
+    size: 100Gi
+    storageClass: ""
+  autoscaling:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+  service:
+    type: ClusterIP
+
+# The cache is a pure pull-through OCI proxy. No UI needed, and the web
+# image release schedule is independent from the backend's so the version
+# tags don't necessarily align (e.g. backend has 1.1.8 but web does not).
+# Keep web disabled to avoid that coupling. Operators who want the UI for
+# debugging can deploy a separate AK install or temporarily enable this.
+web:
+  enabled: false
+
+postgres:
+  enabled: true
+  persistence:
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# Pure pull-through cache: no scanners, no search, no extras.
+trivy:
+  enabled: false
+openscap:
+  enabled: false
+dependencyTrack:
+  enabled: false
+meilisearch:
+  enabled: false
+# Chart enables OpenSearch by default; explicitly disable it for the
+# cache. This instance does no full-text search.
+opensearch:
+  enabled: false
+
+# In-cluster only: no public ingress, no internet exposure.
+ingress:
+  enabled: false
+
+# Stable name across upgrades; service DNS becomes
+# `ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local`.
+fullnameOverride: "ak-cache"

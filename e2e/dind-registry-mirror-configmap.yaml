@@ -1,0 +1,33 @@
+# Docker daemon config that points DinD at the in-cluster registry-cache
+# instance as a Docker Hub mirror.
+#
+# Apply BEFORE upgrading the ARC runners with the mirror-aware values:
+#   kubectl apply -f e2e/dind-registry-mirror-configmap.yaml
+#
+# The mirror URL is the cache's backend service, which exposes the OCI
+# proxy repo `docker-hub-cache` (see docs/registry-cache.md for repo
+# creation).
+#
+# Note on `insecure-registries`: in-cluster traffic to the cache uses
+# plain HTTP. dockerd treats unknown schemes as TLS by default; we
+# whitelist this specific endpoint as insecure. There is no path on
+# this listener that exposes anything beyond the OCI registry, and the
+# service is ClusterIP-only (not reachable outside the cluster).
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dind-registry-mirror
+  namespace: arc-runners
+  labels:
+    app.kubernetes.io/component: registry-mirror
+data:
+  daemon.json: |
+    {
+      "registry-mirrors": [
+        "http://ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local:8080"
+      ],
+      "insecure-registries": [
+        "ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local:8080"
+      ]
+    }

@@ -93,6 +93,7 @@ jobs:
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
 
       - name: Run chart-releaser
+        id: cr
         uses: helm/chart-releaser-action@cae68fefc6b5f367a0275617c9f83181ba54714f # v1.7.0
         with:
           charts_dir: charts
@@ -100,3 +101,54 @@ jobs:
           config: .github/cr.yaml
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Tag chart-${appVersion} alias
+        # chart-releaser tags releases as "<chart-name>-<chart-version>" (for
+        # us, "artifact-keeper-<version>"). For users tracking which chart
+        # release pairs with which backend release, that name is opaque.
+        # Add a parallel "chart-<appVersion>" alias tag pointing to the
+        # same commit so users can run:
+        #   helm pull oci://... --version <appVersion>
+        # OR refer to chart-1.1.9 and know it pairs with backend 1.1.9.
+        # See iac issue #74 (Hardening Core Phase 1).
+        run: |
+          set -u
+          APP_VERSION=$(grep '^appVersion:' charts/artifact-keeper/Chart.yaml \
+            | awk '{print $2}' | tr -d '"')
+          CHART_VERSION=$(grep '^version:' charts/artifact-keeper/Chart.yaml \
+            | awk '{print $2}')
+
+          if [ -z "${APP_VERSION}" ] || [ -z "${CHART_VERSION}" ]; then
+            echo "::error::could not read appVersion or version from Chart.yaml"
+            exit 1
+          fi
+
+          ALIAS="chart-${APP_VERSION}"
+          ORIGIN_TAG="artifact-keeper-${CHART_VERSION}"
+
+          # If chart-releaser didn't actually create a release this run
+          # (skip_existing handled it), just exit cleanly.
+          if ! git rev-parse "${ORIGIN_TAG}" >/dev/null 2>&1; then
+            echo "Origin tag ${ORIGIN_TAG} does not exist; chart-releaser likely skipped this run. Nothing to alias."
+            exit 0
+          fi
+
+          # If the alias already exists pointing at the same commit, leave
+          # it alone. If it exists pointing at a DIFFERENT commit, fail
+          # loudly so the operator can decide whether to bump appVersion
+          # or replace the alias (don't silently overwrite history).
+          if git rev-parse "${ALIAS}" >/dev/null 2>&1; then
+            EXISTING=$(git rev-parse "${ALIAS}^{}")
+            EXPECTED=$(git rev-parse "${ORIGIN_TAG}^{}")
+            if [ "${EXISTING}" = "${EXPECTED}" ]; then
+              echo "Alias ${ALIAS} already points at ${EXPECTED}, nothing to do."
+              exit 0
+            else
+              echo "::error::Alias ${ALIAS} exists but points at ${EXISTING}, not the new ${ORIGIN_TAG} commit ${EXPECTED}. Bump appVersion in Chart.yaml or remove the stale alias."
+              exit 1
+            fi
+          fi
+
+          git tag "${ALIAS}" "${ORIGIN_TAG}"
+          git push origin "${ALIAS}"
+          echo "Created alias tag ${ALIAS} -> ${ORIGIN_TAG}"

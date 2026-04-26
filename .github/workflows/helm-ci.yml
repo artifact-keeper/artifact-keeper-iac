@@ -100,6 +100,144 @@ jobs:
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             /tmp/rendered-${{ matrix.variant }}.yaml
 
+  verify-image-references:
+    name: "Verify Image References (${{ matrix.variant }})"
+    runs-on: ak-ci-runners
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: default
+            values_args: "--set secrets.jwtSecret=ci-test --set postgres.auth.password=ci-test --set meilisearch.masterKey=ci-test"
+          - variant: production
+            values_args: "-f charts/artifact-keeper/values-production.yaml"
+          - variant: staging
+            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-test --set postgres.auth.password=ci-test --set meilisearch.masterKey=ci-test"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v3.16.3
+
+      - name: "Render template (${{ matrix.variant }})"
+        run: |
+          helm template artifact-keeper charts/artifact-keeper/ \
+            ${{ matrix.values_args }} \
+            > /tmp/rendered-${{ matrix.variant }}.yaml
+
+      - name: "Extract and verify image references (${{ matrix.variant }})"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -u
+          # Extract every "image: ..." reference from the rendered chart.
+          # Skip duplicates and probe each one against the appropriate
+          # registry. v1.1.8 shipped with a chart that referenced
+          # ghcr.io/.../artifact-keeper-web:1.1.8, an image that was
+          # never published. This gate catches that class of failure
+          # before the chart change merges.
+          IMAGES=$(grep -hE '^\s*image:\s*' /tmp/rendered-${{ matrix.variant }}.yaml \
+            | sed -E 's/^\s*image:\s*"?([^"]*)"?\s*$/\1/' \
+            | grep -v '^$' \
+            | sort -u)
+
+          if [ -z "${IMAGES}" ]; then
+            echo "::warning::no image references found in rendered chart"
+            exit 0
+          fi
+
+          echo "Image references in ${{ matrix.variant }} variant:"
+          echo "${IMAGES}" | sed 's/^/  /'
+          echo ""
+
+          MANIFEST_ACCEPT='-H Accept:application/vnd.oci.image.index.v1+json -H Accept:application/vnd.docker.distribution.manifest.list.v2+json -H Accept:application/vnd.docker.distribution.manifest.v2+json'
+
+          probe_ghcr() {
+            local name="$1"; local tag="$2"
+            local token
+            token=$(curl -sf "https://ghcr.io/token?service=ghcr.io&scope=repository:${name}:pull" \
+              -H "Authorization: Bearer ${GH_TOKEN}" | jq -r '.token // empty')
+            [ -n "${token}" ] || return 1
+            # shellcheck disable=SC2086
+            curl -sfL -o /dev/null -H "Authorization: Bearer ${token}" \
+              ${MANIFEST_ACCEPT} "https://ghcr.io/v2/${name}/manifests/${tag}"
+          }
+
+          probe_dockerhub() {
+            local name="$1"; local tag="$2"
+            local token
+            token=$(curl -sf "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${name}:pull" \
+              | jq -r '.token // empty')
+            [ -n "${token}" ] || return 1
+            # shellcheck disable=SC2086
+            curl -sfL -o /dev/null -H "Authorization: Bearer ${token}" \
+              ${MANIFEST_ACCEPT} "https://registry-1.docker.io/v2/${name}/manifests/${tag}"
+          }
+
+          missing=()
+          while IFS= read -r ref; do
+            [ -z "${ref}" ] && continue
+            tag="${ref##*:}"
+            name="${ref%:*}"
+            # Detect registry. References without a host default to Docker Hub.
+            case "${name}" in
+              ghcr.io/*)
+                probe_name="${name#ghcr.io/}"
+                if probe_ghcr "${probe_name}" "${tag}"; then
+                  echo "  ✓ ${ref}"
+                else
+                  echo "  ✗ ${ref}  (missing on ghcr.io)"
+                  missing+=("${ref}")
+                fi
+                ;;
+              docker.io/*)
+                probe_name="${name#docker.io/}"
+                if probe_dockerhub "${probe_name}" "${tag}"; then
+                  echo "  ✓ ${ref}"
+                else
+                  echo "  ✗ ${ref}  (missing on docker.io)"
+                  missing+=("${ref}")
+                fi
+                ;;
+              gcr.io/*|registry.k8s.io/*|quay.io/*)
+                # External well-known registries; we trust them and don't probe.
+                echo "  - ${ref}  (external registry, not probed)"
+                ;;
+              */*)
+                # No host prefix but contains a slash; could be docker.io/library
+                # via short form (e.g. "library/postgres" or "user/image").
+                if probe_dockerhub "${name}" "${tag}"; then
+                  echo "  ✓ ${ref}  (resolved on docker.io)"
+                else
+                  echo "  ✗ ${ref}  (missing on docker.io)"
+                  missing+=("${ref}")
+                fi
+                ;;
+              *)
+                # No slash, no host. Implicit Docker Hub library namespace
+                # (e.g. "postgres:16-alpine" -> docker.io/library/postgres).
+                if probe_dockerhub "library/${name}" "${tag}"; then
+                  echo "  ✓ ${ref}  (resolved on docker.io/library)"
+                else
+                  echo "  ✗ ${ref}  (missing on docker.io/library)"
+                  missing+=("${ref}")
+                fi
+                ;;
+            esac
+          done <<< "${IMAGES}"
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo ""
+            echo "::error::${#missing[@]} image reference(s) in the ${{ matrix.variant }} chart variant do not resolve on their registry. Either fix the chart values or publish the missing images before merging."
+            printf '  - %s\n' "${missing[@]}"
+            exit 1
+          fi
+
   version-check:
     name: Chart Version Check
     if: github.event_name == 'pull_request'

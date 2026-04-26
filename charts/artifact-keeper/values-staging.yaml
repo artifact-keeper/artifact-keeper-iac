@@ -27,8 +27,10 @@ backend:
 web:
   replicaCount: 2
 
+# Edge replication: disabled by default until the artifact-keeper-edge image
+# ships on ghcr.io. See the note in values.yaml. Re-enable once published.
 edge:
-  enabled: true
+  enabled: false
   replicaCount: 1
 
 postgres:

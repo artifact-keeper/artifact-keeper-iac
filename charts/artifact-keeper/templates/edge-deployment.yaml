@@ -47,7 +47,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: edge
-          image: "{{ .Values.edge.image.repository }}:{{ .Values.edge.image.tag }}"
+          image: "{{ .Values.edge.image.repository }}:{{ .Values.edge.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.edge.image.pullPolicy }}
           securityContext:
             readOnlyRootFilesystem: true

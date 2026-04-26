@@ -23,10 +23,20 @@
 #
 # IMAGE TAGS
 # ----------
-# The "dev" tag on backend/web is a floating tag that always points to
-# the latest build from main. ArgoCD Image Updater pins these to specific
-# digests so rollouts are deterministic. If you deploy outside ArgoCD,
-# set imagePullPolicy: Always so restarts pull the latest dev build.
+# The backend/web/edge image tag is load-bearing: when image.tag is left
+# empty (""), the chart falls back to the chart's appVersion, so a given
+# chart release is reproducible. `helm install foo --version 1.2.3` then
+# pulls image tag 1.2.3 without any extra wiring. Bumping appVersion in
+# Chart.yaml auto-pins any component whose tag is left empty.
+#
+# This development profile keeps an explicit floating tag instead:
+#   - "dev" follows the latest build from main (backend/web/edge here)
+#   - values-production.yaml pins "latest" (the most recent release)
+# An explicit tag always wins over the appVersion fallback. Leave a tag
+# empty only when you want it to track appVersion (handy for tagged
+# chart releases). ArgoCD Image Updater pins floating tags to specific
+# digests so rollouts stay deterministic. For manual deploys with a
+# floating tag, set imagePullPolicy: Always so restarts pick up new builds.
 #
 # RESOURCE SIZING
 # ---------------
@@ -84,9 +94,11 @@ backend:
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-backend  # Docker Hub: artifactkeeper/backend
-    # -- "dev" is a floating tag built from main. ArgoCD Image Updater
-    # pins this to a digest automatically. For manual deploys, consider
-    # using a specific version tag (e.g. 1.1.0).
+    # -- "dev" is a floating tag built from main. Leave this empty ("") to
+    # inherit the chart's appVersion instead (see the IMAGE TAGS note at the
+    # top of this file). ArgoCD Image Updater pins floating tags to a digest
+    # automatically. For manual deploys with a floating tag, consider a
+    # specific version tag (e.g. 1.1.0) or set pullPolicy: Always.
     tag: dev
     pullPolicy: Always
   # -- Pod-level securityContext. Defaults are image-native: the backend
@@ -312,6 +324,8 @@ web:
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-web  # Docker Hub: artifactkeeper/web
+    # -- "dev" floating tag for the development profile. Leave empty ("") to
+    # inherit the chart's appVersion (see backend.image.tag).
     tag: dev
     pullPolicy: Always
   service:
@@ -349,6 +363,11 @@ edge:
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-edge
+    # -- "dev" floating tag. Kept explicit (not empty) on purpose: the edge
+    # image is not published at the chart's appVersion yet, so inheriting
+    # appVersion would reference an image that does not exist. See the edge
+    # note above and issue #56. Leave empty ("") only once edge ships at the
+    # chart's appVersion.
     tag: dev
     pullPolicy: Always
   service:

@@ -70,8 +70,12 @@ web:
                 app.kubernetes.io/component: web
             topologyKey: kubernetes.io/hostname
 
+# Edge replication: disabled by default until the artifact-keeper-edge image
+# ships on ghcr.io. Setting enabled: true today fails with ImagePullBackOff
+# because no published image matches the chart's tag reference. See the
+# note in values.yaml. Re-enable once the edge image is published.
 edge:
-  enabled: true
+  enabled: false
   replicaCount: 2
   podDisruptionBudget:
     enabled: true

@@ -1,0 +1,65 @@
+# Static hostPath PVs for the registry-cache artifact-keeper instance.
+#
+# These bind to claims created by the helm chart with claimRef and live on
+# the runner host's large persistent volume rather than the default
+# local-path storageClass, which on this cluster provisions on the smaller
+# root filesystem.
+#
+# Layout: /srv/ak-cache/<volume-name>. /srv is the conventional location
+# for service data on Linux hosts; this path is owned by the cluster, not
+# any user account.
+#
+# Pre-create the directories with the correct ownership for each
+# component before applying:
+#   sudo mkdir -p /srv/ak-cache/{artifact-storage,postgres-data}
+#   sudo chown 1000:1000 /srv/ak-cache/artifact-storage   # backend uid
+#   sudo chown 999:999  /srv/ak-cache/postgres-data       # postgres uid (chart sets runAsUser: 999)
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ak-cache-artifact-storage-pv
+  labels:
+    app: backend
+    instance: ak-cache
+    volume: artifact-storage
+spec:
+  capacity:
+    # The actual cache. Sized for "many months of CI without eviction" against
+    # a Docker Hub mirror. Bump as growth dictates; the underlying /home
+    # volume is 1.8T so there is plenty of room.
+    storage: 100Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /srv/ak-cache/artifact-storage
+    type: DirectoryOrCreate
+  claimRef:
+    namespace: infra-registry-cache
+    name: ak-cache-storage
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ak-cache-postgres-pv
+  labels:
+    app: postgres
+    instance: ak-cache
+    volume: postgres-data
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /srv/ak-cache/postgres-data
+    type: DirectoryOrCreate
+  claimRef:
+    namespace: infra-registry-cache
+    name: postgres-data-ak-cache-postgres-0

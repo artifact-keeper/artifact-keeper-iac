@@ -1,0 +1,62 @@
+# ArgoCD Application for the registry-cache artifact-keeper instance.
+#
+# Deploys an artifact-keeper instance pinned to a stable release (see
+# values-registry-cache.yaml) into the infra-registry-cache namespace.
+# This instance runs as a Docker Hub pull-through cache for the ARC
+# runners on the CI/CD runner cluster.
+#
+# Bootstrap order (run with kubectl context pointed at the runner cluster):
+#   1. Create the namespace and pre-stage the host directories.
+#        kubectl create namespace infra-registry-cache
+#        sudo mkdir -p /srv/ak-cache/{artifact-storage,postgres-data}
+#        sudo chown 1000:1000 /srv/ak-cache/artifact-storage
+#        sudo chown 999:999  /srv/ak-cache/postgres-data
+#   2. Apply the static PVs:
+#        kubectl apply -f e2e/registry-cache-pvs.yaml
+#   3. Apply this Application:
+#        kubectl apply -f argocd/registry-cache-application.yaml
+#   4. Wait for backend pod ready, then create the docker.io proxy repo
+#      via API (see docs/registry-cache.md).
+#
+# Updates: this Application is intentionally NOT registered with
+# image-updater. Bumps to backend.image.tag in values-registry-cache.yaml
+# go through a normal PR + manual sync after smoke testing.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: registry-cache
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ak-infra
+    ak-infra-role: registry-mirror
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/artifact-keeper/artifact-keeper-iac
+    targetRevision: main
+    path: charts/artifact-keeper
+    helm:
+      releaseName: ak-cache
+      valueFiles:
+        - values.yaml
+        - values-registry-cache.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: infra-registry-cache
+  syncPolicy:
+    # Manual sync. We do NOT want autoSync here: every upgrade of the
+    # cache is a deliberate operator action with a smoke test attached.
+    automated: null
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    # Static PVs we apply separately have a claimRef that ArgoCD doesn't
+    # know about; ignore the field on PVCs to avoid sync churn.
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /spec/volumeName

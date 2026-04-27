@@ -67,7 +67,7 @@ kubectl apply -f e2e/registry-cache-pvs.yaml
 kubectl apply -f argocd/registry-cache-application.yaml
 
 # 4. Wait for the backend pod to be ready.
-kubectl -n infra-registry-cache rollout status deployment/ak-cache-artifact-keeper-backend
+kubectl -n infra-registry-cache rollout status deployment/ak-cache-backend
 ```
 
 ## Create the docker.io proxy repo
@@ -78,8 +78,8 @@ declarative bootstrap, do this once via the API.
 
 ```bash
 # Resolve the in-cluster service URL.
-SVC=ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local:8080
-kubectl -n infra-registry-cache exec deploy/ak-cache-artifact-keeper-backend -- \
+SVC=ak-cache-backend.infra-registry-cache.svc.cluster.local:8080
+kubectl -n infra-registry-cache exec deploy/ak-cache-backend -- \
   cat /data/storage/admin.password
 
 # Login as admin (use the bootstrap password from above), then create the repo:
@@ -135,7 +135,7 @@ with no Docker Hub egress.
 Verify cache hits in the cache backend logs:
 
 ```bash
-kubectl -n infra-registry-cache logs deploy/ak-cache-artifact-keeper-backend | grep docker-hub-cache | tail
+kubectl -n infra-registry-cache logs deploy/ak-cache-backend | grep docker-hub-cache | tail
 ```
 
 You should see GET requests with `cache=hit` (or equivalent) on the second

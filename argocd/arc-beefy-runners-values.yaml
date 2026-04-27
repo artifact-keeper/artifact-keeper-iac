@@ -10,7 +10,20 @@
 #
 # Opt jobs in by setting `runs-on: ak-beefy-runners` in the workflow.
 #
+# DOCKER HUB PULL-THROUGH AND AUTH
+# --------------------------------
+# Mirrors the ak-ci-runners setup:
+#  1. dind sidecar mounts /etc/docker/daemon.json from the
+#     `dind-registry-mirror` ConfigMap so pulls route through the
+#     in-cluster artifact-keeper registry-cache when possible.
+#  2. The runner container mounts the `dockerhub-pull` Secret at
+#     ~/.docker/config.json so authenticated docker.io pulls bypass
+#     the anonymous rate limit when the cache cannot serve a request.
+#
 # Deployed via:
+#   kubectl apply -f e2e/dind-registry-mirror-configmap.yaml
+#   kubectl -n arc-runners create secret docker-registry dockerhub-pull ...
+#     (see argocd/dockerhub-pull-secret.example.yaml)
 #   helm upgrade --install ak-beefy-runners \
 #     --namespace arc-runners \
 #     --version 0.13.1 \
@@ -67,6 +80,10 @@ template:
             mountPath: /var/run
           - name: dind-externals
             mountPath: /home/runner/externals
+          - name: dockerhub-config
+            mountPath: /home/runner/.docker/config.json
+            subPath: .dockerconfigjson
+            readOnly: true
         resources:
           requests:
             cpu: "4"
@@ -110,6 +127,10 @@ template:
             mountPath: /var/run
           - name: dind-externals
             mountPath: /home/runner/externals
+          - name: dind-config
+            mountPath: /etc/docker/daemon.json
+            subPath: daemon.json
+            readOnly: true
     volumes:
       - name: work
         emptyDir: {}
@@ -117,3 +138,12 @@ template:
         emptyDir: {}
       - name: dind-externals
         emptyDir: {}
+      - name: dind-config
+        configMap:
+          name: dind-registry-mirror
+          items:
+            - key: daemon.json
+              path: daemon.json
+      - name: dockerhub-config
+        secret:
+          secretName: dockerhub-pull

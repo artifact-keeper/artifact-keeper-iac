@@ -1,47 +1,58 @@
-# ARC v2 Runner Scale Set for E2E Tests (with Docker-in-Docker)
+# ARC v2 Runner Scale Set for fast CI jobs (lint, unit tests, helm chart CI).
 #
-# Provides Docker capability so CI jobs can run docker-compose
-# based E2E test stacks (postgres + backend + test containers).
+# Purpose
+# -------
+# Default pool for the artifact-keeper org. Workflows opt in with
+# `runs-on: ak-ci-runners`. Heavier jobs use `ak-beefy-runners` and
+# E2E suites with full docker-compose stacks use `ak-e2e-runners`.
 #
 # DOCKER HUB PULL-THROUGH AND AUTH
 # --------------------------------
 # Two layers, applied independently:
 #
 # 1. dind sidecar mounts /etc/docker/daemon.json from the
-#    `dind-registry-mirror` ConfigMap (e2e/dind-registry-mirror-configmap.yaml)
-#    so dockerd routes docker.io pulls through the in-cluster
-#    artifact-keeper registry-cache where possible.
+#    `dind-registry-mirror` ConfigMap (e2e/dind-registry-mirror-configmap.yaml).
+#    dockerd routes docker.io pulls through the in-cluster
+#    artifact-keeper cache where possible.
 #
 # 2. The runner container mounts the `dockerhub-pull` Secret at
-#    ~/.docker/config.json. When dockerd falls back to docker.io
+#    `~/.docker/config.json`. When dockerd falls back to docker.io
 #    directly (the cache cannot serve dockerd-mirror style requests
 #    until the DOCKER_HUB_MIRROR_REPO backend feature ships), the auth
 #    raises the rate limit from 100 anonymous pulls / 6h per IP to a
 #    per-user budget. See argocd/dockerhub-pull-secret.example.yaml for
 #    how to create the Secret.
 #
+# RUNNER IMAGE
+# ------------
+# Uses ghcr.io/artifact-keeper/ak-runner-rust:latest (built from
+# runner-images/rust/Dockerfile) with cargo, sccache, and npm caches
+# pre-baked. The /cache hostPath persists those caches across runners.
+#
 # Deployed via:
 #   kubectl apply -f e2e/dind-registry-mirror-configmap.yaml
 #   kubectl -n arc-runners create secret docker-registry dockerhub-pull ...
 #     (see argocd/dockerhub-pull-secret.example.yaml)
-#   helm upgrade --install ak-e2e-runners \
+#   helm upgrade --install ak-ci-runners \
 #     --namespace arc-runners \
 #     --version 0.13.1 \
-#     -f argocd/arc-e2e-runners-values.yaml \
+#     -f argocd/arc-ci-runners-values.yaml \
 #     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 #
 # NOTE: pin --version 0.13.1 to match the ARC controller version
-# already running on the cluster (arc-systems namespace).
+# already running on the cluster (arc-systems namespace). Chart 0.14.x
+# renders an incompatible AutoscalingRunnerSet CR that the 0.13.x
+# controller silently drops.
 #
 # Requires secret "github-token-secret" in arc-runners namespace with
 # key "github_token".
 
 githubConfigUrl: "https://github.com/artifact-keeper"
 githubConfigSecret: "github-token-secret"
-runnerScaleSetName: "ak-e2e-runners"
+runnerScaleSetName: "ak-ci-runners"
 
 minRunners: 0
-maxRunners: 5
+maxRunners: 20
 
 template:
   spec:
@@ -49,22 +60,26 @@ template:
       - name: ghcr-pull-secret
     containers:
       - name: runner
-        image: ghcr.io/artifact-keeper/ak-runner-e2e:latest
-        command: ["/home/runner/run.sh"]
+        image: ghcr.io/artifact-keeper/ak-runner-rust:latest
+        command:
+          - /bin/bash
+          - -c
+          - umask 0000 && /home/runner/run.sh
         env:
           - name: DOCKER_HOST
             value: unix:///var/run/docker.sock
-        volumeMounts:
-          - name: work
-            mountPath: /home/runner/_work
-          - name: dind-var
-            mountPath: /var/run
-          - name: dind-externals
-            mountPath: /home/runner/externals
-          - name: dockerhub-config
-            mountPath: /home/runner/.docker/config.json
-            subPath: .dockerconfigjson
-            readOnly: true
+          - name: RUNNER_WAIT_FOR_DOCKER_IN_SECONDS
+            value: "120"
+          - name: CARGO_HOME
+            value: /cache/cargo-home
+          - name: SCCACHE_DIR
+            value: /cache/sccache
+          - name: RUSTC_WRAPPER
+            value: sccache
+          - name: NPM_CONFIG_CACHE
+            value: /cache/npm
+          - name: SCCACHE_IDLE_TIMEOUT
+            value: "0"
         resources:
           requests:
             cpu: "2"
@@ -72,9 +87,22 @@ template:
           limits:
             cpu: "4"
             memory: "8Gi"
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: dind-var
+            mountPath: /var/run
+          - name: dind-externals
+            mountPath: /home/runner/externals
+          - name: runner-cache
+            mountPath: /cache
+          - name: dockerhub-config
+            mountPath: /home/runner/.docker/config.json
+            subPath: .dockerconfigjson
+            readOnly: true
     initContainers:
       - name: init-dind-externals
-        image: ghcr.io/artifact-keeper/ak-runner-e2e:latest
+        image: ghcr.io/artifact-keeper/ak-runner-rust:latest
         command:
           - cp
           - -r
@@ -83,16 +111,24 @@ template:
         volumeMounts:
           - name: dind-externals
             mountPath: /home/runner/tmpDir
+      - name: init-cache
+        image: ghcr.io/artifact-keeper/ak-runner-rust:latest
+        securityContext:
+          runAsUser: 0
+        command:
+          - sh
+          - -c
+          - mkdir -p /cache/cargo-home /cache/sccache /cache/npm && chmod -R 777 /cache/cargo-home /cache/sccache /cache/npm
+        volumeMounts:
+          - name: runner-cache
+            mountPath: /cache
       - name: dind
-        image: docker:dind
+        image: docker:27-dind
         args:
           - dockerd
           - --host=unix:///var/run/docker.sock
           - --storage-driver=vfs
           - --group=123
-        env:
-          - name: DOCKER_GROUP_GID
-            value: "123"
         restartPolicy: Always
         securityContext:
           privileged: true
@@ -101,9 +137,9 @@ template:
             command:
               - docker
               - info
-          failureThreshold: 24
-          initialDelaySeconds: 5
-          periodSeconds: 5
+          failureThreshold: 30
+          initialDelaySeconds: 3
+          periodSeconds: 3
         volumeMounts:
           - name: work
             mountPath: /home/runner/_work
@@ -122,6 +158,10 @@ template:
         emptyDir: {}
       - name: dind-externals
         emptyDir: {}
+      - name: runner-cache
+        hostPath:
+          path: /home/runner-cache
+          type: DirectoryOrCreate
       - name: dind-config
         configMap:
           name: dind-registry-mirror

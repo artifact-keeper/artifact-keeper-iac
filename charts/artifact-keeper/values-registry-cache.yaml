@@ -27,9 +27,19 @@
 
 # Pin to a known-good stable release. Bump only after smoke testing.
 # Do NOT use 'dev' or 'latest' here. Document upgrades in CHANGELOG.
+#
+# Temporarily pinned to a SHA tag because the mirror-mode routing fix
+# (artifact-keeper PR #944 / #945) hasn't been cut into a stable release
+# yet. `:sha-<commit>` is content-addressable and immutable, so it's
+# consistent with the spirit of the "no floating tags" rule. Replace
+# with the proper `1.1.9` (or `1.2.0`) tag once that release ships.
+#
+# Image: ghcr.io/artifact-keeper/artifact-keeper-backend:sha-1f52e00
+# Built from: artifact-keeper main commit 1f52e00 (PR #945, "fix(oci):
+# support Docker daemon registry-mirrors via env-configured fallback")
 backend:
   image:
-    tag: "1.1.8"
+    tag: "sha-1f52e00"
     pullPolicy: IfNotPresent
   replicaCount: 1
   env:

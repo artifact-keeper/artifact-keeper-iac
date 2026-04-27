@@ -8,11 +8,24 @@
 # proxy repo `docker-hub-cache` (see docs/registry-cache.md for repo
 # creation).
 #
-# Note on `insecure-registries`: in-cluster traffic to the cache uses
-# plain HTTP. dockerd treats unknown schemes as TLS by default; we
-# whitelist this specific endpoint as insecure. There is no path on
-# this listener that exposes anything beyond the OCI registry, and the
-# service is ClusterIP-only (not reachable outside the cluster).
+# Note on `insecure-registries`: in-cluster traffic uses plain HTTP.
+# dockerd treats unknown schemes as TLS by default; we whitelist the
+# whole Kubernetes service network so any ClusterIP service responding
+# on plain HTTP is reachable for `docker push`/`docker pull` from the
+# DinD sidecar. dockerd's insecure-registries does not support hostname
+# wildcards (no `*.svc.cluster.local`), but it does support CIDR for
+# IPs. The service network 10.96.0.0/12 (Rocky default) covers every
+# in-cluster Service ClusterIP, including:
+#
+#   - The dogfood Docker Hub cache at
+#     ak-cache-artifact-keeper-backend.infra-registry-cache.svc...:8080
+#   - Ephemeral test backends at
+#     artifact-keeper-backend.test-${RUN_ID}.svc...:8080 (used by the
+#     format-test docker native client gates -- artifact-keeper-test#52)
+#
+# This is in-cluster-only; the service network is not routable from
+# outside the cluster, so there is no surface exposed beyond what the
+# Service objects already advertise to in-cluster pods.
 
 apiVersion: v1
 kind: ConfigMap
@@ -28,6 +41,7 @@ data:
         "http://ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local:8080"
       ],
       "insecure-registries": [
-        "ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local:8080"
+        "ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local:8080",
+        "10.96.0.0/12"
       ]
     }

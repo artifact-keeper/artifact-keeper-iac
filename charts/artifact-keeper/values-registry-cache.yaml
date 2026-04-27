@@ -36,6 +36,15 @@ backend:
     RUST_LOG: "info"
     ENVIRONMENT: "production"
     AK_GUEST_ACCESS_ENABLED: "false"
+    # Mirror-mode fallback for Docker daemon registry-mirrors. When a
+    # request arrives at `/v2/<image>/...` (no AK repo prefix -- the path
+    # layout dockerd's `registry-mirrors` produces) and the literal
+    # repo_key lookup misses, the backend re-resolves through the named
+    # proxy repo with the full image_name as the upstream image path.
+    # Requires the `docker-hub-cache` proxy repo to exist (see
+    # docs/registry-cache.md). Implemented in artifact-keeper PR #944
+    # (release/1.1.x) / PR #945 (main).
+    AK_DEFAULT_DOCKER_MIRROR_REPO: "docker-hub-cache"
   resources:
     requests:
       cpu: 250m
@@ -97,5 +106,9 @@ ingress:
   enabled: false
 
 # Stable name across upgrades; service DNS becomes
-# `ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local`.
+# `ak-cache-backend.infra-registry-cache.svc.cluster.local`.
+# (The chart's helper expands `<fullnameOverride>-<component>`, NOT
+# `<fullnameOverride>-artifact-keeper-<component>` -- earlier comments here
+# and in `e2e/dind-registry-mirror-configmap.yaml` had the wrong DNS name,
+# silently breaking dockerd's `registry-mirrors` config.)
 fullnameOverride: "ak-cache"

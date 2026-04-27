@@ -6,7 +6,11 @@
 #
 # The mirror URL is the cache's backend service, which exposes the OCI
 # proxy repo `docker-hub-cache` (see docs/registry-cache.md for repo
-# creation).
+# creation). Mirror-mode routing in the AK backend (artifact-keeper PR
+# #944 / #945) requires `AK_DEFAULT_DOCKER_MIRROR_REPO=docker-hub-cache`
+# on the cache deployment so prefix-less `/v2/<image>/...` requests
+# (the path layout dockerd's `registry-mirrors` produces) get routed
+# through the proxy repo.
 #
 # Note on `insecure-registries`: in-cluster traffic uses plain HTTP.
 # dockerd treats unknown schemes as TLS by default; we whitelist the
@@ -18,7 +22,7 @@
 # in-cluster Service ClusterIP, including:
 #
 #   - The dogfood Docker Hub cache at
-#     ak-cache-artifact-keeper-backend.infra-registry-cache.svc...:8080
+#     ak-cache-backend.infra-registry-cache.svc.cluster.local:8080
 #   - Ephemeral test backends at
 #     artifact-keeper-backend.test-${RUN_ID}.svc...:8080 (used by the
 #     format-test docker native client gates -- artifact-keeper-test#52)
@@ -38,10 +42,10 @@ data:
   daemon.json: |
     {
       "registry-mirrors": [
-        "http://ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local:8080"
+        "http://ak-cache-backend.infra-registry-cache.svc.cluster.local:8080"
       ],
       "insecure-registries": [
-        "ak-cache-artifact-keeper-backend.infra-registry-cache.svc.cluster.local:8080",
+        "ak-cache-backend.infra-registry-cache.svc.cluster.local:8080",
         "10.96.0.0/12"
       ]
     }

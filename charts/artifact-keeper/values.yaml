@@ -205,6 +205,23 @@ backend:
     # RATE_LIMIT_EXEMPT_USERNAMES: ""
     # RATE_LIMIT_EXEMPT_SERVICE_ACCOUNTS: "false"
 
+    # -- Proxy Stampede Protection (remote/proxy repository upstream fetch limiter)
+    # Bounds peak concurrent in-flight upstream fetches across all remote
+    # repos. Prevents thundering-herd against upstream registries (PyPI,
+    # Maven Central, npm, Docker Hub, etc.) when many clients race for the
+    # same uncached artifact. When the queue saturates, requests return
+    # 503 Service Unavailable so clients back off rather than block.
+    #
+    # Operator dashboards: ak_proxy_upstream_inflight (gauge),
+    # ak_proxy_queue_full_total (counter), ak_proxy_queue_wait_seconds
+    # (histogram). A sustained queue_full rate signals undersized cap.
+    #
+    # PROXY_MAX_CONCURRENT_FETCHES: "20"   # Concurrent upstream fetch cap (default: 20).
+    #                                      # Set to "0" to DISABLE the limiter
+    #                                      # entirely (kill switch). Logs a
+    #                                      # startup warning when disabled.
+    # PROXY_QUEUE_TIMEOUT_SECS: "10"       # Per-request queue wait budget (default: 10).
+
     # -- Security Scanning
     # OPENSCAP_PROFILE: "xccdf_org.ssgproject.content_profile_standard"
     # GITHUB_TOKEN: ""

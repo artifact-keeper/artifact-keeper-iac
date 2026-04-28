@@ -169,24 +169,24 @@ jobs:
               ${MANIFEST_ACCEPT} "https://ghcr.io/v2/${name}/manifests/${tag}"
           }
 
-          probe_dockerhub() {
-            local name="$1"; local tag="$2"
-            local token
-            token=$(curl -sf "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${name}:pull" \
-              | jq -r '.token // empty')
-            [ -n "${token}" ] || return 1
-            # shellcheck disable=SC2086
-            # --proto =https refuses to follow HTTPS->HTTP redirects.
-            curl -sfL --proto =https -o /dev/null -H "Authorization: Bearer ${token}" \
-              ${MANIFEST_ACCEPT} "https://registry-1.docker.io/v2/${name}/manifests/${tag}"
-          }
+          # NOTE: we deliberately do not probe Docker Hub. The original gate
+          # was added to catch unpublished *ghcr.io* images we own (the
+          # v1.1.8 chart referenced an artifact-keeper-web image that was
+          # never pushed). Anonymous Docker Hub probing from CI runners
+          # hits the 100-pulls-per-6h-per-IP unauthenticated rate limit
+          # almost immediately and produces false negatives -- it claims
+          # `postgres:16-alpine` doesn't exist when it's actually the most
+          # popular image on Docker Hub. We treat docker.io the same way
+          # we treat gcr.io / registry.k8s.io / quay.io: trust the public
+          # registry, log the reference for visibility, and let the
+          # install-test job catch a genuinely-broken upstream ref via an
+          # actual pull through the mirror-configured containerd.
 
           missing=()
           while IFS= read -r ref; do
             [ -z "${ref}" ] && continue
             tag="${ref##*:}"
             name="${ref%:*}"
-            # Detect registry. References without a host default to Docker Hub.
             case "${name}" in
               ghcr.io/*)
                 probe_name="${name#ghcr.io/}"
@@ -197,38 +197,20 @@ jobs:
                   missing+=("${ref}")
                 fi
                 ;;
-              docker.io/*)
-                probe_name="${name#docker.io/}"
-                if probe_dockerhub "${probe_name}" "${tag}"; then
-                  echo "  ✓ ${ref}"
-                else
-                  echo "  ✗ ${ref}  (missing on docker.io)"
-                  missing+=("${ref}")
-                fi
-                ;;
-              gcr.io/*|registry.k8s.io/*|quay.io/*)
-                # External well-known registries; we trust them and don't probe.
-                echo "  - ${ref}  (external registry, not probed)"
+              docker.io/*|gcr.io/*|registry.k8s.io/*|quay.io/*)
+                # Public well-known registries; not probed (rate limits and
+                # registry-specific auth quirks make probing unreliable).
+                echo "  - ${ref}  (public registry, not probed)"
                 ;;
               */*)
-                # No host prefix but contains a slash; could be docker.io/library
-                # via short form (e.g. "library/postgres" or "user/image").
-                if probe_dockerhub "${name}" "${tag}"; then
-                  echo "  ✓ ${ref}  (resolved on docker.io)"
-                else
-                  echo "  ✗ ${ref}  (missing on docker.io)"
-                  missing+=("${ref}")
-                fi
+                # No host prefix but contains a slash; implicit Docker Hub
+                # short form (e.g. "user/image"). Not probed, see above.
+                echo "  - ${ref}  (implicit docker.io, not probed)"
                 ;;
               *)
                 # No slash, no host. Implicit Docker Hub library namespace
-                # (e.g. "postgres:16-alpine" -> docker.io/library/postgres).
-                if probe_dockerhub "library/${name}" "${tag}"; then
-                  echo "  ✓ ${ref}  (resolved on docker.io/library)"
-                else
-                  echo "  ✗ ${ref}  (missing on docker.io/library)"
-                  missing+=("${ref}")
-                fi
+                # (e.g. "postgres:16-alpine"). Not probed, see above.
+                echo "  - ${ref}  (implicit docker.io/library, not probed)"
                 ;;
             esac
           done <<< "${IMAGES}"
@@ -320,6 +302,35 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/k3d" version
 
+      - name: Configure k3d Docker Hub mirror
+        run: |
+          # Route k3d's embedded containerd through Google's public Docker
+          # Hub mirror (mirror.gcr.io) before falling back to the canonical
+          # registry. The mirror is a free read-through cache of all of
+          # Docker Hub (not just `library/*`) and has no anonymous pull
+          # rate limit -- in contrast to registry-1.docker.io's
+          # 100-pulls-per-6h-per-IP cap, which CI runners trip almost
+          # immediately when an `install-test` job pulls postgres,
+          # opensearch, trivy, busybox, and alpine in a single run
+          # (observed: ImagePullBackOff with HTTP 429
+          # "toomanyrequests: You have reached your unauthenticated pull
+          # rate limit").
+          #
+          # Configuration is per the k3d registries-config schema, which
+          # k3s consumes and lowers to containerd's mirrors block.
+          # https://k3d.io/v5.7.5/usage/registries/
+          # https://cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images
+          mkdir -p /tmp/k3d
+          cat > /tmp/k3d/registries.yaml <<'EOF'
+          mirrors:
+            "docker.io":
+              endpoint:
+                - "https://mirror.gcr.io"
+                - "https://registry-1.docker.io"
+          EOF
+          echo "k3d registries.yaml:"
+          cat /tmp/k3d/registries.yaml
+
       - name: Create k3d cluster
         run: |
           # Single-server cluster, no LoadBalancer (not needed for chart-testing
@@ -332,9 +343,15 @@ jobs:
           # with "failed to mount overlay: invalid argument" and the k3s node
           # never registers. The `native` snapshotter uses plain file copies
           # instead; slower but works in nested environments.
+          #
+          # --registry-config: feeds the mirror.gcr.io fallback above into
+          # k3s, which writes /etc/rancher/k3s/registries.yaml inside the
+          # node and configures containerd's mirrors block before pulling
+          # the chart-testing image graph.
           k3d cluster create chart-testing \
             --agents 0 \
             --no-lb \
+            --registry-config /tmp/k3d/registries.yaml \
             --k3s-arg "--disable=traefik@server:0" \
             --k3s-arg "--disable=metrics-server@server:0" \
             --k3s-arg "--snapshotter=native@server:0" \

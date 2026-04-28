@@ -26,6 +26,8 @@ backend:
 
 web:
   replicaCount: 2
+  image:
+    tag: dev
 
 # Edge replication: disabled by default until the artifact-keeper-edge image
 # ships on ghcr.io. See the note in values.yaml. Re-enable once published.

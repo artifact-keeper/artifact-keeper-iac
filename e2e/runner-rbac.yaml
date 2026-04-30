@@ -34,8 +34,11 @@ rules:
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Core workload resources (Helm chart deploys these)
+  # pods/exec is needed by the clean-install smoke test to run /readyz
+  # probes from inside the cluster (either against the backend pod when it
+  # ships curl/wget, or against an ephemeral curl pod when it does not).
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "configmaps", "persistentvolumeclaims", "serviceaccounts"]
+    resources: ["pods", "pods/log", "pods/exec", "services", "configmaps", "persistentvolumeclaims", "serviceaccounts"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Apps (Deployments, StatefulSets managed by Helm)

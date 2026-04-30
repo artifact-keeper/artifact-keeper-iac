@@ -58,6 +58,8 @@ jobs:
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
             values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-test --set postgres.auth.password=ci-test --set meilisearch.masterKey=ci-test"
+          - variant: smoke
+            values_args: "-f charts/artifact-keeper/values-smoke.yaml --set backend.image.tag=dev --set web.image.tag=dev"
           - variant: mesh-main
             values_args: "-f charts/artifact-keeper/values-mesh-main.yaml"
           - variant: mesh-peer
@@ -115,6 +117,8 @@ jobs:
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
             values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-test --set postgres.auth.password=ci-test --set meilisearch.masterKey=ci-test"
+          - variant: smoke
+            values_args: "-f charts/artifact-keeper/values-smoke.yaml --set backend.image.tag=dev --set web.image.tag=dev"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

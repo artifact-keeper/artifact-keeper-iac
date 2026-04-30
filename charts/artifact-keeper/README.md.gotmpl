@@ -111,6 +111,21 @@ helm install ak charts/artifact-keeper/ \
   --set secrets.jwtSecret=$(openssl rand -base64 64)
 ```
 
+### Smoke / Release-Gate Testing
+
+`values-smoke.yaml` is the canonical overlay for smoke installs and the release-gate test suites in [artifact-keeper-test](https://github.com/artifact-keeper/artifact-keeper-test). It pins resource requests to fit a 4 CPU / 8 Gi namespace, sets a non-default admin password, exempts the `admin` user from rate limiting, and disables every external dependency the smoke can't satisfy (Trivy, DependencyTrack, ingress, ServiceMonitor, NetworkPolicy, External Secrets, edge replication, cosign verification).
+
+```bash
+helm install ak charts/artifact-keeper/ \
+  -f charts/artifact-keeper/values-smoke.yaml \
+  --set backend.image.tag=dev \
+  --set web.image.tag=dev \
+  --namespace artifact-keeper-smoke \
+  --create-namespace
+```
+
+This file is the single source of truth for smoke overrides. When the chart adds a new default-on subsystem, update `values-smoke.yaml` rather than encoding overrides as inline `--set` flags in test scripts.
+
 ### Mesh (Multi-Instance Replication)
 
 Two overlay files support multi-instance mesh testing via ArgoCD:
@@ -275,6 +290,8 @@ The CI pipeline verifies that the README is up to date on every pull request. If
 helm lint charts/artifact-keeper/
 helm template ak charts/artifact-keeper/ > /dev/null
 helm template ak charts/artifact-keeper/ -f charts/artifact-keeper/values-production.yaml > /dev/null
+helm template ak charts/artifact-keeper/ -f charts/artifact-keeper/values-smoke.yaml \
+  --set backend.image.tag=dev --set web.image.tag=dev > /dev/null
 ```
 
 ## Contributing

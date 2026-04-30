@@ -1,0 +1,195 @@
+# =============================================================================
+# Smoke test overlay
+# =============================================================================
+# Canonical values overlay for smoke / clean-install gates and the
+# artifact-keeper-test release-gate suite. Use this file whenever you need a
+# minimal, deterministic install that can stand up in a 4 CPU / 8 Gi namespace
+# (kind, k3d, or a sized-down K8s test namespace).
+#
+# This file is the single source of truth for "what must be turned off so a
+# smoke install succeeds against the bundled in-cluster components." Every
+# override below is documented with its reason so that a future chart change
+# (a new external dep, a new feature default-on) can be reviewed against
+# this file consciously.
+#
+# Used by:
+#   - artifact-keeper-test/scripts/create-test-namespace.sh (release-gate suites)
+#   - artifact-keeper-test/scripts/clean-install-smoke.sh (clean install gate)
+#   - .github/workflows/helm-ci.yml (template-validation matrix)
+#
+# Typical invocation:
+#   helm install ak ./charts/artifact-keeper \
+#     -f ./charts/artifact-keeper/values-smoke.yaml \
+#     --set backend.image.tag=dev \
+#     --set web.image.tag=dev
+# =============================================================================
+
+# Stable release name. Tests hardcode service URLs like
+# `http://artifact-keeper-backend.<ns>.svc.cluster.local:8080`, so keep the
+# release-name suffix off the rendered Service names regardless of what the
+# caller passes to `helm install`.
+fullnameOverride: artifact-keeper
+
+backend:
+  replicaCount: 1
+  image:
+    # Image tag is set explicitly by the caller (`--set backend.image.tag=...`).
+    # `dev` is the floating tag built from main; release gates pin to the RC tag.
+    pullPolicy: Always
+  # Resource sizing for v1.2.x: uploads now write to OpenSearch in the same
+  # critical path, so the backend competes with the JVM for CPU under sustained
+  # load. CPU bumped from 2 to 2500m at the limit. Total namespace CPU
+  # requests stay under the 4 CPU quota:
+  #   750m (backend) + 50m (web) + 50m (postgres) + 100m (opensearch)
+  #   = 950m requested, 4250m at the limits (oversubscribed at the limit,
+  #   which is fine for CI smoke).
+  resources:
+    requests:
+      cpu: 750m
+      memory: 384Mi
+    limits:
+      cpu: 2500m
+      memory: 2Gi
+  env:
+    ENVIRONMENT: test
+    RUST_LOG: info
+    # Override the default ADMIN_PASSWORD ("admin" from values.yaml) so the
+    # backend does not detect a default-password install and lock its /readyz
+    # endpoint. Without this, helm --wait times out because the pod never
+    # becomes Ready (the startup probe against /readyz returns 503 for as
+    # long as the admin lock is active).
+    ADMIN_PASSWORD: TestRunner!2026secure
+    # Disable account lockout so brute-force-style E2E tests (auth, password
+    # rotation, impersonation suites) don't lock themselves out partway
+    # through the run.
+    ACCOUNT_LOCKOUT_THRESHOLD: "0"
+    # Exempt the admin user from the global rate limiter. The release-gate
+    # suite drives all traffic as `admin` and trips the default per-user
+    # limit on stress / concurrent-upload jobs. See artifact-keeper-test#102
+    # and artifact-keeper-iac#97 for context.
+    RATE_LIMIT_EXEMPT_USERNAMES: "admin"
+  persistence:
+    size: 2Gi
+  scanWorkspace:
+    enabled: false
+  autoscaling:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+
+web:
+  replicaCount: 1
+  image:
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# In-cluster Postgres. Sized to fit alongside the backend, web, and OpenSearch
+# inside the 4 CPU / 8 Gi namespace quota. RDS / external DB overlays should
+# layer their own values file on top of this one and set postgres.enabled=false.
+postgres:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    size: 2Gi
+  auth:
+    username: registry
+    password: "test-db-password"
+    database: artifact_registry
+
+# OpenSearch (replaces Meilisearch as of v1.2.x). Enabled because the
+# search-tests suite requires a working search backend end-to-end.
+#
+# disableSecurityPlugin keeps us off the cert/auth dance that production uses
+# (the chart's default for non-prod). Reduced JVM heap and resources to fit
+# the test namespace's 4 CPU / 8 Gi quota alongside backend, web, and postgres.
+opensearch:
+  enabled: true
+  disableSecurityPlugin: true
+  javaOpts: "-Xms256m -Xmx256m"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+  persistence:
+    enabled: true
+    size: 1Gi
+
+# -----------------------------------------------------------------------------
+# Disabled subsystems
+# -----------------------------------------------------------------------------
+# Anything below this line is turned off for one of three reasons:
+#   1. Requires an external dep the smoke can't satisfy (RDS, External Secrets,
+#      a real ingress controller, a Prometheus operator).
+#   2. Pulls a heavyweight image whose cold-start cost blows the helm --wait
+#      window (Trivy DB sync, Dependency-Track JVM warmup).
+#   3. Out of scope for smoke validation -- the gate is "does the chart stand
+#      up and serve /healthz", not "does every optional integration boot."
+#
+# When the chart adds a new default-on subsystem, add it here with a comment
+# explaining why the smoke can't run it. Don't silently ignore it via --set.
+# -----------------------------------------------------------------------------
+
+# Edge replication: requires a published edge image and a peer instance to
+# replicate against. Out of scope for single-instance smoke.
+edge:
+  enabled: false
+
+# Trivy: ~700 MiB DB pull on first start, then continuous DB updates.
+# Smoke gates don't run vulnerability scans.
+trivy:
+  enabled: false
+
+# Dependency-Track: 4 GiB+ JVM, multi-minute startup loading the NVD on
+# first boot. Far too heavy for a smoke namespace.
+dependencyTrack:
+  enabled: false
+
+# Ingress: smoke runs port-forward against the backend Service. A real
+# ingress controller (nginx, traefik) is not present in the test namespace.
+ingress:
+  enabled: false
+
+# Cosign image-signature verification: the dev tag is unsigned, so enabling
+# cosign verification on smoke would block pod startup. Production overlay
+# turns this back on.
+cosign:
+  enabled: false
+
+# NetworkPolicy: smoke namespaces are isolated by namespace boundary; we
+# don't enforce per-component policies because the test runner needs to
+# reach every Service in the namespace via port-forward.
+networkPolicy:
+  enabled: false
+
+# ServiceMonitor: requires the Prometheus Operator CRDs, which the smoke
+# cluster doesn't install.
+serviceMonitor:
+  enabled: false
+
+# External Secrets Operator: requires AWS Secrets Manager + the ESO
+# controller. Smoke uses inline secrets below.
+externalSecrets:
+  enabled: false
+
+# Inline secrets for smoke. These are NOT production credentials -- they
+# exist solely so the chart's Secret template renders and pods can mount
+# the expected keys. Production overlays must override them.
+secrets:
+  jwtSecret: "smoke-test-jwt-secret-not-for-production"
+  s3AccessKey: "smoke-test-access"
+  s3SecretKey: "smoke-test-secret"

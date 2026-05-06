@@ -189,6 +189,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "artifact-keeper.fullname" . }}-secrets
                   key: JWT_SECRET
+            {{- if or (and .Values.externalSecrets.enabled .Values.externalSecrets.secrets.migrationEncryptionKey) (and (not .Values.externalSecrets.enabled) .Values.secrets.migrationEncryptionKey) }}
+            - name: MIGRATION_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  key: MIGRATION_ENCRYPTION_KEY
+            {{- end }}
             {{- if .Values.opensearch.enabled }}
             - name: OPENSEARCH_URL
               value: "{{ if .Values.opensearch.disableSecurityPlugin }}http{{ else }}https{{ end }}://{{ include "artifact-keeper.fullname" . }}-opensearch:9200"

@@ -557,6 +557,12 @@ secrets:
   s3SecretKey: ""
   # SMTP password (only used when backend.env.SMTP_HOST is set)
   smtpPassword: ""
+  # Migration encryption key — required at runtime by the backend to
+  # encrypt source-connection credentials in the migration_jobs table.
+  # Without it, POST /api/v1/migrations/connections returns 500. Should
+  # be a random 32-byte value (e.g. `openssl rand -hex 32`). Leave empty
+  # to skip the env var entirely (migration features will return 500).
+  migrationEncryptionKey: ""
 
 # -- External Secrets Operator
 # When enabled, ExternalSecret CRDs replace the static Secret template.
@@ -579,6 +585,12 @@ externalSecrets:
     opensearchAuth: artifact-keeper/${ENVIRONMENT}/opensearch-auth
     dtAdminPassword: artifact-keeper/${ENVIRONMENT}/dt-admin-password
     smtpPassword: artifact-keeper/${ENVIRONMENT}/smtp-password
+    # MIGRATION_ENCRYPTION_KEY — required at runtime to encrypt
+    # source-connection credentials in the migration_jobs table. The
+    # AWS SM secret should expose this under the property name
+    # `migration-encryption-key`. Leave the value empty to skip the
+    # ExternalSecret data entry (set this to a real path to enable).
+    migrationEncryptionKey: ""
 
 # -- Network policies
 networkPolicy:

@@ -38,8 +38,8 @@ spec:
             valuesFile: values-production.yaml
             # Production tracks a specific release tag. Update this value
             # to promote a new version (e.g., v1.2.0). Sync is manual.
-            targetRevision: v1.1.0
-            imageTag: ~1.0
+            targetRevision: v1.1.9
+            imageTag: ~1.1
             imageUpdateStrategy: semver
             autoSync: "false"
   template:

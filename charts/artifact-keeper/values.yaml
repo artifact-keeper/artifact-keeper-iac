@@ -23,10 +23,16 @@
 #
 # IMAGE TAGS
 # ----------
-# The "dev" tag on backend/web is a floating tag that always points to
-# the latest build from main. ArgoCD Image Updater pins these to specific
-# digests so rollouts are deterministic. If you deploy outside ArgoCD,
-# set imagePullPolicy: Always so restarts pull the latest dev build.
+# When backend/web/edge image.tag is left empty (the default), the chart
+# pins to the chart's appVersion so a given chart release is reproducible:
+# `helm install foo --version 1.2.3` always pulls image tag 1.2.3.
+#
+# Override image.tag explicitly when you want a floating tag:
+#   - "dev" follows the latest build from main (used in values-staging.yaml)
+#   - "latest" is the most recent release (used in values-production.yaml)
+# ArgoCD Image Updater pins floating tags to specific digests so rollouts
+# stay deterministic. For manual deploys with a floating tag, set
+# imagePullPolicy: Always so restarts pick up new builds.
 #
 # RESOURCE SIZING
 # ---------------
@@ -84,11 +90,11 @@ backend:
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-backend  # Docker Hub: artifactkeeper/backend
-    # -- "dev" is a floating tag built from main. ArgoCD Image Updater
-    # pins this to a digest automatically. For manual deploys, consider
-    # using a specific version tag (e.g. 1.1.0).
-    tag: dev
-    pullPolicy: Always
+    # -- Defaults to .Chart.AppVersion when empty, so chart version and
+    # image version stay in lockstep. Override to "dev" or "latest" for
+    # a floating tag (see comment block at top of file).
+    tag: ""
+    pullPolicy: IfNotPresent
   service:
     type: ClusterIP
     httpPort: 8080
@@ -300,8 +306,9 @@ web:
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-web  # Docker Hub: artifactkeeper/web
-    tag: dev
-    pullPolicy: Always
+    # -- Defaults to .Chart.AppVersion when empty (see backend.image.tag).
+    tag: ""
+    pullPolicy: IfNotPresent
   service:
     type: ClusterIP
     port: 3000
@@ -337,8 +344,9 @@ edge:
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-edge
-    tag: dev
-    pullPolicy: Always
+    # -- Defaults to .Chart.AppVersion when empty (see backend.image.tag).
+    tag: ""
+    pullPolicy: IfNotPresent
   service:
     type: ClusterIP
     port: 8081

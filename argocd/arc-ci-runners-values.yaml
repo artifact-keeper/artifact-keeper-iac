@@ -58,6 +58,7 @@ template:
   spec:
     imagePullSecrets:
       - name: ghcr-pull-secret
+      - name: dockerhub-pull
     containers:
       - name: runner
         image: ghcr.io/artifact-keeper/ak-runner-rust:latest

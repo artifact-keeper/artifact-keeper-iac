@@ -31,9 +31,22 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with (.Values.backend.affinity | default .Values.global.affinity) }}
+      {{- $explicitAffinity := .Values.backend.affinity | default .Values.global.affinity }}
+      {{- if $explicitAffinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml $explicitAffinity | nindent 8 }}
+      {{- else if and .Values.backend.scanWorkspace.enabled .Values.trivy.enabled }}
+      # The scan-workspace PVC is ReadWriteOnce and is mounted by both the
+      # backend (RW) and trivy (RO) Deployments. Force backend onto the same
+      # node as trivy so the volume can attach. Operators can override by
+      # setting backend.affinity (or global.affinity) explicitly.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "artifact-keeper.trivy.selectorLabels" . | nindent 18 }}
+              topologyKey: kubernetes.io/hostname
       {{- end }}
       {{- with (.Values.backend.nodeSelector | default .Values.global.nodeSelector) }}
       nodeSelector:

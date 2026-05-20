@@ -286,6 +286,16 @@ backend:
     minAvailable: 1
   # -- Per-component scheduling (overrides global)
   tolerations: []
+  # -- Backend pod affinity.
+  # When left empty AND both `backend.scanWorkspace.enabled` and
+  # `trivy.enabled` are true, the chart auto-injects a required podAffinity
+  # rule that co-schedules backend with trivy on the same node
+  # (topologyKey: kubernetes.io/hostname). This is required because the
+  # `<release>-scan-workspace` PVC is ReadWriteOnce and is mounted by both
+  # Deployments — without co-scheduling, the second pod fails to attach
+  # with `Multi-Attach error`. Set this field to opt out of the auto-inject
+  # and own scheduling fully (e.g. for pod anti-affinity to spread backend
+  # replicas, you must also re-add the trivy podAffinity yourself).
   affinity: {}
   nodeSelector: {}
   topologySpreadConstraints: []

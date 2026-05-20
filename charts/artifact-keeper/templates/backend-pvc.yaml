@@ -24,8 +24,9 @@ spec:
   {{- if .Values.backend.persistence.storageClass }}
   storageClassName: {{ .Values.backend.persistence.storageClass | quote }}
   {{- end }}
+{{- end }}
+{{- if and .Values.backend.enabled .Values.backend.scanWorkspace.enabled }}
 ---
-{{- if .Values.backend.scanWorkspace.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -43,8 +44,8 @@ spec:
   storageClassName: {{ .Values.backend.persistence.storageClass | quote }}
   {{- end }}
 {{- end }}
----
 {{- if .Values.dependencyTrack.enabled }}
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -61,5 +62,4 @@ spec:
   {{- if .Values.backend.persistence.storageClass }}
   storageClassName: {{ .Values.backend.persistence.storageClass | quote }}
   {{- end }}
-{{- end }}
 {{- end }}

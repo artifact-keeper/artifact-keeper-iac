@@ -514,6 +514,15 @@ dependencyTrack:
     repository: dependencytrack/apiserver
     tag: "4.11.4"
   adminPassword: ""
+  # -- PostgreSQL database name used by DependencyTrack. Rendered into the
+  # JDBC URL (`jdbc:postgresql://<host>:<port>/<databaseName>`) for both the
+  # in-cluster postgres and `externalDatabase` deployment paths. Defaults
+  # to "dependency_track" so existing installs see no behaviour change.
+  # Set this to share a single managed-Postgres database with the backend
+  # (e.g. one CloudSQL DB serving the whole stack). When using the
+  # in-cluster postgres with `postgres.initDb.enabled=true`, this name is
+  # also used for the `CREATE DATABASE` statement in the bootstrap SQL.
+  databaseName: "dependency_track"
   persistence:
     size: 5Gi
     storageClass: ""

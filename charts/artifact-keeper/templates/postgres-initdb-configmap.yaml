@@ -18,6 +18,9 @@ metadata:
 data:
   init-db.sql: |
     -- Create Dependency-Track database
-    CREATE DATABASE dependency_track;
-    GRANT ALL PRIVILEGES ON DATABASE dependency_track TO {{ .Values.postgres.auth.username }};
+    {{- $dtrackDb := .Values.dependencyTrack.databaseName | default "dependency_track" }}
+    {{- if ne $dtrackDb .Values.postgres.auth.database }}
+    CREATE DATABASE {{ $dtrackDb }};
+    GRANT ALL PRIVILEGES ON DATABASE {{ $dtrackDb }} TO {{ .Values.postgres.auth.username }};
+    {{- end }}
 {{- end }}

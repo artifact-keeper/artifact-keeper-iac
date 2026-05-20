@@ -91,11 +91,29 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            {{- if and (not .Values.postgres.enabled) .Values.externalDatabase.existingSecret }}
+            # Project host/port out of the operator-provided Secret so the JDBC
+            # URL below can reference them via $(VAR) expansion. Kubernetes
+            # expands env vars in declared order, so these MUST come before
+            # ALPINE_DATABASE_URL.
+            - name: _DTRACK_DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalDatabase.existingSecret }}
+                  key: {{ .Values.externalDatabase.existingHostKey | default "POSTGRES_HOST" }}
+            - name: _DTRACK_DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalDatabase.existingSecret }}
+                  key: {{ .Values.externalDatabase.existingPortKey | default "POSTGRES_PORT" }}
+            {{- end }}
             - name: ALPINE_DATABASE_MODE
               value: "external"
             - name: ALPINE_DATABASE_URL
               {{- if .Values.postgres.enabled }}
               value: "jdbc:postgresql://{{ include "artifact-keeper.fullname" . }}-postgres:5432/dependency_track"
+              {{- else if .Values.externalDatabase.existingSecret }}
+              value: "jdbc:postgresql://$(_DTRACK_DB_HOST):$(_DTRACK_DB_PORT)/dependency_track"
               {{- else }}
               value: "jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port }}/dependency_track"
               {{- end }}

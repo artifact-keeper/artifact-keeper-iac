@@ -406,6 +406,11 @@ externalDatabase:
   database: "artifact_registry"
   existingSecret: ""
   existingSecretKey: "DATABASE_URL"
+  # Key in `existingSecret` holding the database password used by the
+  # dependency-track deployment (`ALPINE_DATABASE_PASSWORD`). Only consulted
+  # when `postgres.enabled=false` and `externalDatabase.existingSecret` is
+  # set. Defaults to "POSTGRES_PASSWORD" if left empty.
+  existingPasswordKey: ""
 
 # -- OpenSearch (full-text search engine)
 # Powers full-text artifact search. The backend auto-reindexes from

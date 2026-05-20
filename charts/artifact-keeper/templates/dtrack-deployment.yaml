@@ -146,7 +146,13 @@ spec:
       volumes:
         - name: tmp
           emptyDir:
-            sizeLimit: 256Mi
+            # DependencyTrack writes ~1-2Gi into /tmp during startup (NVD
+            # mirror sync, DB migrations, JVM working files). A 256Mi
+            # ceiling triggers `Usage of EmptyDir volume "tmp" exceeds the
+            # limit` evictions partway through init, producing a tight
+            # crash-loop. 2Gi default fits stock startup; operators on
+            # constrained nodes can tune down via dependencyTrack.tmpSizeLimit.
+            sizeLimit: {{ .Values.dependencyTrack.tmpSizeLimit | default "2Gi" }}
         - name: dtrack-data
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-dtrack

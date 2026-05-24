@@ -72,9 +72,9 @@ backend:
 
 # The cache is a pure pull-through OCI proxy. No UI needed, and the web
 # image release schedule is independent from the backend's so the version
-# tags don't necessarily align (e.g. backend has 1.1.8 but web does not).
-# Keep web disabled to avoid that coupling. Operators who want the UI for
-# debugging can deploy a separate AK install or temporarily enable this.
+# tags don't necessarily align. Keep web disabled to avoid that coupling.
+# Operators who want the UI for debugging can deploy a separate AK install
+# or temporarily enable this.
 web:
   enabled: false
 

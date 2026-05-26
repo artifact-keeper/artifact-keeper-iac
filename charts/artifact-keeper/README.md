@@ -22,6 +22,19 @@ This chart deploys [Artifact Keeper](https://github.com/artifact-keeper/artifact
 
 All files in this chart are provided as example configurations. Review and modify them to match your specific infrastructure requirements, security policies, and operational needs before use in production.
 
+## Compatibility Matrix
+
+The chart and backend versions must match. The current chart on `main` deploys OpenSearch (replacing Meilisearch from v1.1.x), so it requires backend v1.2.0 or later.
+
+| Chart version | Backend image | Search backend |
+|---|---|---|
+| `main` (unreleased v1.2.x) | v1.2.0+ (`:dev`, `:1.2-dev`, or `:1.2.0`+) | OpenSearch |
+| tag `chart-1.1.x` (planned) | v1.1.x line | Meilisearch |
+
+For deployments running backend v1.1.x, pin the chart to a tag matching that line. Mixing chart `main` with backend `:1.1-dev` will fail at startup because the backend will not find an OpenSearch endpoint.
+
+Tracking issues: chart release tags are coordinated in [#74](https://github.com/artifact-keeper/artifact-keeper-iac/issues/74), and a published Helm repository is tracked in [#51](https://github.com/artifact-keeper/artifact-keeper-iac/issues/51).
+
 ## Prerequisites
 
 - Kubernetes 1.26+
@@ -38,15 +51,7 @@ echo "vm.max_map_count = 262144" >> /etc/sysctl.d/99-opensearch.conf
 
 ## Installing the Chart
 
-Install the chart with the release name `ak`:
-
-```bash
-helm install ak artifact-keeper/artifact-keeper \
-  --namespace artifact-keeper \
-  --create-namespace
-```
-
-Or install from a local checkout:
+Install the chart from a local clone with the release name `ak`:
 
 ```bash
 git clone https://github.com/artifact-keeper/artifact-keeper-iac.git
@@ -55,6 +60,10 @@ helm install ak charts/artifact-keeper/ \
   --namespace artifact-keeper \
   --create-namespace
 ```
+
+A published Helm repository at `https://artifact-keeper.github.io/artifact-keeper-iac/` is planned but not yet live (see [issue #51](https://github.com/artifact-keeper/artifact-keeper-iac/issues/51)). Once published, the equivalent install command will be `helm install ak artifact-keeper/artifact-keeper`.
+
+If you are running backend v1.1.x, do not install from `main`. See the [Compatibility Matrix](#compatibility-matrix) above for chart/backend version pairing.
 
 These commands deploy Artifact Keeper with the default development configuration. See the [Values](#values) section for the full list of configurable parameters.
 

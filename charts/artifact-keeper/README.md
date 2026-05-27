@@ -86,6 +86,9 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | externalDatabase | object | `{"database":"artifact_registry","existingSecret":"","existingSecretKey":"DATABASE_URL","host":"","password":"","port":5432,"username":""}` | External database (used when postgres.enabled=false) |
 | externalSecrets | object | `{"enabled":false,"refreshInterval":"1h","secrets":{"dbCredentials":"artifact-keeper/${ENVIRONMENT}/db-credentials","dtAdminPassword":"artifact-keeper/${ENVIRONMENT}/dt-admin-password","jwtSecret":"artifact-keeper/${ENVIRONMENT}/jwt-secret","opensearchAuth":"artifact-keeper/${ENVIRONMENT}/opensearch-auth","s3Keys":"artifact-keeper/${ENVIRONMENT}/s3-keys","smtpPassword":"artifact-keeper/${ENVIRONMENT}/smtp-password"},"storeKind":"ClusterSecretStore","storeName":"aws-secrets-manager"}` | External Secrets Operator When enabled, ExternalSecret CRDs replace the static Secret template. Requires External Secrets Operator installed on the cluster and a SecretStore or ClusterSecretStore configured for your provider. |
 | fullnameOverride | string | `""` |  |
+| gke.healthCheckPolicies.backend.requestPath | string | `"/livez"` | Health-check path for the backend BackendService. |
+| gke.healthCheckPolicies.dependencyTrack.requestPath | string | `"/api/version"` | Health-check path for the DependencyTrack BackendService. |
+| gke.healthCheckPolicies.enabled | bool | `false` | Render a `networking.gke.io/v1` HealthCheckPolicy per Service so a GKE Gateway BackendService probes the app's real health path instead of `/` (which backend and DependencyTrack return 404 for). Leave disabled on non-GKE installs and on plain Ingress-based GKE. |
 | global.affinity | object | `{}` |  |
 | global.imagePullPolicy | string | `"Always"` |  |
 | global.imageRegistry | string | `"ghcr.io/artifact-keeper"` |  |

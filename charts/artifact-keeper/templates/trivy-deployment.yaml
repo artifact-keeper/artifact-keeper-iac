@@ -85,11 +85,6 @@ spec:
               mountPath: /home/trivy/.cache
             - name: tmp
               mountPath: /tmp
-            {{- if .Values.backend.scanWorkspace.enabled }}
-            - name: scan-workspace
-              mountPath: /scan-workspace
-              readOnly: true
-            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
@@ -97,11 +92,6 @@ spec:
         - name: trivy-cache
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-trivy-cache
-        {{- if .Values.backend.scanWorkspace.enabled }}
-        - name: scan-workspace
-          persistentVolumeClaim:
-            claimName: {{ include "artifact-keeper.fullname" . }}-scan-workspace
-        {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

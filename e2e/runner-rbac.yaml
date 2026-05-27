@@ -46,10 +46,13 @@ rules:
     resources: ["deployments", "statefulsets", "replicasets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
-  # Batch (Jobs used by mesh E2E tests)
+  # Batch (Jobs used by mesh E2E tests, plus the DTrack bootstrap Job
+  # the chart renders when dependencyTrack.enabled=true). Helm uses
+  # server-side apply which needs patch+update; the missing verbs were
+  # blocking every DTrack-enabled deploy (#129).
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch", "delete"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Networking (Services, Ingresses, NetworkPolicies from Helm chart)
   - apiGroups: ["networking.k8s.io"]

@@ -589,3 +589,18 @@ serviceMonitor:
   enabled: false
   interval: 30s
   scrapeTimeout: 10s
+
+# GKE-specific resources. Only relevant on Google Kubernetes Engine.
+gke:
+  healthCheckPolicies:
+    # -- Render a `networking.gke.io/v1` HealthCheckPolicy per Service so a GKE
+    # Gateway BackendService probes the app's real health path instead of `/`
+    # (which backend and DependencyTrack return 404 for). Leave disabled on
+    # non-GKE installs and on plain Ingress-based GKE.
+    enabled: false
+    backend:
+      # -- Health-check path for the backend BackendService.
+      requestPath: /livez
+    dependencyTrack:
+      # -- Health-check path for the DependencyTrack BackendService.
+      requestPath: /api/version

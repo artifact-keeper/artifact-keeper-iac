@@ -47,8 +47,15 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
+        # Image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
+        # with ownership 1001:0 (see artifact-keeper/docker/Dockerfile.backend
+        # lines 95-108, 175). fsGroup only chowns mounted volumes -- it does
+        # NOT touch the image's root filesystem -- so we MUST run as the
+        # image-native UID 1001 or Grype hits EACCES and every scan terminates
+        # with status=failed, findings_count=0 (#127, artifact-keeper-test
+        # release-gate run 26487615730).
+        runAsUser: {{ .Values.backend.podSecurityContext.runAsUser | default 1001 }}
+        fsGroup: {{ .Values.backend.podSecurityContext.fsGroup | default 0 }}
       initContainers:
         {{- if .Values.cosign.enabled }}
         - name: verify-image-signature

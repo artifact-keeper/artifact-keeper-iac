@@ -89,6 +89,18 @@ backend:
     # using a specific version tag (e.g. 1.1.0).
     tag: dev
     pullPolicy: Always
+  # -- Pod-level securityContext. Defaults are image-native: the backend
+  # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
+  # with ownership 1001:0 (see artifact-keeper docker/Dockerfile.backend).
+  # The pod MUST run as that UID/GID or Grype hits EACCES on the DB.
+  #
+  # If you are upgrading from chart <= 1.x where this defaulted to
+  # 1000:1000, your storage/scan-workspace PVCs will be recursively
+  # chowned on first remount because fsGroup changed. That takes ~1s per
+  # GiB of artifact data. See UPGRADE-NOTES.md.
+  podSecurityContext:
+    runAsUser: 1001
+    fsGroup: 0
   service:
     type: ClusterIP
     httpPort: 8080

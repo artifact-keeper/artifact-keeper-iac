@@ -506,11 +506,15 @@ trivy:
   # the DB with an init container so it is present before the server accepts scans.
   db:
     # -- OCI repository for the vulnerability DB. Override to an internal mirror the
-    # cluster can reach. mirror.gcr.io fronts the same artifact as ghcr but is not
-    # subject to the ghcr anonymous-pull rate limit.
-    repository: "mirror.gcr.io/aquasecurity/trivy-db"
-    # -- OCI repository for the Java DB (used by jar/war scanning).
-    javaRepository: "mirror.gcr.io/aquasecurity/trivy-java-db"
+    # cluster can reach. Default empty means Trivy uses its built-in ghcr.io default,
+    # which has historically been the only reliably-reachable source from our gate
+    # cluster. mirror.gcr.io was tried in #136 but caused the server to hang at
+    # Available 0/1 even with preseed off (see artifact-keeper-iac #140), so the
+    # mirror is now opt-in by override rather than the default.
+    repository: ""
+    # -- OCI repository for the Java DB (used by jar/war scanning). Same opt-in
+    # semantics as `repository` above.
+    javaRepository: ""
     # -- Run an init container that downloads the DB into the cache PVC before the
     # server starts. Makes the DB present on rollout instead of on first scan.
     # Default OFF because the preseed download from mirror.gcr.io can exceed Helm's

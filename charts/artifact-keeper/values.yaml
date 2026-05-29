@@ -513,8 +513,12 @@ trivy:
     javaRepository: "mirror.gcr.io/aquasecurity/trivy-java-db"
     # -- Run an init container that downloads the DB into the cache PVC before the
     # server starts. Makes the DB present on rollout instead of on first scan.
+    # Default OFF because the preseed download from mirror.gcr.io can exceed Helm's
+    # default install timeout in some clusters, leaving the Trivy Deployment stuck
+    # at Available 0/1 (see artifact-keeper-iac #137). The server still fetches the
+    # DB lazily on first scan via TRIVY_DB_REPOSITORY, so this is opt-in for now.
     preseed:
-      enabled: true
+      enabled: false
     # -- Skip the periodic in-server DB refresh. Leave false so the server keeps the
     # DB fresh from the configured mirror; set true for fully air-gapped clusters
     # where the DB is seeded out of band.

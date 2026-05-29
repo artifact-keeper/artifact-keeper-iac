@@ -497,6 +497,28 @@ trivy:
   image:
     repository: aquasec/trivy
     tag: "0.62.1"
+  # -- Vulnerability database settings.
+  # Trivy downloads its vulnerability DB lazily (on first scan), pulling an OCI
+  # artifact from a registry. The upstream default (ghcr.io/aquasecurity/trivy-db)
+  # is anonymous-pull and gets rate-limited; clusters that cannot reach it (or that
+  # hit the rate limit) end up with no DB, which fails the pinned-cve-gate pre-flight.
+  # To make the fetch reliable we (a) point at a configurable mirror and (b) pre-seed
+  # the DB with an init container so it is present before the server accepts scans.
+  db:
+    # -- OCI repository for the vulnerability DB. Override to an internal mirror the
+    # cluster can reach. mirror.gcr.io fronts the same artifact as ghcr but is not
+    # subject to the ghcr anonymous-pull rate limit.
+    repository: "mirror.gcr.io/aquasecurity/trivy-db"
+    # -- OCI repository for the Java DB (used by jar/war scanning).
+    javaRepository: "mirror.gcr.io/aquasecurity/trivy-java-db"
+    # -- Run an init container that downloads the DB into the cache PVC before the
+    # server starts. Makes the DB present on rollout instead of on first scan.
+    preseed:
+      enabled: true
+    # -- Skip the periodic in-server DB refresh. Leave false so the server keeps the
+    # DB fresh from the configured mirror; set true for fully air-gapped clusters
+    # where the DB is seeded out of band.
+    skipUpdate: false
   persistence:
     size: 5Gi
     storageClass: ""

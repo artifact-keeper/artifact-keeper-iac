@@ -130,7 +130,7 @@ helm install ak charts/artifact-keeper/ \
   --namespace artifact-keeper \
   --create-namespace \
   --set ingress.host=registry.example.com \
-  --set secrets.jwtSecret=$(openssl rand -base64 64) \
+  --set secrets.jwtSecret=$(openssl rand 64 | openssl base64 -A) \
   --set externalDatabase.host=your-rds-endpoint.amazonaws.com
 ```
 

@@ -452,7 +452,7 @@ opensearch:
     # version the backend is tested against.
     tag: 2.19.1
   busyboxImage:
-    repository: busybox:1.37
+    repository: busybox
     tag: 1.37
   # -- JVM heap sizing. Keep Xms == Xmx. The container memory limit
   # should be roughly 2x the heap to leave room for off-heap and page cache.

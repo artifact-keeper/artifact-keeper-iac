@@ -1,0 +1,61 @@
+{{/*
+HealthCheckPolicy for GKE Gateway environments.
+
+On GKE clusters fronted by the Gateway API, each BackendService the controller
+creates from an HTTPRoute defaults to an HTTP `GET /` health check. The backend
+(Axum) and DependencyTrack both return 404 for `/` (they only serve their own
+API path prefixes), so the NEG endpoints are marked Unhealthy and Envoy returns
+`503 no healthy upstream`. The kubelet liveness/readiness probes don't help —
+the Gateway controller doesn't derive its check from them; it needs an explicit
+HealthCheckPolicy bound to the Service.
+
+Rendered only when `gke.healthCheckPolicies.enabled` is true, so installs on
+other clouds (or on plain Ingress-based GKE) are unaffected. Web is omitted on
+purpose — Next.js serves `/` with 200.
+*/}}
+{{- if .Values.gke.healthCheckPolicies.enabled }}
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-backend
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        port: {{ .Values.backend.service.httpPort | default 8080 }}
+        requestPath: {{ .Values.gke.healthCheckPolicies.backend.requestPath | default "/livez" }}
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ include "artifact-keeper.fullname" . }}-backend
+{{- if .Values.dependencyTrack.enabled }}
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-dtrack
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dependency-track
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        {{- /* dependencyTrack has no `service:` block in values.yaml yet, so use a
+               nil-safe lookup (Go templates don't short-circuit nil parents, and
+               `| default` only catches a missing leaf). Adding
+               dependencyTrack.service.port to values would let this be a plain
+               `.Values.dependencyTrack.service.port`. */}}
+        port: {{ (.Values.dependencyTrack.service | default dict).port | default 8080 }}
+        requestPath: {{ .Values.gke.healthCheckPolicies.dependencyTrack.requestPath | default "/api/version" }}
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ include "artifact-keeper.fullname" . }}-dtrack
+{{- end }}
+{{- end }}

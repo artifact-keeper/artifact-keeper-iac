@@ -19,6 +19,8 @@ spec:
   {{- if not .Values.backend.autoscaling.enabled }}
   replicas: {{ .Values.backend.replicaCount }}
   {{- end }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "artifact-keeper.backend.selectorLabels" . | nindent 6 }}
@@ -63,7 +65,7 @@ spec:
           command: ["cosign", "verify",
             "--certificate-oidc-issuer={{ .Values.cosign.certificateOidcIssuer }}",
             "--certificate-identity-regexp={{ .Values.cosign.certificateIdentityRegexp }}",
-            "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"]
+            "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"]
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -145,7 +147,7 @@ spec:
         {{- end }}
       containers:
         - name: backend
-          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           securityContext:
             readOnlyRootFilesystem: true
@@ -196,6 +198,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "artifact-keeper.fullname" . }}-secrets
                   key: JWT_SECRET
+            {{- if or (and .Values.externalSecrets.enabled .Values.externalSecrets.secrets.migrationEncryptionKey) (and (not .Values.externalSecrets.enabled) .Values.secrets.migrationEncryptionKey) }}
+            - name: MIGRATION_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  key: MIGRATION_ENCRYPTION_KEY
+            {{- end }}
             {{- if .Values.opensearch.enabled }}
             - name: OPENSEARCH_URL
               value: "{{ if .Values.opensearch.disableSecurityPlugin }}http{{ else }}https{{ end }}://{{ include "artifact-keeper.fullname" . }}-opensearch:9200"

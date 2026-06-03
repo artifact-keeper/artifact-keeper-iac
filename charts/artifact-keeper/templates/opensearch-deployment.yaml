@@ -61,7 +61,7 @@ spec:
         fsGroup: 1000
       initContainers:
         - name: fix-ownership
-          image: busybox:1.37
+          image: "{{ .Values.opensearch.busyboxImage.repository }}:{{ .Values.opensearch.busyboxImage.tag }}"
           securityContext:
             runAsNonRoot: false
             runAsUser: 0

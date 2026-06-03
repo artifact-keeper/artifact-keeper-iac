@@ -89,6 +89,9 @@ backend:
     # using a specific version tag (e.g. 1.1.0).
     tag: dev
     pullPolicy: Always
+  alpineImage:
+    repository: alpine
+    tag: 3.20
   # -- Pod-level securityContext. Defaults are image-native: the backend
   # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
   # with ownership 1001:0 (see artifact-keeper docker/Dockerfile.backend).
@@ -448,6 +451,9 @@ opensearch:
     # -- Pin to a specific patch for stability. 2.19.1 matches the
     # version the backend is tested against.
     tag: 2.19.1
+  busyboxImage:
+    repository: busybox:1.37
+    tag: 1.37
   # -- JVM heap sizing. Keep Xms == Xmx. The container memory limit
   # should be roughly 2x the heap to leave room for off-heap and page cache.
   javaOpts: "-Xms512m -Xmx512m"

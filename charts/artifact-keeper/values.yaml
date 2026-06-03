@@ -575,6 +575,11 @@ dependencyTrack:
     repository: dependencytrack/apiserver
     tag: "4.11.4"
   adminPassword: ""
+  existingSecret: ""
+  existingSecretDbPasswordKey: "POSTGRES_PASSWORD"
+  existingSecretHostKey: "POSTGRES_HOST"
+  existingSecretUsernameKey: "POSTGRES_USERNAME"
+  existingSecretAdminPasswordKey: "DEPENDENCY_TRACK_ADMIN_PASSWORD"
   # -- Size limit for the `/tmp` emptyDir volume. DependencyTrack writes
   # ~1-2Gi into /tmp during startup (NVD mirror sync, DB migrations, JVM
   # working files), so the default is sized to fit. Operators on

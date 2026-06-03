@@ -32,8 +32,8 @@ means:
 - The development profile in `values.yaml` keeps an explicit `tag: dev`
   for backend, web, and edge, so day-to-day dev work tracks the floating
   `dev` build rather than a fixed release.
-- `values-staging.yaml` keeps `dev` and `values-production.yaml` keeps
-  `latest` by overriding `image.tag` explicitly.
+- `values-staging.yaml` keeps `dev` and `values-production.yaml` pins the
+  release version (currently `1.2.0`) by overriding `image.tag` explicitly.
 - Edge keeps an explicit `dev` tag everywhere on purpose: no
   `artifact-keeper-edge` image is published at the chart's `appVersion`
   yet, so letting edge inherit `appVersion` would reference a missing

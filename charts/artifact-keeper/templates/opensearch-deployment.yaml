@@ -149,7 +149,7 @@ spec:
             - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: OPENSEARCH_PASSWORD
             {{- end }}
           resources:

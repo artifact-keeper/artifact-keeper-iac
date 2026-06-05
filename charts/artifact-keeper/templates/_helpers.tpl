@@ -157,8 +157,19 @@ ServiceAccount name
 {{- end }}
 {{- end }}
 
+{{/*
+Resolve the secret name: existingSecret takes precedence, then the chart-managed secret.
+*/}}
+{{- define "artifact-keeper.secretName" -}}
+{{- if .Values.secrets.existingSecret -}}
+{{- .Values.secrets.existingSecret -}}
+{{- else -}}
+{{- include "artifact-keeper.fullname" . }}-secrets
+{{- end -}}
+{{- end }}
+
 {{- define "artifact-keeper.validateSecrets" -}}
-{{- if not .Values.externalSecrets.enabled -}}
+{{- if and (not .Values.externalSecrets.enabled) (not .Values.secrets.existingSecret) -}}
 {{- if eq .Values.secrets.jwtSecret "" -}}
 {{- fail "secrets.jwtSecret is required when externalSecrets is not enabled. Set it with --set secrets.jwtSecret=<value>" -}}
 {{- end -}}

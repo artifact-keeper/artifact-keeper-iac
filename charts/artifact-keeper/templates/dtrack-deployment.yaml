@@ -110,7 +110,7 @@ spec:
             - name: ALPINE_DATABASE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: POSTGRES_PASSWORD
             - name: ALPINE_DATA_DIRECTORY
               value: "/data"
@@ -309,7 +309,7 @@ spec:
             - name: DEPENDENCY_TRACK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: DEPENDENCY_TRACK_ADMIN_PASSWORD
           volumeMounts:
             - name: init-script

@@ -61,7 +61,7 @@ spec:
         fsGroup: 1000
       initContainers:
         - name: fix-ownership
-          image: busybox:1.37
+          image: "{{ .Values.opensearch.busyboxImage.repository }}:{{ .Values.opensearch.busyboxImage.tag }}"
           securityContext:
             runAsNonRoot: false
             runAsUser: 0
@@ -87,7 +87,7 @@ spec:
             - name: opensearch-data
               mountPath: /usr/share/opensearch/data
         - name: sysctl-check
-          image: busybox:1.37
+          image: "{{ .Values.opensearch.busyboxImage.repository }}:{{ .Values.opensearch.busyboxImage.tag }}"
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false

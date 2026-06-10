@@ -47,17 +47,10 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "artifact-keeper.serviceAccountName" . }}
       automountServiceAccountToken: false
+      {{- with .Values.backend.podSecurityContext }}
       securityContext:
-        runAsNonRoot: true
-        # Image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
-        # with ownership 1001:0 (see artifact-keeper/docker/Dockerfile.backend
-        # lines 95-108, 175). fsGroup only chowns mounted volumes -- it does
-        # NOT touch the image's root filesystem -- so we MUST run as the
-        # image-native UID 1001 or Grype hits EACCES and every scan terminates
-        # with status=failed, findings_count=0 (#127, artifact-keeper-test
-        # release-gate run 26487615730).
-        runAsUser: {{ .Values.backend.podSecurityContext.runAsUser | default 1001 }}
-        fsGroup: {{ .Values.backend.podSecurityContext.fsGroup | default 0 }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         {{- if .Values.cosign.enabled }}
         - name: verify-image-signature
@@ -66,12 +59,10 @@ spec:
             "--certificate-oidc-issuer={{ .Values.cosign.certificateOidcIssuer }}",
             "--certificate-identity-regexp={{ .Values.cosign.certificateIdentityRegexp }}",
             "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"]
+          {{- with .Values.backend.initContainerSecurityContext }}
           securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             requests:
               cpu: 10m
@@ -84,13 +75,11 @@ spec:
         {{- end }}
         {{- if .Values.postgres.enabled }}
         - name: wait-for-postgres
-          image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          {{- with .Values.backend.initContainerSecurityContext }}
           securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             requests:
               cpu: 10m
@@ -112,12 +101,10 @@ spec:
         {{- if .Values.opensearch.enabled }}
         - name: wait-for-opensearch
           image: alpine:3.20
+          {{- with .Values.backend.initContainerSecurityContext }}
           securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             requests:
               cpu: 10m
@@ -149,12 +136,10 @@ spec:
         - name: backend
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          {{- with .Values.backend.containerSecurityContext }}
           securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- if .Values.dependencyTrack.enabled }}
           command: ["/bin/sh", "-c"]
           args:

@@ -44,10 +44,10 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       automountServiceAccountToken: false
+      {{- with .Values.trivy.podSecurityContext }}
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 10000
-        fsGroup: 10000
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if .Values.trivy.db.preseed.enabled }}
       initContainers:
         # Pre-seed the vulnerability DB into the shared cache before the server
@@ -58,12 +58,10 @@ spec:
         - name: trivy-db-init
           image: "{{ .Values.trivy.image.repository }}:{{ .Values.trivy.image.tag }}"
           imagePullPolicy: IfNotPresent
+          {{- with .Values.trivy.initContainerSecurityContext }}
           securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command: ["trivy"]
           # --download-db-only fetches the vuln DB (and Java DB) into the cache and
           # exits. The DB repository is supplied via env so it stays identical to the
@@ -94,12 +92,10 @@ spec:
         - name: trivy
           image: "{{ .Values.trivy.image.repository }}:{{ .Values.trivy.image.tag }}"
           imagePullPolicy: IfNotPresent
+          {{- with .Values.trivy.containerSecurityContext }}
           securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command: ["trivy"]
           args: ["server", "--listen", "0.0.0.0:8090", "--cache-dir", "/home/trivy/.cache"]
           env:

@@ -55,24 +55,18 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       automountServiceAccountToken: false
+      {{- with .Values.opensearch.podSecurityContext }}
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
+        {{- if .Values.opensearch.fixOwnership.enabled }}
         - name: fix-ownership
           image: busybox:1.37
+          {{- with .Values.opensearch.fixOwnership.securityContext }}
           securityContext:
-            runAsNonRoot: false
-            runAsUser: 0
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-              add:
-                - CHOWN
-                - FOWNER
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             requests:
               cpu: 10m
@@ -86,14 +80,13 @@ spec:
           volumeMounts:
             - name: opensearch-data
               mountPath: /usr/share/opensearch/data
+        {{- end }}
         - name: sysctl-check
           image: busybox:1.37
+          {{- with .Values.opensearch.initContainerSecurityContext }}
           securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             requests:
               cpu: 10m
@@ -117,12 +110,10 @@ spec:
         - name: opensearch
           image: "{{ .Values.opensearch.image.repository }}:{{ .Values.opensearch.image.tag }}"
           imagePullPolicy: IfNotPresent
+          {{- with .Values.opensearch.containerSecurityContext }}
           securityContext:
-            readOnlyRootFilesystem: false
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 9200

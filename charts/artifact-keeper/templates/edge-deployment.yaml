@@ -41,20 +41,18 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.edge.podSecurityContext }}
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: edge
           image: "{{ .Values.edge.image.repository }}:{{ .Values.edge.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.edge.image.pullPolicy }}
+          {{- with .Values.edge.containerSecurityContext }}
           securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 8081

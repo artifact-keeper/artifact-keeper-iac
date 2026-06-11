@@ -291,7 +291,17 @@ backend:
     limits:
       cpu: "2"
       memory: 2Gi
-      ephemeral-storage: 1Gi
+      # `ephemeral-storage` covers the container writable layer, container
+      # logs, AND all emptyDir volumes (including `/data/storage`, which
+      # has `sizeLimit: 10Gi` below). Streaming format handlers (Incus,
+      # large OCI layer pushes) stage uploads on local disk before
+      # finalizing, so any single artifact larger than this limit gets
+      # the pod kubelet-evicted mid-upload with `Pod ephemeral local
+      # storage usage exceeds the total limit of containers <N>Gi`, and
+      # the client sees a TLS EOF. Size to match `persistence.size` plus
+      # headroom; `16Gi` is a sensible default for the `10Gi` storage
+      # emptyDir / PVC and the writable layer.
+      ephemeral-storage: 16Gi
   persistence:
     enabled: true
     size: 10Gi

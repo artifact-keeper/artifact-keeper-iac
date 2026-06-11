@@ -253,9 +253,12 @@ data:
 
     if [ -z "$TOKEN" ]; then echo "[dtrack-init] ERROR: auth failed"; exit 1; fi
 
-    # Resolve the team UUID. We only need this — Dependency-Track 4.12+
-    # redacts `.apiKeys[*].key` in the team listing response, so we can't
-    # read an existing key from this endpoint regardless of version.
+    # Resolve the team UUID. We generate a fresh key below rather than
+    # reading an existing one from this listing: Dependency-Track 4.13+
+    # redacts `.apiKeys[*].key` here (only `maskedKey` remains), so the
+    # read-from-listing approach silently yields an empty key on 4.13+.
+    # (4.11/4.12 still return the full key, but generating is the
+    # version-agnostic path.)
     TEAM_UUID=$(curl -sf "$DT_URL/api/v1/team" \
       -H "Authorization: Bearer $TOKEN" | \
       jq -r --arg name "$DT_TEAM_NAME" '.[] | select(.name == $name) | .uuid // empty')
@@ -265,11 +268,12 @@ data:
       exit 1
     fi
 
-    # Generate a fresh API key. Dependency-Track 4.x returns the unmasked
-    # secret in the response body of this single call -- there is no other
-    # way to retrieve it. The endpoint shape changed between 4.11 and 4.12:
-    # 4.11 accepts POST (no body), 4.12+ expects PUT with JSON content
-    # type. PUT works on both versions; POST on 4.12+ returns 405.
+    # Generate a fresh API key. Dependency-Track returns the unmasked
+    # secret in the response body of this single PUT -- there is no other
+    # way to retrieve it afterward. PUT is the generate verb on every 4.x
+    # version (verified 4.11.4 / 4.12.7 / 4.13.0 / 4.14.2 -> 201 + .key).
+    # POST to this path returns 405 on all of them: DT only accepts
+    # POST .../key/{key} to regenerate an existing key, never to create.
     echo "[dtrack-init] Generating new $DT_TEAM_NAME API key..."
     KEY_RESP=$(curl -sf -X PUT "$DT_URL/api/v1/team/$TEAM_UUID/key" \
       -H "Authorization: Bearer $TOKEN" \

@@ -1,0 +1,93 @@
+# Monthly cleanup of the shared ARC CI runner cache (hostPath /home/runner-cache).
+#
+# WHAT it cleans:
+#   - cargo-home/registry/src/*    (unpacked crate sources; cargo re-fetches)
+#   - cargo-home/registry/cache/*  (downloaded .crate files; cargo re-fetches)
+#   - npm/*                        (npm cache; safe to prune)
+#
+# WHAT it must NOT touch:
+#   - sccache/         self-evicting via SCCACHE_CACHE_SIZE; cleaning it only
+#                      throws away compile-cache hits for no benefit.
+#   - cargo-home/bin/  holds baked/installed tool binaries (cargo install);
+#                      deleting these breaks runners until tools are reinstalled.
+#
+# WHY: cargo registry src+cache and the npm cache grow unboundedly (~750M as of
+# 2026-06). /home has >1T free, so this is hygiene, not urgency — hence monthly.
+#
+# Race risk: deleting registry files while a live cargo build reads them can
+# fail that build (cargo usually just re-downloads missing files, but not
+# always mid-build). Mitigation kept simple: run at 05:00 on the 1st of the
+# month (quiet hour), concurrencyPolicy Forbid, short deadline. If a build
+# does lose the race, a CI retry fixes it.
+#
+# Apply with:
+#   kubectl apply -f e2e/runner-cache-cleanup-cronjob.yaml
+#
+# Test-fire manually:
+#   kubectl create job --from=cronjob/runner-cache-cleanup runner-cache-cleanup-manual -n arc-runners
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: runner-cache-cleanup
+  namespace: arc-runners
+  labels:
+    app.kubernetes.io/part-of: artifact-keeper
+    app.kubernetes.io/component: runner-cache-cleanup
+spec:
+  schedule: "0 5 1 * *"  # 05:00 on the 1st of every month
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: artifact-keeper
+            app.kubernetes.io/component: runner-cache-cleanup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsUser: 0  # cache files are created by root in runner pods
+          containers:
+            - name: cleanup
+              image: busybox:1.36
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  echo "== runner-cache cleanup: $(date -u) =="
+                  echo "-- before --"
+                  du -sh /cache/cargo-home/registry/src \
+                         /cache/cargo-home/registry/cache \
+                         /cache/npm 2>/dev/null || true
+                  echo "SKIP /cache/sccache (self-evicts via SCCACHE_CACHE_SIZE)"
+                  echo "SKIP /cache/cargo-home/bin (baked tool binaries)"
+                  echo "CLEAN /cache/cargo-home/registry/src"
+                  rm -rf /cache/cargo-home/registry/src/* 2>/dev/null || true
+                  echo "CLEAN /cache/cargo-home/registry/cache"
+                  rm -rf /cache/cargo-home/registry/cache/* 2>/dev/null || true
+                  echo "CLEAN /cache/npm"
+                  rm -rf /cache/npm/* 2>/dev/null || true
+                  echo "-- after --"
+                  du -sh /cache/cargo-home/registry/src \
+                         /cache/cargo-home/registry/cache \
+                         /cache/npm 2>/dev/null || true
+                  echo "== done =="
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 64Mi
+              volumeMounts:
+                - name: runner-cache
+                  mountPath: /cache
+          volumes:
+            - name: runner-cache
+              hostPath:
+                path: /home/runner-cache
+                type: Directory

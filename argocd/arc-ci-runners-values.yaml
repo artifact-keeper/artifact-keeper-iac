@@ -93,8 +93,12 @@ template:
           # atomic rename need one kernel / local fs).
           - name: SCCACHE_CACHE_SIZE
             value: "50G"
+          # Must live under a dir init-cache chmods to 777 — the /cache root
+          # itself is root:755, and an unwritable SCCACHE_ERROR_LOG kills the
+          # sccache server at startup, failing every compile job (2026-06-12
+          # outage).
           - name: SCCACHE_ERROR_LOG
-            value: /cache/sccache-error.log
+            value: /cache/sccache/sccache-error.log
         resources:
           requests:
             cpu: "2"

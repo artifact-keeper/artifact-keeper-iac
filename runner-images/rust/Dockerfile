@@ -1,4 +1,11 @@
-FROM ghcr.io/actions/actions-runner:latest
+# Pinning policy: base image and Rust tooling are pinned to explicit
+# versions so the runner environment only changes via deliberate,
+# reviewable bumps in this file -- never via :latest drift on rebuild.
+# This matters especially for sccache, where a silent version change
+# alters cache-hash behavior and invalidates the shared sccache cache.
+# To upgrade: bump the version here in a PR; merging to main rebuilds
+# and publishes the image automatically (.github/workflows/runner-images.yml).
+FROM ghcr.io/actions/actions-runner:2.335.1
 
 USER root
 
@@ -24,8 +31,16 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     rustup target add x86_64-pc-windows-gnu && \
     rustup --version && rustc --version && cargo --version
 
-# Install sccache
-RUN cargo install sccache --locked && sccache --version
+# Install sccache (pinned: version changes silently alter cache-hash behavior)
+ENV SCCACHE_VERSION=0.15.0
+RUN cargo install sccache --version "${SCCACHE_VERSION}" --locked && sccache --version
+
+# Install cargo-nextest (pinned). Baked into /usr/local/cargo/bin so it
+# stays on PATH even though CARGO_HOME is overridden to /cache/cargo-home
+# at runtime; per-run installs into the shared cache raced across pods.
+ENV CARGO_NEXTEST_VERSION=0.9.137
+RUN curl -LsSf "https://get.nexte.st/${CARGO_NEXTEST_VERSION}/linux" | \
+    tar zxf - -C /usr/local/cargo/bin && cargo nextest --version
 
 # Install cargo-llvm-cov for coverage
 RUN curl -LsSf https://github.com/taiki-e/cargo-llvm-cov/releases/latest/download/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz | \

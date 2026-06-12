@@ -22,6 +22,7 @@
 #
 # Deployed via:
 #   kubectl apply -f e2e/dind-registry-mirror-configmap.yaml
+#   kubectl apply -f e2e/runner-dind-cleanup.yaml
 #   kubectl -n arc-runners create secret docker-registry dockerhub-pull ...
 #     (see argocd/dockerhub-pull-secret.example.yaml)
 #   helm upgrade --install ak-e2e-runners \
@@ -113,14 +114,23 @@ template:
             mountPath: /home/runner/tmpDir
       - name: dind
         image: docker:dind
+        # overlay2 on a per-pod hostPath docker root under /home instead
+        # of vfs in the container writable layer on the 70G root disk.
+        # Full rationale in argocd/arc-ci-runners-values.yaml (dind
+        # container comment). Orphaned per-pod dirs are reaped by
+        # e2e/runner-dind-cleanup.yaml.
         args:
           - dockerd
           - --host=unix:///var/run/docker.sock
-          - --storage-driver=vfs
+          - --storage-driver=overlay2
           - --group=123
         env:
           - name: DOCKER_GROUP_GID
             value: "123"
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
         restartPolicy: Always
         securityContext:
           privileged: true
@@ -139,6 +149,9 @@ template:
             mountPath: /var/run
           - name: dind-externals
             mountPath: /home/runner/externals
+          - name: dind-docker
+            mountPath: /var/lib/docker
+            subPathExpr: $(POD_NAME)
           - name: dind-config
             mountPath: /etc/docker/daemon.json
             subPath: daemon.json
@@ -150,6 +163,12 @@ template:
         emptyDir: {}
       - name: dind-externals
         emptyDir: {}
+      # Per-pod docker roots for the dind sidecar; reaped by
+      # e2e/runner-dind-cleanup.yaml.
+      - name: dind-docker
+        hostPath:
+          path: /home/runner-dind
+          type: DirectoryOrCreate
       - name: dind-config
         configMap:
           name: dind-registry-mirror

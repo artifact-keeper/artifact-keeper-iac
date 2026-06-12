@@ -31,6 +31,7 @@
 #
 # Deployed via:
 #   kubectl apply -f e2e/dind-registry-mirror-configmap.yaml
+#   kubectl apply -f e2e/runner-dind-cleanup.yaml
 #   kubectl -n arc-runners create secret docker-registry dockerhub-pull ...
 #     (see argocd/dockerhub-pull-secret.example.yaml)
 #   helm upgrade --install ak-ci-runners \
@@ -170,10 +171,39 @@ template:
             mountPath: /cache
       - name: dind
         image: docker:27-dind
+        # DIND STORAGE (overlay2 on /home, NOT vfs on the root disk)
+        # ----------------------------------------------------------
+        # /var/lib/docker is a hostPath under /home/runner-dind with one
+        # subdir per pod via subPathExpr (concurrent dockerds must never
+        # share a docker root). Previously dockerd ran vfs with
+        # /var/lib/docker unmounted, so every image layer was a FULL
+        # DIRECTORY COPY landing in the container's writable layer under
+        # the crio graph root on the 70G root disk — 20 concurrent
+        # builders could exhaust it and trigger kubelet disk-pressure
+        # eviction of prod pods (root disk had ~25G free, 2026-06-12).
+        #
+        # overlay2 works here because the mount target is a plain xfs
+        # directory (ftype=1, verified on the rocky node): the RHEL 8
+        # 4.18 kernel only forbids overlay-ON-overlay, which is why vfs
+        # was used when /var/lib/docker sat on the crio overlay layer.
+        #
+        # Permissions: hostPath DirectoryOrCreate yields root:755;
+        # dockerd runs as root in a privileged container, so that is
+        # writable (unlike the SCCACHE_ERROR_LOG / 755-root incident —
+        # sccache runs unprivileged).
+        #
+        # Orphaned per-pod dirs (runner pods churn constantly; preStop is
+        # not guaranteed to run) are reaped by the runner-dind-cleanup
+        # CronJob: e2e/runner-dind-cleanup.yaml.
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
         args:
           - dockerd
           - --host=unix:///var/run/docker.sock
-          - --storage-driver=vfs
+          - --storage-driver=overlay2
           - --group=123
         restartPolicy: Always
         securityContext:
@@ -193,6 +223,9 @@ template:
             mountPath: /var/run
           - name: dind-externals
             mountPath: /home/runner/externals
+          - name: dind-docker
+            mountPath: /var/lib/docker
+            subPathExpr: $(POD_NAME)
           - name: dind-config
             mountPath: /etc/docker/daemon.json
             subPath: daemon.json
@@ -207,6 +240,13 @@ template:
       - name: runner-cache
         hostPath:
           path: /home/runner-cache
+          type: DirectoryOrCreate
+      # Per-pod docker roots for the dind sidecar (see dind container
+      # comment). Lives on /home (1.8T) to keep image-build I/O off the
+      # 70G root disk. Reaped by e2e/runner-dind-cleanup.yaml.
+      - name: dind-docker
+        hostPath:
+          path: /home/runner-dind
           type: DirectoryOrCreate
       - name: dind-config
         configMap:

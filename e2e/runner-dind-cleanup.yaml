@@ -1,0 +1,141 @@
+# Reaper for orphaned per-pod dind docker roots under /home/runner-dind.
+#
+# The arc runner scale sets (argocd/arc-{ci,e2e,beefy}-runners-values.yaml)
+# mount hostPath /home/runner-dind/<POD_NAME> at /var/lib/docker in the
+# dind sidecar so docker image layers land on the 1.8T /home disk with
+# the overlay2 driver, instead of vfs full-copies on the 70G root disk.
+#
+# Runner pods are ephemeral and churn constantly; nothing removes a
+# pod's docker-root subdir when the pod goes away (a preStop hook is not
+# guaranteed to run). This CronJob deletes any subdir that
+#   1. has no matching live pod in arc-runners, AND
+#   2. is older than 10 minutes (grace window so we never race a pod
+#      scheduled between the API snapshot and the sweep).
+#
+# Fail-safe: `set -euo pipefail` means an API/auth failure aborts the
+# run before anything is deleted.
+#
+# Image: ak-runner-rust is used because it is already pulled on the node
+# and ships curl + jq (verified 2026-06-12). The pod runs privileged so
+# SELinux lets it remove files created by the privileged dind sidecar.
+#
+# Apply with:
+#   kubectl apply -f e2e/runner-dind-cleanup.yaml
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: runner-dind-cleanup
+  namespace: arc-runners
+  labels:
+    app.kubernetes.io/part-of: artifact-keeper
+    app.kubernetes.io/component: runner-dind-cleanup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: runner-dind-cleanup
+  namespace: arc-runners
+  labels:
+    app.kubernetes.io/part-of: artifact-keeper
+    app.kubernetes.io/component: runner-dind-cleanup
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: runner-dind-cleanup
+  namespace: arc-runners
+  labels:
+    app.kubernetes.io/part-of: artifact-keeper
+    app.kubernetes.io/component: runner-dind-cleanup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: runner-dind-cleanup
+subjects:
+  - kind: ServiceAccount
+    name: runner-dind-cleanup
+    namespace: arc-runners
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: runner-dind-cleanup
+  namespace: arc-runners
+  labels:
+    app.kubernetes.io/part-of: artifact-keeper
+    app.kubernetes.io/component: runner-dind-cleanup
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: artifact-keeper
+            app.kubernetes.io/component: runner-dind-cleanup
+        spec:
+          serviceAccountName: runner-dind-cleanup
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: ghcr-pull-secret
+          containers:
+            - name: cleanup
+              image: ghcr.io/artifact-keeper/ak-runner-rust:latest
+              securityContext:
+                runAsUser: 0
+                # privileged so SELinux permits deleting files written by
+                # the privileged dind sidecars.
+                privileged: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+                  SA=/var/run/secrets/kubernetes.io/serviceaccount
+                  live=$(curl -sSf --cacert "$SA/ca.crt" \
+                    -H "Authorization: Bearer $(cat "$SA/token")" \
+                    "https://kubernetes.default.svc/api/v1/namespaces/arc-runners/pods" \
+                    | jq -r '.items[].metadata.name')
+                  now=$(date +%s)
+                  reaped=0
+                  for dir in /runner-dind/*/; do
+                    [ -d "$dir" ] || continue
+                    name=$(basename "$dir")
+                    if grep -qxF "$name" <<<"$live"; then
+                      continue
+                    fi
+                    age=$(( now - $(stat -c %Y "$dir") ))
+                    if [ "$age" -lt 600 ]; then
+                      echo "skipping $name: only ${age}s old (grace window)"
+                      continue
+                    fi
+                    echo "reaping orphaned dind root: $name (age ${age}s)"
+                    rm -rf --one-file-system "/runner-dind/$name"
+                    reaped=$((reaped + 1))
+                  done
+                  echo "done; reaped $reaped orphaned dir(s)"
+              volumeMounts:
+                - name: runner-dind
+                  mountPath: /runner-dind
+          volumes:
+            - name: runner-dind
+              hostPath:
+                path: /home/runner-dind
+                type: DirectoryOrCreate

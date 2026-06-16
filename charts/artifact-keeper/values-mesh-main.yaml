@@ -108,7 +108,7 @@ ingress:
   enabled: false
 
 secrets:
-  jwtSecret: "mesh-test-jwt-main"
+  jwtSecret: "ak-mesh-main-nonprod-Bdr1bpjKknqKzQXURmY5ol1YXuja72FNvf80YHjjyS6osgyx"
 
 networkPolicy:
   enabled: false

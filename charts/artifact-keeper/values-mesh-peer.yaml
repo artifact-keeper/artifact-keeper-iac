@@ -92,7 +92,7 @@ ingress:
   enabled: false
 
 secrets:
-  jwtSecret: "mesh-test-jwt-peer"
+  jwtSecret: "ak-mesh-peer-nonprod-qAAoih6jbxgaAFm4GMOC5Jc5iYTUV9YutPgl9v8hMqDI4JMy"
 
 networkPolicy:
   enabled: false

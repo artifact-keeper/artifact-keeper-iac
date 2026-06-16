@@ -95,6 +95,6 @@ externalSecrets:
   enabled: false
 
 secrets:
-  jwtSecret: "ci-test-jwt-secret"
+  jwtSecret: "ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7"
   s3AccessKey: "ci-test-access"
   s3SecretKey: "ci-test-secret"

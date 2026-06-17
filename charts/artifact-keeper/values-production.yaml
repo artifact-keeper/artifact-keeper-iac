@@ -11,7 +11,7 @@
 backend:
   replicaCount: 3
   image:
-    tag: "1.2.0"
+    tag: "1.2.1"
   env:
     RUST_LOG: "info"
     ENVIRONMENT: "production"
@@ -49,7 +49,7 @@ backend:
 web:
   replicaCount: 3
   image:
-    tag: "1.2.0"
+    tag: "1.2.1"
   resources:
     requests:
       cpu: 500m

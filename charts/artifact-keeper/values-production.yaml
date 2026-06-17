@@ -145,6 +145,9 @@ trivy:
 
 dependencyTrack:
   adminPassword: ""
+  # existingSecret: ""
+  # existingSecretDbPasswordKey: "POSTGRES_PASSWORD"
+  # existingSecretAdminPasswordKey: "DEPENDENCY_TRACK_ADMIN_PASSWORD"
   persistence:
     size: 20Gi
   resources:

@@ -250,6 +250,16 @@ spec:
             - name: METRICS_PORT
               value: {{ .Values.backend.metricsListener.port | quote }}
             {{- end }}
+            {{- range .Values.backend.environmentSecrets }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretKeyRef.name }}
+                  key: {{ .secretKeyRef.key }}
+                  {{- if hasKey .secretKeyRef "optional" }}
+                  optional: {{ .secretKeyRef.optional }}
+                  {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
           startupProbe:

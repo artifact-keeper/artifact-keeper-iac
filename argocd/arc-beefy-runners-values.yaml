@@ -22,6 +22,7 @@
 #
 # Deployed via:
 #   kubectl apply -f e2e/dind-registry-mirror-configmap.yaml
+#   kubectl apply -f e2e/runner-dind-cleanup.yaml
 #   kubectl -n arc-runners create secret docker-registry dockerhub-pull ...
 #     (see argocd/dockerhub-pull-secret.example.yaml)
 #   helm upgrade --install ak-beefy-runners \
@@ -40,7 +41,8 @@
 # Shape mirrors ak-ci-runners (known working) with doubled resources:
 #   - dind sidecar placed in initContainers with restartPolicy: Always
 #     (K8s native sidecar pattern, required for the 0.13 chart)
-#   - dockerd explicit args: --storage-driver=vfs (nested containers) and
+#   - dockerd explicit args: --storage-driver=overlay2 on a per-pod
+#     hostPath docker root under /home (see dind container comment) and
 #     --group=123 (for /var/run/docker.sock ACL to the runner user)
 #   - dind-var mounted at /var/run in both runner and sidecar so the runner
 #     can talk to the socket
@@ -134,10 +136,20 @@ template:
             mountPath: /home/runner/tmpDir
       - name: dind
         image: docker:27-dind
+        # overlay2 on a per-pod hostPath docker root under /home instead
+        # of vfs in the container writable layer on the 70G root disk.
+        # Full rationale in argocd/arc-ci-runners-values.yaml (dind
+        # container comment). Orphaned per-pod dirs are reaped by
+        # e2e/runner-dind-cleanup.yaml.
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
         args:
           - dockerd
           - --host=unix:///var/run/docker.sock
-          - --storage-driver=vfs
+          - --storage-driver=overlay2
           - --group=123
         restartPolicy: Always
         securityContext:
@@ -157,6 +169,9 @@ template:
             mountPath: /var/run
           - name: dind-externals
             mountPath: /home/runner/externals
+          - name: dind-docker
+            mountPath: /var/lib/docker
+            subPathExpr: $(POD_NAME)
           - name: dind-config
             mountPath: /etc/docker/daemon.json
             subPath: daemon.json
@@ -168,6 +183,12 @@ template:
         emptyDir: {}
       - name: dind-externals
         emptyDir: {}
+      # Per-pod docker roots for the dind sidecar; reaped by
+      # e2e/runner-dind-cleanup.yaml.
+      - name: dind-docker
+        hostPath:
+          path: /home/runner-dind
+          type: DirectoryOrCreate
       - name: dind-config
         configMap:
           name: dind-registry-mirror

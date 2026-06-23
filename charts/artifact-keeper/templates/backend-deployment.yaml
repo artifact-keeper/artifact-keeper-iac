@@ -84,7 +84,7 @@ spec:
         {{- end }}
         {{- if .Values.postgres.enabled }}
         - name: wait-for-postgres
-          image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -111,7 +111,7 @@ spec:
         {{- end }}
         {{- if .Values.opensearch.enabled }}
         - name: wait-for-opensearch
-          image: alpine:3.20
+          image: "{{ .Values.backend.alpineImage.repository }}:{{ .Values.backend.alpineImage.tag }}"
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false

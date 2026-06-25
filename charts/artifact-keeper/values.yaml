@@ -104,15 +104,31 @@ backend:
   # -- Pod-level securityContext. Defaults are image-native: the backend
   # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
   # with ownership 1001:0 (see artifact-keeper docker/Dockerfile.backend).
-  # The pod MUST run as that UID/GID or Grype hits EACCES on the DB.
+  # The pod MUST run as UID 1001 or Grype hits EACCES on the DB. fsGroup
+  # only chowns mounted volumes -- it does NOT touch the image's root
+  # filesystem -- so changing runAsUser away from 1001 will break scans
+  # even if fsGroup matches.
   #
   # If you are upgrading from chart <= 1.x where this defaulted to
   # 1000:1000, your storage/scan-workspace PVCs will be recursively
   # chowned on first remount because fsGroup changed. That takes ~1s per
   # GiB of artifact data. See UPGRADE-NOTES.md.
   podSecurityContext:
+    runAsNonRoot: true
     runAsUser: 1001
     fsGroup: 0
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  initContainerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
   service:
     type: ClusterIP
     httpPort: 8080
@@ -328,6 +344,16 @@ web:
     # inherit the chart's appVersion (see backend.image.tag).
     tag: dev
     pullPolicy: Always
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
   service:
     type: ClusterIP
     port: 3000
@@ -370,6 +396,16 @@ edge:
     # chart's appVersion.
     tag: dev
     pullPolicy: Always
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
   service:
     type: ClusterIP
     port: 8081
@@ -404,6 +440,11 @@ postgres:
   image:
     repository: postgres
     tag: "16-alpine"
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    fsGroup: 999
+  containerSecurityContext: {}
   auth:
     username: registry
     password: ""
@@ -467,6 +508,40 @@ opensearch:
     # -- Pin to a specific patch for stability. 2.19.1 matches the
     # version the backend is tested against.
     tag: 2.19.1
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  # -- readOnlyRootFilesystem is false because OpenSearch writes config
+  # and lock files outside its data volume on startup.
+  containerSecurityContext:
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  # -- Applies to the sysctl-check init container. The fix-ownership
+  # init container has separate root + CHOWN/FOWNER requirements,
+  # configured under `opensearch.fixOwnership.securityContext`.
+  initContainerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  fixOwnership:
+    enabled: true
+    securityContext:
+      runAsNonRoot: false
+      runAsUser: 0
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+        add:
+          - CHOWN
+          - FOWNER
   # -- JVM heap sizing. Keep Xms == Xmx. The container memory limit
   # should be roughly 2x the heap to leave room for off-heap and page cache.
   javaOpts: "-Xms512m -Xmx512m"
@@ -516,6 +591,22 @@ trivy:
   image:
     repository: aquasec/trivy
     tag: "0.62.1"
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10000
+    fsGroup: 10000
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  initContainerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
   # -- Vulnerability database settings.
   # Trivy downloads its vulnerability DB lazily (on first scan), pulling an OCI
   # artifact from a registry. The upstream default (ghcr.io/aquasecurity/trivy-db)
@@ -574,6 +665,22 @@ dependencyTrack:
   image:
     repository: dependencytrack/apiserver
     tag: "4.11.4"
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  initContainerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
   adminPassword: ""
   # -- Size limit for the `/tmp` emptyDir volume. DependencyTrack writes
   # ~1-2Gi into /tmp during startup (NVD mirror sync, DB migrations, JVM
@@ -595,6 +702,15 @@ dependencyTrack:
       ephemeral-storage: 1Gi
   bootstrap:
     enabled: true
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 1000
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}

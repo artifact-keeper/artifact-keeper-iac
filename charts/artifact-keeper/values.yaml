@@ -478,6 +478,12 @@ externalDatabase:
   database: "artifact_registry"
   existingSecret: ""
   existingSecretKey: "DATABASE_URL"
+  # Keys in `existingSecret` holding the database host and port used by the
+  # dependency-track deployment to assemble its JDBC URL. Only consulted when
+  # `postgres.enabled=false` and `externalDatabase.existingSecret` is set.
+  # Default to "POSTGRES_HOST" / "POSTGRES_PORT" if left empty.
+  existingHostKey: ""
+  existingPortKey: ""
 
 # -- OpenSearch (full-text search engine)
 # Powers full-text artifact search. The backend auto-reindexes from

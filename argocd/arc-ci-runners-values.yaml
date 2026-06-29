@@ -85,9 +85,14 @@ template:
           requests:
             cpu: "2"
             memory: "4Gi"
+          # limits raised 8Gi->16Gi / cpu 4->8 (#2062): clippy-driver on the
+          # backend lib-test crate uses ~2-3x rustc's RSS, so even 2 parallel
+          # drivers OOM-killed (signal 9) the 8Gi pod, forcing admin-merges.
+          # Node (rocky) has 156Gi/88cpu, so headroom is ample; requests kept
+          # modest so 20 runners still schedule. Lets clippy run parallel again.
           limits:
-            cpu: "4"
-            memory: "8Gi"
+            cpu: "8"
+            memory: "16Gi"
         volumeMounts:
           - name: work
             mountPath: /home/runner/_work

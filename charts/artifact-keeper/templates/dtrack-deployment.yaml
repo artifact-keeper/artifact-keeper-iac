@@ -104,10 +104,17 @@ spec:
               value: {{ .Values.externalDatabase.username | quote }}
               {{- end }}
             - name: ALPINE_DATABASE_PASSWORD
+              {{- if and (not .Values.postgres.enabled) .Values.externalDatabase.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalDatabase.existingSecret }}
+                  key: {{ .Values.externalDatabase.existingPasswordKey | default "POSTGRES_PASSWORD" }}
+              {{- else }}
               valueFrom:
                 secretKeyRef:
                   name: {{ include "artifact-keeper.fullname" . }}-secrets
                   key: POSTGRES_PASSWORD
+              {{- end }}
             - name: ALPINE_DATA_DIRECTORY
               value: "/data"
             - name: ALPINE_ENFORCE_AUTHENTICATION

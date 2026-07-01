@@ -794,7 +794,19 @@ ingress:
 # -- Secrets
 # These are development defaults. For production, override via --set or
 # use existingSecret references. Never commit real credentials here.
+#
+# existingSecret: if set, the chart skips creating its own Secret and
+# all components reference this pre-existing Secret instead. The Secret
+# must contain the keys the chart expects:
+#   JWT_SECRET, S3_ACCESS_KEY, S3_SECRET_KEY
+#   POSTGRES_PASSWORD, DATABASE_URL        (when postgres.enabled or externalDatabase)
+#   OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD (when opensearch security plugin is on)
+#   DEPENDENCY_TRACK_ADMIN_PASSWORD        (when dependencyTrack.enabled)
+#   SMTP_PASSWORD                          (optional — omit key to skip)
+#   MIGRATION_ENCRYPTION_KEY               (optional — omit key to skip)
+# When existingSecret is set, all inline secret values below are ignored.
 secrets:
+  existingSecret: ""
   jwtSecret: ""
   s3AccessKey: ""
   s3SecretKey: ""

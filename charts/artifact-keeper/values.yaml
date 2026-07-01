@@ -58,6 +58,9 @@ global:
   imageRegistry: ghcr.io/artifact-keeper
   imagePullPolicy: Always
   storageClass: standard
+  # -- Image pull secrets applied to workloads that honor them (currently the
+  # scanner-adapter). Leave empty for public images.
+  imagePullSecrets: []
 
   # -- Scheduling constraints applied to ALL workloads by default.
   # Per-component values (e.g. backend.nodeSelector) override these.
@@ -650,6 +653,63 @@ trivy:
       memory: 2Gi
       ephemeral-storage: 1Gi
   # -- Per-component scheduling (overrides global)
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
+
+# -- In-house Trivy scanner-adapter
+# Stateless Harbor-protocol scanner-adapter (image
+# artifact-keeper-scanner-adapter) that the backend calls over HTTP via
+# TRIVY_ADAPTER_URL for container-image Trivy scans. It pulls the target image
+# from the AK registry per request and runs Trivy in-process, so it needs no
+# Redis and no persistent storage — a single replica is fine. The image is
+# multi-arch (amd64 + arm64), so there is no arch-pinned nodeSelector; leave it
+# enabled on arm64 clusters too. Default enabled: true (recommended for amd64
+# and supported on arm64). This is separate from the `trivy` server above,
+# which stays on TRIVY_URL for the fs/incus scan path.
+scannerAdapter:
+  enabled: true
+  image:
+    repository: ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter
+    # -- "dev" is a floating tag built from main (same convention as the
+    # backend/web/edge images above). Leave this empty ("") to track the chart
+    # appVersion instead — the deployment renders the tag as
+    # `tag | default .Chart.AppVersion`, so release overlays that omit the tag
+    # inherit appVersion and cut-time bumps re-pin the adapter in lockstep.
+    tag: dev
+    pullPolicy: IfNotPresent
+  # -- Extra environment for the adapter. SCANNER_TRIVY_INSECURE defaults to
+  # "true" because the adapter reaches the AK registry over the plain-HTTP
+  # in-cluster Service endpoint; set to "false" if the adapter pulls from a
+  # TLS-terminated registry it can verify.
+  env:
+    SCANNER_TRIVY_INSECURE: "true"
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10000
+    fsGroup: 10000
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  # -- Writable scratch for image-layer extraction and the Trivy DB cache.
+  # emptyDir (no PVC) because the adapter is stateless.
+  cacheSizeLimit: 2Gi
+  tmpSizeLimit: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+      ephemeral-storage: 128Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+      ephemeral-storage: 2Gi
+  # -- Per-component scheduling (overrides global). Do NOT arch-pin here; the
+  # image is multi-arch.
   tolerations: []
   affinity: {}
   nodeSelector: {}

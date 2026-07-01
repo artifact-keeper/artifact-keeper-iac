@@ -103,6 +103,7 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | gke.healthCheckPolicies.enabled | bool | `false` | Render a `networking.gke.io/v1` HealthCheckPolicy per Service so a GKE Gateway BackendService probes the app's real health path instead of `/` (which backend and DependencyTrack return 404 for). Leave disabled on non-GKE installs and on plain Ingress-based GKE. |
 | global.affinity | object | `{}` |  |
 | global.imagePullPolicy | string | `"Always"` |  |
+| global.imagePullSecrets | list | `[]` | Image pull secrets applied to workloads that honor them (currently the scanner-adapter). Leave empty for public images. |
 | global.imageRegistry | string | `"ghcr.io/artifact-keeper"` |  |
 | global.nodeSelector | object | `{}` |  |
 | global.storageClass | string | `"standard"` |  |
@@ -125,6 +126,11 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | opensearch.tolerations | list | `[]` | Per-component scheduling (overrides global) |
 | postgres | object | `{"affinity":{},"auth":{"database":"artifact_registry","password":"","username":"registry"},"containerSecurityContext":{},"enabled":true,"image":{"repository":"postgres","tag":"16-alpine"},"initDb":{"enabled":true},"nodeSelector":{},"persistence":{"size":"20Gi","storageClass":""},"podSecurityContext":{"fsGroup":999,"runAsNonRoot":true,"runAsUser":999},"resources":{"limits":{"cpu":"1","ephemeral-storage":"512Mi","memory":"1Gi"},"requests":{"cpu":"250m","ephemeral-storage":"128Mi","memory":"256Mi"}},"tolerations":[],"topologySpreadConstraints":[]}` | PostgreSQL (in-cluster, disable for external/RDS) For production, set postgres.enabled=false and configure externalDatabase to point at a managed database (RDS, Cloud SQL, etc.). The in-cluster instance is suitable for dev/testing only. |
 | postgres.tolerations | list | `[]` | Per-component scheduling (overrides global) |
+| scannerAdapter | object | `{"affinity":{},"cacheSizeLimit":"2Gi","containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"enabled":true,"env":{"SCANNER_TRIVY_INSECURE":"true"},"image":{"pullPolicy":"IfNotPresent","repository":"ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter","tag":"dev"},"nodeSelector":{},"podSecurityContext":{"fsGroup":10000,"runAsNonRoot":true,"runAsUser":10000},"resources":{"limits":{"cpu":"1","ephemeral-storage":"2Gi","memory":"1Gi"},"requests":{"cpu":"100m","ephemeral-storage":"128Mi","memory":"128Mi"}},"tmpSizeLimit":"1Gi","tolerations":[],"topologySpreadConstraints":[]}` | In-house Trivy scanner-adapter Stateless Harbor-protocol scanner-adapter (image artifact-keeper-scanner-adapter) that the backend calls over HTTP via TRIVY_ADAPTER_URL for container-image Trivy scans. It pulls the target image from the AK registry per request and runs Trivy in-process, so it needs no Redis and no persistent storage — a single replica is fine. The image is multi-arch (amd64 + arm64), so there is no arch-pinned nodeSelector; leave it enabled on arm64 clusters too. Default enabled: true (recommended for amd64 and supported on arm64). This is separate from the `trivy` server above, which stays on TRIVY_URL for the fs/incus scan path. |
+| scannerAdapter.cacheSizeLimit | string | `"2Gi"` | Writable scratch for image-layer extraction and the Trivy DB cache. emptyDir (no PVC) because the adapter is stateless. |
+| scannerAdapter.env | object | `{"SCANNER_TRIVY_INSECURE":"true"}` | Extra environment for the adapter. SCANNER_TRIVY_INSECURE defaults to "true" because the adapter reaches the AK registry over the plain-HTTP in-cluster Service endpoint; set to "false" if the adapter pulls from a TLS-terminated registry it can verify. |
+| scannerAdapter.image.tag | string | `"dev"` | "dev" is a floating tag built from main (same convention as the backend/web/edge images above). Leave this empty ("") to track the chart appVersion instead — the deployment renders the tag as `tag | default .Chart.AppVersion`, so release overlays that omit the tag inherit appVersion and cut-time bumps re-pin the adapter in lockstep. |
+| scannerAdapter.tolerations | list | `[]` | Per-component scheduling (overrides global). Do NOT arch-pin here; the image is multi-arch. |
 | secrets | object | `{"jwtSecret":"","migrationEncryptionKey":"","s3AccessKey":"","s3SecretKey":"","smtpPassword":""}` | Secrets These are development defaults. For production, override via --set or use existingSecret references. Never commit real credentials here. |
 | serviceMonitor | object | `{"enabled":false,"interval":"30s","scrapeTimeout":"10s"}` | Prometheus ServiceMonitor |
 | trivy | object | `{"affinity":{},"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"db":{"javaRepository":"","preseed":{"enabled":false},"repository":"","skipUpdate":false},"enabled":true,"image":{"repository":"aquasec/trivy","tag":"0.62.1"},"initContainerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"nodeSelector":{},"persistence":{"size":"5Gi","storageClass":""},"podSecurityContext":{"fsGroup":10000,"runAsNonRoot":true,"runAsUser":10000},"resources":{"limits":{"cpu":"1","ephemeral-storage":"1Gi","memory":"2Gi"},"requests":{"cpu":"250m","ephemeral-storage":"128Mi","memory":"256Mi"}},"tolerations":[],"topologySpreadConstraints":[]}` | Trivy vulnerability scanner Runs as a persistent server that the backend calls for image/SBOM scans. Uses a PVC for its vulnerability database cache. The deployment uses Recreate strategy because the cache directory uses a file lock that prevents concurrent access from two pods. |
@@ -212,7 +218,8 @@ The chart deploys the following components:
 | **Edge** | Edge replication service for distributed deployments | Disabled |
 | **PostgreSQL** | In-cluster database (disable for external/managed DB) | Enabled |
 | **OpenSearch** | Full-text search engine for artifact discovery | Enabled |
-| **Trivy** | Vulnerability scanner for container images and SBOMs | Enabled |
+| **Trivy** | Vulnerability scanner for container images and SBOMs (fs/incus path via `TRIVY_URL`) | Enabled |
+| **Scanner-adapter** | In-house Harbor scanner-adapter for container-image Trivy scans (`TRIVY_ADAPTER_URL`); stateless, multi-arch, no PVC | Enabled |
 | **DependencyTrack** | SBOM analysis platform for license and vulnerability correlation | Enabled |
 
 ### Component Diagram
@@ -226,6 +233,8 @@ Ingress
 Backend --> PostgreSQL (port 5432)
 Backend --> OpenSearch (port 9200)
 Backend --> Trivy (port 8090)
+Backend --> Scanner-adapter (port 8090)
+Scanner-adapter --> Backend registry (pull target images)
 Backend --> DependencyTrack (port 8080)
 ```
 

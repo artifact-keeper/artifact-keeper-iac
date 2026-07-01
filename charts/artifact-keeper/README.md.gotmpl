@@ -155,7 +155,8 @@ The chart deploys the following components:
 | **Edge** | Edge replication service for distributed deployments | Disabled |
 | **PostgreSQL** | In-cluster database (disable for external/managed DB) | Enabled |
 | **OpenSearch** | Full-text search engine for artifact discovery | Enabled |
-| **Trivy** | Vulnerability scanner for container images and SBOMs | Enabled |
+| **Trivy** | Vulnerability scanner for container images and SBOMs (fs/incus path via `TRIVY_URL`) | Enabled |
+| **Scanner-adapter** | In-house Harbor scanner-adapter for container-image Trivy scans (`TRIVY_ADAPTER_URL`); stateless, multi-arch, no PVC | Enabled |
 | **DependencyTrack** | SBOM analysis platform for license and vulnerability correlation | Enabled |
 
 ### Component Diagram
@@ -169,6 +170,8 @@ Ingress
 Backend --> PostgreSQL (port 5432)
 Backend --> OpenSearch (port 9200)
 Backend --> Trivy (port 8090)
+Backend --> Scanner-adapter (port 8090)
+Scanner-adapter --> Backend registry (pull target images)
 Backend --> DependencyTrack (port 8080)
 ```
 

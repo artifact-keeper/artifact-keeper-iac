@@ -1,0 +1,118 @@
+{{/*
+=============================================================================
+EXAMPLE CONFIGURATION - Getting Started Template
+=============================================================================
+This file is provided as a starting point for deployments. It should be
+reviewed and modified to match your specific infrastructure requirements,
+security policies, and operational needs before use in production.
+=============================================================================
+*/}}
+{{- if .Values.scannerAdapter.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-scanner-adapter
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner-adapter
+spec:
+  # Stateless adapter: a single replica is sufficient. The adapter holds no
+  # persistent state (no Redis, no PVC) — it pulls the target image from the
+  # AK registry per request and returns the Trivy result to the backend.
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "artifact-keeper.scannerAdapter.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "artifact-keeper.scannerAdapter.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with (.Values.scannerAdapter.tolerations | default .Values.global.tolerations) }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.scannerAdapter.affinity | default .Values.global.affinity) }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.scannerAdapter.nodeSelector | default .Values.global.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.scannerAdapter.topologySpreadConstraints | default .Values.global.topologySpreadConstraints) }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      {{- with .Values.scannerAdapter.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: scanner-adapter
+          # appVersion drives the tag by default (same pattern as backend/web);
+          # the image is multi-arch, so no arch-pinned nodeSelector is needed.
+          image: "{{ .Values.scannerAdapter.image.repository }}:{{ .Values.scannerAdapter.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.scannerAdapter.image.pullPolicy }}
+          {{- with .Values.scannerAdapter.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: HOME
+              value: /home/scanner
+            - name: TMPDIR
+              value: /tmp
+            # The adapter binary defaults to :8080, but the chart wires the
+            # Service, probes, containerPort and TRIVY_ADAPTER_URL all on 8090.
+            # Pin the listen address so the port matches (otherwise the 8090
+            # probes get connection-refused and the pod crash-loops).
+            - name: SCANNER_ADAPTER_ADDR
+              value: ":8090"
+            {{- range $key, $value := .Values.scannerAdapter.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8090
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.scannerAdapter.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            tcpSocket:
+              port: 8090
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            # readOnlyRootFilesystem is on, so give the adapter writable scratch
+            # space for image-layer extraction and the Trivy DB cache. Stateless:
+            # emptyDir is fine, no PVC required.
+            - name: cache
+              mountPath: /home/scanner/.cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: cache
+          emptyDir:
+            sizeLimit: {{ .Values.scannerAdapter.cacheSizeLimit | default "2Gi" }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.scannerAdapter.tmpSizeLimit | default "1Gi" }}
+{{- end }}

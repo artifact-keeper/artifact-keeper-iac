@@ -1,0 +1,27 @@
+{{/*
+=============================================================================
+EXAMPLE CONFIGURATION - Getting Started Template
+=============================================================================
+This file is provided as a starting point for deployments. It should be
+reviewed and modified to match your specific infrastructure requirements,
+security policies, and operational needs before use in production.
+=============================================================================
+*/}}
+{{- if .Values.scannerAdapter.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-scanner-adapter
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner-adapter
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8090
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "artifact-keeper.scannerAdapter.selectorLabels" . | nindent 4 }}
+{{- end }}

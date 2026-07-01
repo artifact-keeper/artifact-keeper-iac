@@ -34,6 +34,16 @@ spec:
           protocol: TCP
         - port: {{ .Values.backend.service.grpcPort }}
           protocol: TCP
+    {{- if .Values.scannerAdapter.enabled }}
+    # Scanner-adapter pulls target images from the backend registry endpoint
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.scannerAdapter.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.backend.service.httpPort }}
+          protocol: TCP
+    {{- end }}
     # Allow ingress controller
     - from:
         - namespaceSelector: {}
@@ -78,6 +88,16 @@ spec:
       ports:
         - port: 8090
           protocol: TCP
+    {{- if .Values.scannerAdapter.enabled }}
+    # Scanner-adapter (container-image Trivy scans)
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.scannerAdapter.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8090
+          protocol: TCP
+    {{- end }}
     # DependencyTrack
     - to:
         - podSelector:
@@ -201,6 +221,51 @@ spec:
     - ports:
         - port: 443
           protocol: TCP
+{{- if .Values.scannerAdapter.enabled }}
+---
+# Scanner-adapter: accept scan requests from backend on 8090; reach the backend
+# registry endpoint to pull target images, plus DNS/HTTPS for the vuln DB.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-scanner-adapter
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.scannerAdapter.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8090
+          protocol: TCP
+  egress:
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Backend registry endpoint (pull target images to scan)
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.backend.service.httpPort }}
+          protocol: TCP
+    # HTTPS (Trivy vulnerability DB, external registries)
+    - ports:
+        - port: 443
+          protocol: TCP
+{{- end }}
 ---
 # DependencyTrack: accept traffic from backend and dtrack-init Job
 apiVersion: networking.k8s.io/v1

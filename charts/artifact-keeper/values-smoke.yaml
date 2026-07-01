@@ -154,6 +154,25 @@ edge:
 trivy:
   enabled: false
 
+# In-house Trivy scanner-adapter: ENABLED for the release-gate. Unlike the
+# standalone `trivy` server above (heavy DB pull, disabled for smoke), the
+# adapter is the code path the backend actually uses for container-image scans
+# (TRIVY_ADAPTER_URL), so the artifact-keeper-test#237 per-scanner Trivy
+# assertion must exercise it live on the amd64 gate runners before a cut. It is
+# stateless (no PVC, no Redis) and lightweight enough to fit the 4 CPU / 8 Gi
+# namespace alongside backend + web + postgres + opensearch.
+scannerAdapter:
+  enabled: true
+  image:
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+
 # Dependency-Track: 4 GiB+ JVM, multi-minute startup loading the NVD on
 # first boot. Far too heavy for a smoke namespace.
 dependencyTrack:

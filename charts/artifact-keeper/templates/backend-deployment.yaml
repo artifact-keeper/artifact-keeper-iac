@@ -214,6 +214,13 @@ spec:
             - name: SCAN_WORKSPACE_PATH
               value: "/scan-workspace"
             {{- end }}
+            {{- if .Values.scannerAdapter.enabled }}
+            # In-house Harbor scanner-adapter for container-image Trivy scans
+            # (artifact-keeper#2091). Host must match the scanner-adapter Service
+            # name. Leaves TRIVY_URL (fs/incus path) above untouched.
+            - name: TRIVY_ADAPTER_URL
+              value: "http://{{ include "artifact-keeper.fullname" . }}-scanner-adapter:8090"
+            {{- end }}
             {{- if .Values.dependencyTrack.enabled }}
             - name: DEPENDENCY_TRACK_URL
               value: "http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080"

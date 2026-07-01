@@ -120,6 +120,14 @@ app.kubernetes.io/component: trivy
 {{- end }}
 
 {{/*
+Scanner-adapter selector labels
+*/}}
+{{- define "artifact-keeper.scannerAdapter.selectorLabels" -}}
+{{ include "artifact-keeper.selectorLabels" . }}
+app.kubernetes.io/component: scanner-adapter
+{{- end }}
+
+{{/*
 DependencyTrack selector labels
 */}}
 {{- define "artifact-keeper.dtrack.selectorLabels" -}}

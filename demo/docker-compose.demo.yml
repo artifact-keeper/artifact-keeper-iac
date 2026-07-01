@@ -41,6 +41,9 @@ services:
       JWT_SECRET: demo-instance-jwt-secret-not-for-production
       DEMO_MODE: "true"
       TRIVY_URL: http://trivy:8090
+      # In-house Trivy scanner-adapter for container-image scans (backend #2090).
+      # TRIVY_URL above stays for the fs/incus scan path.
+      TRIVY_ADAPTER_URL: http://scanner-adapter:8090
       OPENSCAP_URL: http://openscap:8091
       SCAN_WORKSPACE_PATH: /scan-workspace
       LOG_LEVEL: info
@@ -59,6 +62,19 @@ services:
     volumes:
       - trivy_cache:/root/.cache/trivy
       - scan_workspace:/scan-workspace:ro
+
+  # In-house Harbor scanner-adapter: the backend calls this over
+  # TRIVY_ADAPTER_URL for container-image Trivy scans. Stateless, no Redis, no
+  # persistent storage. Pulls target images from the backend registry, so it
+  # reaches `backend` on the compose network. Multi-arch image.
+  scanner-adapter:
+    image: ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter:${ARTIFACT_KEEPER_VERSION:-latest}
+    environment:
+      # The backend registry endpoint is served over plain HTTP on the compose
+      # network, so allow insecure pulls.
+      SCANNER_TRIVY_INSECURE: "true"
+    depends_on:
+      - backend
 
   openscap:
     image: ghcr.io/artifact-keeper/artifact-keeper-openscap:${ARTIFACT_KEEPER_VERSION:-latest}

@@ -143,6 +143,16 @@ trivy:
       cpu: "2"
       memory: 4Gi
 
+# In-house Trivy scanner-adapter (container-image scans). Multi-arch, stateless.
+scannerAdapter:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
 dependencyTrack:
   adminPassword: ""
   persistence:

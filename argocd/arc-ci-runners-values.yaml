@@ -52,7 +52,11 @@ githubConfigSecret: "github-token-secret"
 runnerScaleSetName: "ak-ci-runners"
 
 minRunners: 0
-maxRunners: 20
+maxRunners: 6
+# Capped 20->6 (#187): scheduler packs by requests, but each runner can use up
+# to its 16Gi limit under a clippy burst. At 20 that was 20*16=320Gi >> the ~125Gi
+# node -> memory exhaustion wedged the whole node (kubelet+sshd unresponsive). 6*16=96Gi
+# stays safely under 125Gi. Raise requests (8Gi/4cpu) too so scheduling reserves honestly.
 
 template:
   spec:
@@ -83,8 +87,8 @@ template:
             value: "0"
         resources:
           requests:
-            cpu: "2"
-            memory: "4Gi"
+            cpu: "4"
+            memory: "8Gi"
           # limits raised 8Gi->16Gi / cpu 4->8 (#2062): clippy-driver on the
           # backend lib-test crate uses ~2-3x rustc's RSS, so even 2 parallel
           # drivers OOM-killed (signal 9) the 8Gi pod, forcing admin-merges.

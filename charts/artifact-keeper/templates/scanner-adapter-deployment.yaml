@@ -70,6 +70,12 @@ spec:
               value: /home/scanner
             - name: TMPDIR
               value: /tmp
+            # The adapter binary defaults to :8080, but the chart wires the
+            # Service, probes, containerPort and TRIVY_ADAPTER_URL all on 8090.
+            # Pin the listen address so the port matches (otherwise the 8090
+            # probes get connection-refused and the pod crash-loops).
+            - name: SCANNER_ADAPTER_ADDR
+              value: ":8090"
             {{- range $key, $value := .Values.scannerAdapter.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}

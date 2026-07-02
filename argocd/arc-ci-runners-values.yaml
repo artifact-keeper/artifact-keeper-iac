@@ -85,6 +85,30 @@ template:
             value: /cache/npm
           - name: SCCACHE_IDLE_TIMEOUT
             value: "0"
+          # Without an explicit size sccache defaults to 10 GiB and evicts
+          # continuously; /home has ample space. (Reconciled from live rocky
+          # config, which had drifted ahead of git — iac#192.)
+          - name: SCCACHE_CACHE_SIZE
+            value: "50G"
+          # Must live under a dir init-cache chmods to 777; an unwritable
+          # SCCACHE_ERROR_LOG kills the sccache server at startup and fails
+          # every compile job (2026-06-12 outage). Keep it set.
+          - name: SCCACHE_ERROR_LOG
+            value: /cache/sccache/sccache-error.log
+          # PARALLELISM CAP (iac#192, 2026-07-02): cargo/rustc/nextest read the
+          # HOST core count (88) and spawn that many jobs, IGNORING this pod's
+          # 8-CPU cgroup limit — so each runner launches ~88 threads that the
+          # cgroup throttles onto 8 CPUs. N runners => load ~= maxRunners x 88,
+          # which wedged the node twice (load 462 at 6 runners, 1420 peak,
+          # SSH-banner-timeout). Pinning build/test parallelism to the CPU
+          # limit makes load ~= maxRunners x 8, so maxRunners is a throughput
+          # knob again, not a wedge fuse.
+          - name: CARGO_BUILD_JOBS
+            value: "8"
+          - name: RUST_TEST_THREADS
+            value: "8"
+          - name: NEXTEST_TEST_THREADS
+            value: "8"
         resources:
           requests:
             cpu: "4"

@@ -672,12 +672,13 @@ scannerAdapter:
   enabled: true
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter
-    # -- "dev" is a floating tag built from main (same convention as the
-    # backend/web/edge images above). Leave this empty ("") to track the chart
-    # appVersion instead — the deployment renders the tag as
-    # `tag | default .Chart.AppVersion`, so release overlays that omit the tag
-    # inherit appVersion and cut-time bumps re-pin the adapter in lockstep.
-    tag: dev
+    # -- The scanner-adapter is versioned independently of the AK
+    # backend/web/edge images (major-only tags `1`/`1.0`/`latest`; there is no
+    # `scanner-adapter:<appVersion>`). Pin to the adapter's major tag `"1"` so
+    # the chart is decoupled from appVersion. The deployment renders the tag as
+    # `tag | default .Chart.AppVersion`, so leaving this empty ("") would fall
+    # back to appVersion and pull a non-existent tag — keep it pinned.
+    tag: "1"
     pullPolicy: IfNotPresent
   # -- Extra environment for the adapter. SCANNER_TRIVY_INSECURE defaults to
   # "true" because the adapter reaches the AK registry over the plain-HTTP

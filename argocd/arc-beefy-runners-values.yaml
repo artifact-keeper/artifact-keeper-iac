@@ -76,6 +76,19 @@ template:
             value: unix:///var/run/docker.sock
           - name: RUNNER_WAIT_FOR_DOCKER_IN_SECONDS
             value: "120"
+          # PARALLELISM CAP (iac#192): cargo/rustc/nextest read the HOST core
+          # count (88) and spawn that many jobs, IGNORING this pod's 8-CPU cgroup
+          # limit — so each runner launches ~88 threads the cgroup throttles onto
+          # 8 CPUs. N runners => load ~= maxRunners x 88, which wedged rocky
+          # (SSH-banner-timeout). ak-ci-runners got this cap in helm rev 37; the
+          # beefy pool was the last uncapped one. Pin to the 8-CPU limit so load
+          # ~= maxRunners x 8 and maxRunners stays a throughput knob, not a fuse.
+          - name: CARGO_BUILD_JOBS
+            value: "8"
+          - name: RUST_TEST_THREADS
+            value: "8"
+          - name: NEXTEST_TEST_THREADS
+            value: "8"
         volumeMounts:
           - name: work
             mountPath: /home/runner/_work

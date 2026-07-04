@@ -91,10 +91,17 @@ spec:
               type: RuntimeDefault
           containers:
             - name: sweeper
-              # Debian-based (GNU date for RFC3339 parsing + a POSIX shell).
-              image: docker.io/bitnami/kubectl:1.31
+              # alpine/k8s bundles kubectl + bash + GNU coreutils `date`
+              # (RFC3339 parsing). Verified pullable on the runner cluster;
+              # bitnami/kubectl tags were removed in Bitnami's 2025 registry
+              # relocation ("manifest unknown"), so do NOT use them here.
+              image: docker.io/alpine/k8s:1.31.1
               imagePullPolicy: IfNotPresent
               env:
+                # kubectl writes its discovery cache under $HOME; give it a
+                # writable dir since the root fs is read-only.
+                - name: HOME
+                  value: /tmp
                 # A namespace must match one of these prefixes to be eligible.
                 - name: SWEEP_PREFIXES
                   value: "smoke-self- test-self-"
@@ -166,3 +173,9 @@ spec:
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

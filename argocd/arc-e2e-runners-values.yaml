@@ -55,6 +55,17 @@ template:
         env:
           - name: DOCKER_HOST
             value: unix:///var/run/docker.sock
+          # PARALLELISM CAP (iac#192): cargo/rustc/nextest read the HOST core
+          # count (88), IGNORING this pod's 4-CPU cgroup limit, spawning ~88
+          # throttled threads per runner => load ~= maxRunners x 88 and rocky
+          # wedged. ak-ci-runners got this in helm rev 37; pin the e2e pool to
+          # its 4-CPU limit so load ~= maxRunners x 4.
+          - name: CARGO_BUILD_JOBS
+            value: "4"
+          - name: RUST_TEST_THREADS
+            value: "4"
+          - name: NEXTEST_TEST_THREADS
+            value: "4"
         volumeMounts:
           - name: work
             mountPath: /home/runner/_work

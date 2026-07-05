@@ -140,15 +140,6 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if .Values.dependencyTrack.enabled }}
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              if [ -f /shared/dtrack-api-key ] && [ -s /shared/dtrack-api-key ]; then
-                export DEPENDENCY_TRACK_API_KEY="$(cat /shared/dtrack-api-key)"
-              fi
-              exec /usr/local/bin/artifact-keeper
-          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.backend.service.httpPort }}
@@ -162,6 +153,15 @@ spec:
               protocol: TCP
             {{- end }}
           env:
+            {{- if .Values.dependencyTrack.enabled }}
+            # The backend reads the Dependency-Track API key from this file
+            # (see resolve_api_key in dependency_track_service.rs). This replaces
+            # the previous `sh -c "export ...; exec"` command wrapper, which the
+            # shell-less distroless (ubi-micro) backend image cannot run
+            # (CreateContainerError: exec /bin/sh: no such file — iac#199).
+            - name: DEPENDENCY_TRACK_API_KEY_FILE
+              value: /shared/dtrack-api-key
+            {{- end }}
             {{- range $key, $value := .Values.backend.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}

@@ -807,6 +807,13 @@ secrets:
   # be a random 32-byte value (e.g. `openssl rand -hex 32`). Leave empty
   # to skip the env var entirely (migration features will return 500).
   migrationEncryptionKey: ""
+  # Webhook signing-secret encryption key (AK_WEBHOOK_SECRET_KEY) — used by
+  # the backend to encrypt webhook signing secrets at rest. Must be a
+  # base64-encoded 32-byte value (e.g. `openssl rand -base64 32`). A
+  # malformed value aborts backend startup; leave empty to skip the env var
+  # entirely, in which case webhook create and rotate-secret are disabled
+  # with a startup warning.
+  webhookSecretKey: ""
 
 # -- External Secrets Operator
 # When enabled, ExternalSecret CRDs replace the static Secret template.
@@ -835,6 +842,11 @@ externalSecrets:
     # `migration-encryption-key`. Leave the value empty to skip the
     # ExternalSecret data entry (set this to a real path to enable).
     migrationEncryptionKey: ""
+    # AK_WEBHOOK_SECRET_KEY — used at runtime to encrypt webhook signing
+    # secrets at rest. The AWS SM secret should expose this under the
+    # property name `webhook-secret-key`. Leave the value empty to skip
+    # the ExternalSecret data entry (set this to a real path to enable).
+    webhookSecretKey: ""
 
 # -- Network policies
 networkPolicy:

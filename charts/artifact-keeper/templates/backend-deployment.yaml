@@ -194,11 +194,6 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-            {{- if .Values.dependencyTrack.enabled }}
-            # API key provisioned by the dtrack-init Job on the shared volume.
-            - name: DEPENDENCY_TRACK_API_KEY_FILE
-              value: /shared/dtrack-api-key
-            {{- end }}
             - name: DATABASE_URL
               {{- if .Values.backend.database.existingSecret }}
               valueFrom:

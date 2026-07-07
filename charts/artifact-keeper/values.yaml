@@ -242,6 +242,22 @@ backend:
     # PASSWORD_MIN_STRENGTH: "0"
 
     # -- Rate Limiting
+    # RATE_LIMIT_TRUSTED_PROXY_CIDRS — CIDR(s), comma-separated, of the reverse
+    # proxy / ingress that sits in front of the backend. The login rate limiter
+    # keys on (username, client-IP) and only believes the X-Forwarded-For header
+    # when the request's TCP peer falls inside one of these ranges; otherwise it
+    # keys on the raw TCP peer. In Kubernetes the backend is reached through an
+    # ingress controller (ingress-nginx by default), so its TCP peer is ALWAYS
+    # the ingress/proxy pod IP. Leaving this empty makes the backend key every
+    # client on that single proxy pod IP → one shared login bucket per account →
+    # a single flooding client can targeted-lock-out any user (including owner
+    # break-glass) with ~10 requests / 15 min (iac#207, ak#2298). The default
+    # trusts the standard RFC1918 private pod-network ranges so per-client keying
+    # on the real client IP works out of the box behind an in-cluster proxy.
+    # TIGHTEN this to your ingress controller's actual pod CIDR for
+    # defense-in-depth, or set it to "" only when the backend is reached
+    # directly (no proxy) so ConnectInfo already carries the real client IP.
+    RATE_LIMIT_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     # RATE_LIMIT_AUTH_PER_MIN: "120"
     # RATE_LIMIT_API_PER_MIN: "5000"
     # RATE_LIMIT_WINDOW_SECS: "60"

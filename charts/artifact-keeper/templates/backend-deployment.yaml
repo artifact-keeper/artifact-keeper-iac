@@ -223,6 +223,13 @@ spec:
                   name: {{ include "artifact-keeper.fullname" . }}-secrets
                   key: MIGRATION_ENCRYPTION_KEY
             {{- end }}
+            {{- if or (and .Values.externalSecrets.enabled .Values.externalSecrets.secrets.webhookSecretKey) (and (not .Values.externalSecrets.enabled) .Values.secrets.webhookSecretKey) }}
+            - name: AK_WEBHOOK_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  key: AK_WEBHOOK_SECRET_KEY
+            {{- end }}
             {{- if .Values.opensearch.enabled }}
             - name: OPENSEARCH_URL
               value: "{{ if .Values.opensearch.disableSecurityPlugin }}http{{ else }}https{{ end }}://{{ include "artifact-keeper.fullname" . }}-opensearch:9200"

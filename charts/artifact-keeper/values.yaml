@@ -242,6 +242,22 @@ backend:
     # PASSWORD_MIN_STRENGTH: "0"
 
     # -- Rate Limiting
+    # RATE_LIMIT_TRUSTED_PROXY_CIDRS — CIDR(s), comma-separated, of the reverse
+    # proxy / ingress that sits in front of the backend. The login rate limiter
+    # keys on (username, client-IP) and only believes the X-Forwarded-For header
+    # when the request's TCP peer falls inside one of these ranges; otherwise it
+    # keys on the raw TCP peer. In Kubernetes the backend is reached through an
+    # ingress controller (ingress-nginx by default), so its TCP peer is ALWAYS
+    # the ingress/proxy pod IP. Leaving this empty makes the backend key every
+    # client on that single proxy pod IP → one shared login bucket per account →
+    # a single flooding client can targeted-lock-out any user (including owner
+    # break-glass) with ~10 requests / 15 min (iac#207, ak#2298). The default
+    # trusts the standard RFC1918 private pod-network ranges so per-client keying
+    # on the real client IP works out of the box behind an in-cluster proxy.
+    # TIGHTEN this to your ingress controller's actual pod CIDR for
+    # defense-in-depth, or set it to "" only when the backend is reached
+    # directly (no proxy) so ConnectInfo already carries the real client IP.
+    RATE_LIMIT_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     # RATE_LIMIT_AUTH_PER_MIN: "120"
     # RATE_LIMIT_API_PER_MIN: "5000"
     # RATE_LIMIT_WINDOW_SECS: "60"
@@ -672,12 +688,13 @@ scannerAdapter:
   enabled: true
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter
-    # -- "dev" is a floating tag built from main (same convention as the
-    # backend/web/edge images above). Leave this empty ("") to track the chart
-    # appVersion instead — the deployment renders the tag as
-    # `tag | default .Chart.AppVersion`, so release overlays that omit the tag
-    # inherit appVersion and cut-time bumps re-pin the adapter in lockstep.
-    tag: dev
+    # -- The scanner-adapter is versioned independently of the AK
+    # backend/web/edge images (major-only tags `1`/`1.0`/`latest`; there is no
+    # `scanner-adapter:<appVersion>`). Pin to the adapter's major tag `"1"` so
+    # the chart is decoupled from appVersion. The deployment renders the tag as
+    # `tag | default .Chart.AppVersion`, so leaving this empty ("") would fall
+    # back to appVersion and pull a non-existent tag — keep it pinned.
+    tag: "1"
     pullPolicy: IfNotPresent
   # -- Extra environment for the adapter. SCANNER_TRIVY_INSECURE defaults to
   # "true" because the adapter reaches the AK registry over the plain-HTTP
@@ -818,6 +835,13 @@ secrets:
   # be a random 32-byte value (e.g. `openssl rand -hex 32`). Leave empty
   # to skip the env var entirely (migration features will return 500).
   migrationEncryptionKey: ""
+  # Webhook signing-secret encryption key (AK_WEBHOOK_SECRET_KEY) — used by
+  # the backend to encrypt webhook signing secrets at rest. Must be a
+  # base64-encoded 32-byte value (e.g. `openssl rand -base64 32`). A
+  # malformed value aborts backend startup; leave empty to skip the env var
+  # entirely, in which case webhook create and rotate-secret are disabled
+  # with a startup warning.
+  webhookSecretKey: ""
 
 # -- External Secrets Operator
 # When enabled, ExternalSecret CRDs replace the static Secret template.
@@ -846,6 +870,11 @@ externalSecrets:
     # `migration-encryption-key`. Leave the value empty to skip the
     # ExternalSecret data entry (set this to a real path to enable).
     migrationEncryptionKey: ""
+    # AK_WEBHOOK_SECRET_KEY — used at runtime to encrypt webhook signing
+    # secrets at rest. The AWS SM secret should expose this under the
+    # property name `webhook-secret-key`. Leave the value empty to skip
+    # the ExternalSecret data entry (set this to a real path to enable).
+    webhookSecretKey: ""
 
 # -- Network policies
 networkPolicy:

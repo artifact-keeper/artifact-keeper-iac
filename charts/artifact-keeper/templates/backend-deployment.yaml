@@ -73,7 +73,7 @@ spec:
               memory: 64Mi
               ephemeral-storage: 128Mi
         {{- end }}
-        {{- if .Values.postgres.enabled }}
+        {{- if or .Values.postgres.enabled (include "artifact-keeper.dedicatedDatabase" .) }}
         - name: wait-for-postgres
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
           {{- with .Values.backend.initContainerSecurityContext }}
@@ -89,6 +89,33 @@ spec:
               cpu: 100m
               memory: 64Mi
               ephemeral-storage: 64Mi
+          {{- if include "artifact-keeper.dedicatedDatabase" . }}
+          # pg_isready reads PGHOST/PGPORT/PGUSER from the environment.
+          env:
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: {{ include "artifact-keeper.backend.dbSecretKey" (dict "root" $ "key" "host" "default" "host") }}
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: {{ include "artifact-keeper.backend.dbSecretKey" (dict "root" $ "key" "port" "default" "port") }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: {{ include "artifact-keeper.backend.dbSecretKey" (dict "root" $ "key" "username" "default" "username") }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Waiting for PostgreSQL..."
+              until pg_isready; do
+                sleep 3
+              done
+              echo "PostgreSQL is ready"
+          {{- else }}
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -97,6 +124,7 @@ spec:
                 sleep 3
               done
               echo "PostgreSQL is ready"
+          {{- end }}
         {{- end }}
         {{- if .Values.opensearch.enabled }}
         - name: wait-for-opensearch
@@ -171,7 +199,12 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
             - name: DATABASE_URL
-              {{- if and (not .Values.postgres.enabled) .Values.externalDatabase.existingSecret }}
+              {{- if include "artifact-keeper.dedicatedDatabase" . }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: {{ include "artifact-keeper.backend.dbSecretKey" (dict "root" $ "key" "uri" "default" "uri") }}
+              {{- else if and (not .Values.postgres.enabled) .Values.externalDatabase.existingSecret }}
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.externalDatabase.existingSecret }}

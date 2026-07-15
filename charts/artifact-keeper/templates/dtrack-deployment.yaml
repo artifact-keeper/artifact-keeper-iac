@@ -57,7 +57,7 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.postgres.enabled }}
+      {{- if or .Values.postgres.enabled (include "artifact-keeper.dedicatedDatabase" .) }}
       initContainers:
         - name: wait-for-postgres
           image: {{ include "artifact-keeper.image" (dict "image" .Values.postgres.image "context" .) | quote }}
@@ -74,6 +74,33 @@ spec:
               cpu: 100m
               memory: 64Mi
               ephemeral-storage: 64Mi
+          {{- if include "artifact-keeper.dedicatedDatabase" . }}
+          # pg_isready reads PGHOST/PGPORT/PGUSER from the environment.
+          env:
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dependencyTrack.dedicatedDatabase.existingSecret }}
+                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "host" "default" "host") }}
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dependencyTrack.dedicatedDatabase.existingSecret }}
+                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "port" "default" "port") }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dependencyTrack.dedicatedDatabase.existingSecret }}
+                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "username" "default" "username") }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Waiting for PostgreSQL..."
+              until pg_isready; do
+                sleep 3
+              done
+              echo "PostgreSQL is ready"
+          {{- else }}
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -82,6 +109,7 @@ spec:
                 sleep 3
               done
               echo "PostgreSQL is ready"
+          {{- end }}
       {{- end }}
       containers:
         - name: dtrack-api
@@ -119,7 +147,12 @@ spec:
             - name: ALPINE_DATABASE_MODE
               value: "external"
             - name: ALPINE_DATABASE_URL
-              {{- if .Values.postgres.enabled }}
+              {{- if include "artifact-keeper.dedicatedDatabase" . }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dependencyTrack.dedicatedDatabase.existingSecret }}
+                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "jdbcUri" "default" "jdbc-uri") }}
+              {{- else if .Values.postgres.enabled }}
               value: "jdbc:postgresql://{{ include "artifact-keeper.fullname" . }}-postgres:5432/{{ include "artifact-keeper.dtrackDatabase" . }}"
               {{- else if $dbHostFromSecret }}
               value: "jdbc:postgresql://$(_DTRACK_DB_HOST):$(_DTRACK_DB_PORT)/{{ include "artifact-keeper.dtrackDatabase" . }}"
@@ -129,13 +162,23 @@ spec:
             - name: ALPINE_DATABASE_DRIVER
               value: "org.postgresql.Driver"
             - name: ALPINE_DATABASE_USERNAME
-              {{- if .Values.postgres.enabled }}
+              {{- if include "artifact-keeper.dedicatedDatabase" . }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dependencyTrack.dedicatedDatabase.existingSecret }}
+                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "username" "default" "username") }}
+              {{- else if .Values.postgres.enabled }}
               value: {{ .Values.postgres.auth.username | quote }}
               {{- else }}
               value: {{ .Values.externalDatabase.username | quote }}
               {{- end }}
             - name: ALPINE_DATABASE_PASSWORD
-              {{- if eq (include "artifact-keeper.dtrackDbPasswordFromExistingSecret" .) "true" }}
+              {{- if include "artifact-keeper.dedicatedDatabase" . }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dependencyTrack.dedicatedDatabase.existingSecret }}
+                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "password" "default" "password") }}
+              {{- else if eq (include "artifact-keeper.dtrackDbPasswordFromExistingSecret" .) "true" }}
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.externalDatabase.existingSecret }}

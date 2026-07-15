@@ -216,6 +216,34 @@ proxyReadTimeoutSeconds and proxySendTimeoutSeconds, as YAML.
 {{- end -}}
 
 {{/*
+Database mode selection. The in-cluster postgres wins when enabled and
+ignores every other database setting. With postgres disabled the legacy
+externalDatabase remains the default; setting externalDatabase.enabled to
+false switches backend and DependencyTrack to their per-service
+dedicatedDatabase.existingSecret references (e.g. CloudNativePG `<cluster>-app`
+Secrets). Returns "true" when the per-service references are active.
+*/}}
+{{- define "artifact-keeper.dedicatedDatabase" -}}
+{{- if and (not .Values.postgres.enabled) (hasKey .Values.externalDatabase "enabled") (not .Values.externalDatabase.enabled) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Per-service database secret key lookups, defaulting to the CloudNativePG
+application-secret key names when secretKeys (or an individual key) is unset.
+*/}}
+{{- define "artifact-keeper.backend.dbSecretKey" -}}
+{{- $keys := .root.Values.backend.dedicatedDatabase.secretKeys | default dict -}}
+{{- get $keys .key | default .default -}}
+{{- end }}
+
+{{- define "artifact-keeper.dtrack.dbSecretKey" -}}
+{{- $keys := .root.Values.dependencyTrack.dedicatedDatabase.secretKeys | default dict -}}
+{{- get $keys .key | default .default -}}
+{{- end }}
+
+{{/*
 Database URL helper — returns the full DATABASE_URL string
 */}}
 {{- define "artifact-keeper.databaseUrl" -}}

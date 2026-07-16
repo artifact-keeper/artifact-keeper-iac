@@ -307,3 +307,4 @@ The deployment includes two open-source security scanning tools:
 ## License
 
 This repository is licensed under the [MIT License](LICENSE), matching the main [artifact-keeper](https://github.com/artifact-keeper/artifact-keeper) project.
+

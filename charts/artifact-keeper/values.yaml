@@ -520,6 +520,12 @@ externalDatabase:
 #   into production by accident.
 opensearch:
   enabled: true
+  # -- Seconds the backend's wait-for-opensearch init container waits for
+  # OpenSearch to reach green/yellow before proceeding on the Postgres-native
+  # search fallback. OpenSearch is an optional accelerator (the backend boots
+  # without it), so an unbounded wait turns a slow/degraded OpenSearch into a
+  # backend-that-never-starts. 0 restores the legacy wait-forever behavior.
+  waitTimeoutSeconds: 180
   replicaCount: 1
   clusterName: artifact-keeper
   image:

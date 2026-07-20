@@ -127,7 +127,27 @@ spec:
               URL="https://{{ include "artifact-keeper.fullname" . }}-opensearch:9200/_cluster/health"
               CURL_ARGS="-k"
               {{- end }}
+              # BOUNDED wait. OpenSearch is an OPTIONAL search accelerator: the
+              # backend boots and runs on Postgres-native search when it is
+              # unavailable (main.rs: "continuing without search" -> search_service
+              # = None; the reindex is backgrounded). An UNBOUNDED wait here made a
+              # slow/degraded OpenSearch block the backend in PodInitializing until
+              # the rollout timeout, which cascaded a whole release-gate failure
+              # (the v1.6.0 gate). After waitTimeoutSeconds we PROCEED so the
+              # backend can serve on the Postgres fallback and pick OpenSearch back
+              # up when it recovers. Set opensearch.waitTimeoutSeconds=0 to restore
+              # the old wait-forever behavior.
+              {{- /* dig (not `default`) so an explicit 0 is honored: Go
+                     templates treat 0 as empty, so `0 | default 180` would
+                     wrongly render 180 and the wait-forever escape hatch would
+                     never work. */}}
+              WAIT_TIMEOUT={{ dig "waitTimeoutSeconds" 180 .Values.opensearch }}
+              DEADLINE=$(( $(date +%s) + WAIT_TIMEOUT ))
               until wget -qO- $URL 2>/dev/null | grep -q '"status":"\(green\|yellow\)"'; do
+                if [ "$WAIT_TIMEOUT" -gt 0 ] && [ "$(date +%s)" -ge "$DEADLINE" ]; then
+                  echo "WARNING: OpenSearch not ready after ${WAIT_TIMEOUT}s; proceeding. The backend will serve on Postgres-native search until OpenSearch recovers."
+                  exit 0
+                fi
                 sleep 3
               done
               echo "OpenSearch is ready"

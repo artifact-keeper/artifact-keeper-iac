@@ -27,3 +27,13 @@ README.md.gotmpl
 *.tmp
 *.bak
 *.orig
+
+# Internal build-infra and CI-only values overlays.
+# These are not customer configuration and must not ship inside the packaged
+# chart. They are still consumed by CI/internal tooling via `helm template -f`,
+# which .helmignore does not affect. Customer example overlays
+# (values-production.yaml, values-staging.yaml) are intentionally NOT ignored.
+values-registry-cache.yaml
+values-mesh-main.yaml
+values-mesh-peer.yaml
+values-smoke.yaml

@@ -199,10 +199,28 @@ data:
   init-dtrack.sh: |
     #!/bin/sh
     set -e
+
+    # Tool preflight. The wrapper in the Job spec (`apk add --no-cache curl jq`)
+    # silently swallows failures when the pod has no egress to the alpine
+    # package mirrors. Verify the binaries are actually present before we
+    # start; otherwise every subsequent `curl` call is silently a no-op
+    # and the wait loop below burns its 5-minute budget waiting for a
+    # request that was never made.
+    for tool in curl jq; do
+      if ! command -v "$tool" > /dev/null 2>&1; then
+        echo "[dtrack-init] ERROR: $tool not installed. The bootstrap image needs egress to" >&2
+        echo "[dtrack-init]        the alpine package repositories. Either grant egress, or" >&2
+        echo "[dtrack-init]        replace the dtrack-init container image with one that has" >&2
+        echo "[dtrack-init]        curl + jq pre-installed." >&2
+        exit 1
+      fi
+    done
+
     DT_URL="${DEPENDENCY_TRACK_URL:-http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080}"
     DT_ADMIN_USER="admin"
     DT_DEFAULT_PASS="admin"
     DT_NEW_PASS="${DEPENDENCY_TRACK_ADMIN_PASSWORD}"
+    DT_TEAM_NAME="${DEPENDENCY_TRACK_TEAM_NAME:-Automation}"
     API_KEY_FILE="/shared/dtrack-api-key"
 
     echo "[dtrack-init] Waiting for Dependency-Track at $DT_URL ..."
@@ -219,26 +237,85 @@ data:
 
     TOKEN=$(curl -sf -X POST "$DT_URL/api/v1/user/login" \
       -H "Content-Type: application/x-www-form-urlencoded" \
-      -d "username=${DT_ADMIN_USER}&password=${DT_NEW_PASS}" 2>/dev/null || true)
+      --data-urlencode "username=${DT_ADMIN_USER}" \
+      --data-urlencode "password=${DT_NEW_PASS}" 2>/dev/null || true)
 
     if [ -z "$TOKEN" ] || echo "$TOKEN" | grep -qi "FORCE_PASSWORD_CHANGE"; then
       curl -sf -o /dev/null -X POST "$DT_URL/api/v1/user/forceChangePassword" \
         -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "username=${DT_ADMIN_USER}&password=${DT_DEFAULT_PASS}&newPassword=${DT_NEW_PASS}&confirmPassword=${DT_NEW_PASS}"
+        --data-urlencode "username=${DT_ADMIN_USER}" \
+        --data-urlencode "password=${DT_DEFAULT_PASS}" \
+        --data-urlencode "newPassword=${DT_NEW_PASS}" \
+        --data-urlencode "confirmPassword=${DT_NEW_PASS}"
       TOKEN=$(curl -sf -X POST "$DT_URL/api/v1/user/login" \
         -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "username=${DT_ADMIN_USER}&password=${DT_NEW_PASS}" 2>/dev/null || true)
+        --data-urlencode "username=${DT_ADMIN_USER}" \
+        --data-urlencode "password=${DT_NEW_PASS}" 2>/dev/null || true)
     fi
 
     if [ -z "$TOKEN" ]; then echo "[dtrack-init] ERROR: auth failed"; exit 1; fi
 
-    API_KEY=$(curl -sf "$DT_URL/api/v1/team" \
+    # Resolve the team UUID. We generate a fresh key below rather than
+    # reading an existing one from this listing: Dependency-Track 4.13+
+    # redacts `.apiKeys[*].key` here (only `maskedKey` remains), so the
+    # read-from-listing approach silently yields an empty key on 4.13+.
+    # (4.11/4.12 still return the full key, but generating is the
+    # version-agnostic path.)
+    TEAM_UUID=$(curl -sf "$DT_URL/api/v1/team" \
       -H "Authorization: Bearer $TOKEN" | \
-      jq -r '.[] | select(.name == "Automation") | .apiKeys[0].key // empty')
+      jq -r --arg name "$DT_TEAM_NAME" '.[] | select(.name == $name) | .uuid // empty')
 
-    if [ -z "$API_KEY" ]; then echo "[dtrack-init] ERROR: no API key"; exit 1; fi
+    if [ -z "$TEAM_UUID" ]; then
+      echo "[dtrack-init] ERROR: team '$DT_TEAM_NAME' not found" >&2
+      exit 1
+    fi
 
-    echo "$API_KEY" > "$API_KEY_FILE"
+    # Generate a fresh API key. Dependency-Track returns the unmasked
+    # secret in the response body of this single PUT -- there is no other
+    # way to retrieve it afterward. PUT is the generate verb on every 4.x
+    # version (verified 4.11.4 / 4.12.7 / 4.13.0 / 4.14.2 -> 201 + .key).
+    # POST to this path returns 405 on all of them: DT only accepts
+    # POST .../key/{key} to regenerate an existing key, never to create.
+    echo "[dtrack-init] Generating new $DT_TEAM_NAME API key..."
+    KEY_RESP=$(curl -sf -X PUT "$DT_URL/api/v1/team/$TEAM_UUID/key" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" || true)
+
+    if [ -z "$KEY_RESP" ]; then
+      echo "[dtrack-init] ERROR: PUT /api/v1/team/$TEAM_UUID/key returned empty body" >&2
+      exit 1
+    fi
+
+    API_KEY=$(echo "$KEY_RESP" | jq -r '.key // empty')
+
+    if [ -z "$API_KEY" ]; then
+      echo "[dtrack-init] ERROR: response did not contain a 'key' field" >&2
+      echo "[dtrack-init]        response was: $KEY_RESP" >&2
+      exit 1
+    fi
+
+    # Write atomically -- the backend pod polls this file at startup and
+    # exporting a partial key would leave it permanently misauthenticated.
+    TMP_KEY_FILE="$API_KEY_FILE.tmp"
+    umask 077
+    printf '%s' "$API_KEY" > "$TMP_KEY_FILE"
+    mv "$TMP_KEY_FILE" "$API_KEY_FILE"
+
+    # Enable NVD REST API 2.0 mirroring. NIST retired the legacy JSON feed
+    # files in late 2023, so dtrack's default `nvd.feeds.url` source
+    # (still configured by some older chart versions) 404s on every poll.
+    # The 4.10+ replacement is `nvd.api.enabled=true`; safe to set
+    # unconditionally because dtrack ignores unknown config properties.
+    echo "[dtrack-init] Enabling NVD REST API 2.0 mirroring..."
+    NVD_HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
+      -X POST "$DT_URL/api/v1/configProperty" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"groupName":"vuln-source","propertyName":"nvd.api.enabled","propertyValue":"true"}' || true)
+    if [ "$NVD_HTTP" != "200" ]; then
+      echo "[dtrack-init] WARNING: NVD config returned HTTP $NVD_HTTP (may already be set)"
+    fi
+
     echo "[dtrack-init] Done"
 ---
 apiVersion: batch/v1
@@ -296,7 +373,16 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              apk add --no-cache curl jq >/dev/null 2>&1
+              # Don't silence apk: when the pod has no egress to the
+              # alpine mirrors, the install fails silently, the script
+              # below runs without `curl` installed, and every `curl`
+              # call in it is a no-op. The wait loop then burns its
+              # 5-minute budget waiting for a request that was never
+              # made, all three backoffs run, the Job is marked Failed,
+              # and the only signal is a silent log. The script
+              # preflight (`command -v curl`) catches the symptom; this
+              # surfacing catches the cause.
+              apk add --no-cache curl jq
               /bin/sh /scripts/init-dtrack.sh
           env:
             - name: DEPENDENCY_TRACK_URL

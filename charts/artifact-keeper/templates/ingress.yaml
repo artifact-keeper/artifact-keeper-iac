@@ -8,6 +8,27 @@ security policies, and operational needs before use in production.
 =============================================================================
 */}}
 {{- if .Values.ingress.enabled }}
+{{- /*
+  Ingress annotations: the operator-supplied `ingress.annotations` merged with
+  the nginx proxy annotations derived from the dedicated maxBodySize /
+  proxyReadTimeoutSeconds / proxySendTimeoutSeconds values. The derived
+  annotations are only added when the ingress class is nginx (they are no-ops on
+  other controllers), and any key the operator sets explicitly in
+  `ingress.annotations` wins over the derived value.
+*/}}
+{{- $derived := dict }}
+{{- if eq (default "" .Values.ingress.className) "nginx" }}
+{{- with .Values.ingress.maxBodySize }}
+{{- $_ := set $derived "nginx.ingress.kubernetes.io/proxy-body-size" (toString .) }}
+{{- end }}
+{{- if not (kindIs "invalid" .Values.ingress.proxyReadTimeoutSeconds) }}
+{{- $_ := set $derived "nginx.ingress.kubernetes.io/proxy-read-timeout" (toString .Values.ingress.proxyReadTimeoutSeconds) }}
+{{- end }}
+{{- if not (kindIs "invalid" .Values.ingress.proxySendTimeoutSeconds) }}
+{{- $_ := set $derived "nginx.ingress.kubernetes.io/proxy-send-timeout" (toString .Values.ingress.proxySendTimeoutSeconds) }}
+{{- end }}
+{{- end }}
+{{- $annotations := merge (dict) (default dict .Values.ingress.annotations) $derived }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -15,7 +36,7 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingress
-  {{- with .Values.ingress.annotations }}
+  {{- with $annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}

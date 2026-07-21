@@ -798,11 +798,27 @@ dependencyTrack:
 ingress:
   enabled: true
   className: nginx
+  # Extra annotations for the Ingress object. These are merged with the nginx
+  # proxy annotations derived from maxBodySize / proxyReadTimeoutSeconds /
+  # proxySendTimeoutSeconds below. Any key set here takes precedence over the
+  # derived value, so you can raise a single timeout through the dedicated value
+  # without restating the whole annotation block, or override an annotation
+  # outright by setting it here.
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
     nginx.ingress.kubernetes.io/enable-cors: "true"
+  # Maximum client request body size, rendered as the nginx `proxy-body-size`
+  # annotation when className is `nginx`. Registries host large artifacts, so
+  # this defaults high; "0" disables the limit entirely. Set to "" to omit the
+  # annotation (for example when a non-nginx controller manages it elsewhere).
+  maxBodySize: "1024m"
+  # Proxy read timeout in seconds, rendered as the nginx `proxy-read-timeout`
+  # annotation when className is `nginx`. Raise this for multi-GiB uploads over
+  # slow links, where the default 300 can be too short. Set to null to omit the
+  # annotation.
+  proxyReadTimeoutSeconds: 300
+  # Proxy send timeout in seconds, rendered as the nginx `proxy-send-timeout`
+  # annotation when className is `nginx`. Set to null to omit the annotation.
+  proxySendTimeoutSeconds: 300
   host: artifacts.example.com
   tls:
     enabled: true
@@ -899,6 +915,17 @@ gke:
     dependencyTrack:
       # -- Health-check path for the DependencyTrack BackendService.
       requestPath: /api/version
+  backendPolicies:
+    # -- Render a `networking.gke.io/v1` GCPBackendPolicy for the backend
+    # Service so a GKE Gateway BackendService uses `timeoutSec` below instead of
+    # the ~30s default, which makes multi-GiB uploads 504 before the backend
+    # finishes reading and checksumming the body. Leave disabled on non-GKE
+    # installs and on nginx Ingress (tune ingress.proxyReadTimeoutSeconds there).
+    enabled: false
+    backend:
+      # -- Backend BackendService request timeout in seconds. Mirrors the
+      # nginx proxy-read-timeout default so both ingress paths behave the same.
+      timeoutSec: 300
 
 # -- Fleet mode: many instances per cluster sharing external services.
 # Opt-in and off by default. When fleet.enabled is false none of the fleet

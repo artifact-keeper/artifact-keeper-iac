@@ -1,0 +1,30 @@
+{{/*
+GCPBackendPolicy for GKE Gateway environments.
+
+On GKE clusters fronted by the Gateway API, the BackendService the controller
+creates for the backend defaults to a ~30s request timeout. Multi-GiB artifact
+uploads take longer than that and fail with a 504 before the backend finishes
+reading the request body and verifying its checksum. A GCPBackendPolicy bound to
+the backend Service raises `timeoutSec` so those uploads can complete.
+
+Rendered only when `gke.backendPolicies.enabled` is true, so installs on other
+clouds and nginx-Ingress-based installs (which tune the timeout through
+`ingress.proxyReadTimeoutSeconds` instead) are unaffected. This is the
+Gateway-API counterpart to the nginx proxy-read-timeout annotation.
+*/}}
+{{- if .Values.gke.backendPolicies.enabled }}
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-backend
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  default:
+    timeoutSec: {{ .Values.gke.backendPolicies.backend.timeoutSec | default 300 }}
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ include "artifact-keeper.fullname" . }}-backend
+{{- end }}

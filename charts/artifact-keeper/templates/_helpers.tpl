@@ -170,3 +170,177 @@ ServiceAccount name
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+=============================================================================
+Cloud tenant overlay helpers
+=============================================================================
+All cloud behavior is gated on cloud.slug being set. When cloud.slug is empty
+(the default for non-cloud installs) every helper below falls back to the
+existing per-component values, so rendered output is unchanged.
+*/}}
+
+{{/*
+Returns the string "true" when this release is a cloud tenant (cloud.slug set).
+Callers gate on: eq (include "artifact-keeper.cloud.enabled" .) "true"
+*/}}
+{{- define "artifact-keeper.cloud.enabled" -}}
+{{- if and .Values.cloud .Values.cloud.slug -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Returns "true" when a cloud tenant is suspended. Suspended tenants scale their
+backend and web workloads to zero replicas.
+*/}}
+{{- define "artifact-keeper.cloud.suspended" -}}
+{{- if and (eq (include "artifact-keeper.cloud.enabled" .) "true") (eq (default "active" .Values.cloud.status) "suspended") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Postgres identifier for a tenant (role and database share the name). Slugs use
+dashes; Postgres identifiers use underscores, so the slug is normalized and
+prefixed with t_ to match the t-<slug> namespace convention.
+*/}}
+{{- define "artifact-keeper.cloud.dbIdentifier" -}}
+{{- printf "t_%s" (.Values.cloud.slug | replace "-" "_") -}}
+{{- end -}}
+
+{{/*
+Preset sizing table keyed on cloud.preset (small|medium|large). Returns YAML
+for the selected preset with backend/web replica counts and resource blocks.
+Presets are chart-owned so tenant specs only carry the preset name.
+*/}}
+{{- define "artifact-keeper.cloud.presetSpec" -}}
+{{- $preset := default "small" .Values.cloud.preset -}}
+{{- $table := dict
+  "small" (dict
+    "backendReplicas" 1
+    "webReplicas" 1
+    "backend" (dict
+      "requests" (dict "cpu" "250m" "memory" "512Mi" "ephemeral-storage" "256Mi")
+      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "1Gi"))
+    "web" (dict
+      "requests" (dict "cpu" "100m" "memory" "128Mi" "ephemeral-storage" "128Mi")
+      "limits" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "1Gi")))
+  "medium" (dict
+    "backendReplicas" 2
+    "webReplicas" 2
+    "backend" (dict
+      "requests" (dict "cpu" "500m" "memory" "1Gi" "ephemeral-storage" "512Mi")
+      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi"))
+    "web" (dict
+      "requests" (dict "cpu" "250m" "memory" "256Mi" "ephemeral-storage" "256Mi")
+      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "2Gi")))
+  "large" (dict
+    "backendReplicas" 3
+    "webReplicas" 2
+    "backend" (dict
+      "requests" (dict "cpu" "1" "memory" "2Gi" "ephemeral-storage" "1Gi")
+      "limits" (dict "cpu" "4" "memory" "4Gi" "ephemeral-storage" "4Gi"))
+    "web" (dict
+      "requests" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "512Mi")
+      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi")))
+  -}}
+{{- $spec := index $table $preset -}}
+{{- if not $spec -}}
+{{- fail (printf "cloud.preset=%q is not valid; use one of small, medium, large" $preset) -}}
+{{- end -}}
+{{- $spec | toYaml -}}
+{{- end -}}
+
+{{/*
+Backend replica count. Zero when suspended, the preset count for cloud tenants,
+otherwise the per-component value.
+*/}}
+{{- define "artifact-keeper.backend.replicaCount" -}}
+{{- if eq (include "artifact-keeper.cloud.suspended" .) "true" -}}
+0
+{{- else if eq (include "artifact-keeper.cloud.enabled" .) "true" -}}
+{{- (fromYaml (include "artifact-keeper.cloud.presetSpec" .)).backendReplicas -}}
+{{- else -}}
+{{- .Values.backend.replicaCount -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Web replica count. Zero when suspended, the preset count for cloud tenants,
+otherwise the per-component value.
+*/}}
+{{- define "artifact-keeper.web.replicaCount" -}}
+{{- if eq (include "artifact-keeper.cloud.suspended" .) "true" -}}
+0
+{{- else if eq (include "artifact-keeper.cloud.enabled" .) "true" -}}
+{{- (fromYaml (include "artifact-keeper.cloud.presetSpec" .)).webReplicas -}}
+{{- else -}}
+{{- .Values.web.replicaCount -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Backend resources. Preset block for cloud tenants, otherwise the per-component
+value (identical output to the previous direct toYaml of backend.resources).
+*/}}
+{{- define "artifact-keeper.backend.resources" -}}
+{{- if eq (include "artifact-keeper.cloud.enabled" .) "true" -}}
+{{- (fromYaml (include "artifact-keeper.cloud.presetSpec" .)).backend | toYaml -}}
+{{- else -}}
+{{- toYaml .Values.backend.resources -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Web resources. Preset block for cloud tenants, otherwise the per-component value.
+*/}}
+{{- define "artifact-keeper.web.resources" -}}
+{{- if eq (include "artifact-keeper.cloud.enabled" .) "true" -}}
+{{- (fromYaml (include "artifact-keeper.cloud.presetSpec" .)).web | toYaml -}}
+{{- else -}}
+{{- toYaml .Values.web.resources -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Ingress host. Cloud tenants derive it from cloud.host; otherwise ingress.host.
+*/}}
+{{- define "artifact-keeper.ingressHost" -}}
+{{- if and .Values.cloud .Values.cloud.host -}}
+{{- .Values.cloud.host -}}
+{{- else -}}
+{{- .Values.ingress.host -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Per-namespace guardrail sizing keyed on cloud.preset. Returns YAML with the
+ResourceQuota totals and the LimitRange container defaults/bounds for the
+selected preset. The quota totals sit above the summed backend+web
+requests/limits to leave headroom for init containers and the bootstrap Job.
+*/}}
+{{- define "artifact-keeper.cloud.guardrailSpec" -}}
+{{- $preset := default "small" .Values.cloud.preset -}}
+{{- $table := dict
+  "small" (dict
+    "quota" (dict "requestsCpu" "1" "requestsMemory" "1Gi" "limitsCpu" "4" "limitsMemory" "4Gi" "pods" "12" "pvcs" "4")
+    "limitRange" (dict
+      "defaultRequest" (dict "cpu" "100m" "memory" "128Mi")
+      "default" (dict "cpu" "500m" "memory" "512Mi")
+      "max" (dict "cpu" "2" "memory" "2Gi")))
+  "medium" (dict
+    "quota" (dict "requestsCpu" "2" "requestsMemory" "3Gi" "limitsCpu" "8" "limitsMemory" "8Gi" "pods" "20" "pvcs" "6")
+    "limitRange" (dict
+      "defaultRequest" (dict "cpu" "250m" "memory" "256Mi")
+      "default" (dict "cpu" "1" "memory" "1Gi")
+      "max" (dict "cpu" "3" "memory" "3Gi")))
+  "large" (dict
+    "quota" (dict "requestsCpu" "4" "requestsMemory" "6Gi" "limitsCpu" "16" "limitsMemory" "16Gi" "pods" "30" "pvcs" "8")
+    "limitRange" (dict
+      "defaultRequest" (dict "cpu" "500m" "memory" "512Mi")
+      "default" (dict "cpu" "2" "memory" "2Gi")
+      "max" (dict "cpu" "6" "memory" "6Gi")))
+  -}}
+{{- $spec := index $table $preset -}}
+{{- if not $spec -}}
+{{- fail (printf "cloud.preset=%q is not valid; use one of small, medium, large" $preset) -}}
+{{- end -}}
+{{- $spec | toYaml -}}
+{{- end -}}

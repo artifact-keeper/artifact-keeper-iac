@@ -17,7 +17,7 @@ metadata:
     app.kubernetes.io/component: backend
 spec:
   {{- if not .Values.backend.autoscaling.enabled }}
-  replicas: {{ .Values.backend.replicaCount }}
+  replicas: {{ include "artifact-keeper.backend.replicaCount" . }}
   {{- end }}
   strategy:
     type: Recreate
@@ -249,8 +249,29 @@ spec:
             - name: METRICS_PORT
               value: {{ .Values.backend.metricsListener.port | quote }}
             {{- end }}
+            {{- if eq (include "artifact-keeper.cloud.enabled" .) "true" }}
+            # Cloud tenant object storage. Artifacts live in Cloudflare R2 under
+            # a per-tenant prefix; downloads are served via presigned redirects.
+            # STORAGE_BACKEND, S3_BUCKET, S3_ENDPOINT, S3_REGION and the redirect
+            # flags come from backend.env in values-cloud.yaml; the slug-derived
+            # prefix and the credentials are injected here.
+            - name: S3_PREFIX
+              value: {{ .Values.cloud.slug | quote }}
+            {{- if .Values.cloud.storage.existingSecret }}
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloud.storage.existingSecret }}
+                  key: {{ .Values.cloud.storage.accessKeyIdKey }}
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloud.storage.existingSecret }}
+                  key: {{ .Values.cloud.storage.secretAccessKeyKey }}
+            {{- end }}
+            {{- end }}
           resources:
-            {{- toYaml .Values.backend.resources | nindent 12 }}
+            {{- include "artifact-keeper.backend.resources" . | nindent 12 }}
           startupProbe:
             httpGet:
               path: /readyz

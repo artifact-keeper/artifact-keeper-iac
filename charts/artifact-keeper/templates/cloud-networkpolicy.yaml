@@ -1,0 +1,80 @@
+{{/*
+=============================================================================
+Cloud tenant overlay: per-namespace NetworkPolicy
+=============================================================================
+Renders only for cloud tenants (cloud.slug set) and replaces the default
+in-namespace NetworkPolicy set (networkPolicy.enabled is turned off in
+values-cloud.yaml). Ingress is allowed only from the ingress-nginx namespace
+and from pods within the tenant namespace (web to backend). Egress is allowed
+only to the shared CNPG, search, and Trivy namespaces, plus DNS and outbound
+HTTPS for Cloudflare R2. namespaceSelector uses the kubernetes.io/metadata.name
+label that Kubernetes stamps on every namespace automatically.
+=============================================================================
+*/}}
+{{- if eq (include "artifact-keeper.cloud.enabled" .) "true" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-cloud
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cloud-guardrail
+spec:
+  # Applies to every pod in the tenant namespace.
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # ingress-nginx controller reaching backend (8080) and web (3000).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.cloud.ingressNamespace | quote }}
+      ports:
+        - port: {{ .Values.backend.service.httpPort }}
+          protocol: TCP
+        - port: {{ .Values.web.service.port }}
+          protocol: TCP
+    # Intra-namespace traffic (web to backend, backend gRPC).
+    - from:
+        - podSelector: {}
+  egress:
+    # DNS resolution.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Intra-namespace traffic.
+    - to:
+        - podSelector: {}
+    # Shared CloudNativePG cluster.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.cloud.shared.databaseNamespace | quote }}
+      ports:
+        - port: 5432
+          protocol: TCP
+    # Shared search.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.cloud.shared.searchNamespace | quote }}
+      ports:
+        - port: 9200
+          protocol: TCP
+    # Shared Trivy.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.cloud.shared.scannerNamespace | quote }}
+      ports:
+        - port: 8090
+          protocol: TCP
+    # Outbound HTTPS for Cloudflare R2 (and any external OIDC/registry).
+    - ports:
+        - port: 443
+          protocol: TCP
+{{- end }}

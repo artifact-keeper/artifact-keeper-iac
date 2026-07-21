@@ -1,0 +1,26 @@
+{{/*
+=============================================================================
+Cloud tenant overlay: per-namespace ResourceQuota
+=============================================================================
+Renders only for cloud tenants (cloud.slug set). Caps total requests, limits,
+pod count, and PVC count for the tenant namespace, sized per cloud.preset.
+=============================================================================
+*/}}
+{{- if eq (include "artifact-keeper.cloud.enabled" .) "true" }}
+{{- $g := (fromYaml (include "artifact-keeper.cloud.guardrailSpec" .)).quota }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-quota
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cloud-guardrail
+spec:
+  hard:
+    requests.cpu: {{ $g.requestsCpu | quote }}
+    requests.memory: {{ $g.requestsMemory | quote }}
+    limits.cpu: {{ $g.limitsCpu | quote }}
+    limits.memory: {{ $g.limitsMemory | quote }}
+    pods: {{ $g.pods | quote }}
+    persistentvolumeclaims: {{ $g.pvcs | quote }}
+{{- end }}

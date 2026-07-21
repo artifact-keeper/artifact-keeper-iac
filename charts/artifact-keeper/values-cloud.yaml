@@ -1,0 +1,222 @@
+# =============================================================================
+# Cloud tenant overlay (instance-per-tenant SaaS)
+# =============================================================================
+# Layered on top of values.yaml by the tenants ApplicationSet. Every tenant is
+# one Helm release in namespace t-<slug> with hostname <slug>.artifactkeeper.cloud.
+# The ApplicationSet supplies the per-tenant cloud.* values (slug, plan, preset,
+# status, host, features.plugins) as an inline valuesObject; this file carries
+# the fleet-wide configuration that is identical across tenants.
+#
+# What this overlay does:
+#   - Disables the in-release Postgres, search, Trivy, Dependency-Track, edge,
+#     and scanner-adapter. Databases, search, and scanning are shared cluster
+#     services; artifacts live in Cloudflare R2.
+#   - Points the backend at the shared CloudNativePG cluster (connection string
+#     from a per-tenant Secret) and at Cloudflare R2 via the S3 backend with a
+#     per-tenant key prefix and presigned-redirect downloads.
+#   - Serves a single ingress host from cloud.host with TLS terminated by the
+#     fleet wildcard certificate (no per-release cert).
+#   - Sizes backend/web and renders per-namespace guardrails (ResourceQuota,
+#     LimitRange, NetworkPolicy) from cloud.preset. Suspended tenants scale to
+#     zero. See templates/_helpers.tpl for the preset tables.
+#
+# Provisioning contract (owned by the tenant provisioner, not this chart):
+#   - Secret "tenant-db" in the tenant namespace with:
+#       DATABASE_URL  postgresql://t_<slug>:<pw>@<cnpg-rw-host>:5432/t_<slug>
+#       password      <pw>   (same password, used by the bootstrap Job)
+#   - Secret "tenant-r2" in the tenant namespace with:
+#       S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY  (R2 access keys)
+#   - Secret "cnpg-bootstrap" in the tenant namespace with superuser
+#       username / password for the shared CNPG cluster (bootstrap Job only).
+#   - Per-tenant application secrets (JWT and the migration/webhook encryption
+#     keys). See the secrets block near the bottom of this file; these still
+#     need to be supplied per tenant (external-secrets or an added valuesObject
+#     entry). Tracking follow-up noted in the PR.
+# =============================================================================
+
+# Stable, predictable resource names within each tenant namespace. Every tenant
+# lives in its own namespace, so the names do not collide across tenants.
+fullnameOverride: artifact-keeper
+
+global:
+  imageRegistry: ghcr.io/artifact-keeper
+  # Cloud runs pinned release images, so IfNotPresent avoids needless re-pulls.
+  imagePullPolicy: IfNotPresent
+
+# -----------------------------------------------------------------------------
+# Cloud tenant identity. slug/plan/preset/status/host/features come from the
+# ApplicationSet valuesObject per tenant; the defaults here keep helm template
+# and helm lint working when only --set cloud.slug is provided.
+# -----------------------------------------------------------------------------
+cloud:
+  slug: ""
+  plan: ""
+  preset: small
+  status: active
+  host: ""
+  features:
+    plugins: false
+  storage:
+    existingSecret: tenant-r2
+    accessKeyIdKey: S3_ACCESS_KEY_ID
+    secretAccessKeyKey: S3_SECRET_ACCESS_KEY
+  database:
+    existingSecret: tenant-db
+    passwordKey: password
+    bootstrapSecret: cnpg-bootstrap
+    bootstrap:
+      enabled: true
+  shared:
+    databaseNamespace: cnpg-system
+    searchNamespace: search
+    scannerNamespace: trivy
+  ingressNamespace: ingress-nginx
+
+# -----------------------------------------------------------------------------
+# Backend
+# -----------------------------------------------------------------------------
+backend:
+  enabled: true
+  image:
+    # Empty tag inherits the chart appVersion, so chart release X pulls
+    # backend image X (reproducible fleet rollouts pinned by chartVersion).
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Replica count and resources come from cloud.preset (chart-owned), so no
+  # per-preset duplication here. autoscaling stays off in cloud.
+  autoscaling:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+  # Artifacts live in R2, not on a PVC.
+  persistence:
+    enabled: false
+  # Scanning uses the shared Trivy service; no local scan-workspace PVC.
+  scanWorkspace:
+    enabled: false
+  env:
+    RUST_LOG: "info"
+    ENVIRONMENT: "production"
+    HOST: "0.0.0.0"
+    PORT: "8080"
+    # Admin bootstrap password is provisioned per tenant. Leave empty here.
+    ADMIN_PASSWORD: ""
+    # Object storage: Cloudflare R2 via the S3 backend. S3_PREFIX (=slug) and
+    # the R2 credentials are injected by the deployment template from cloud.*;
+    # the non-secret endpoint settings are here. Override S3_BUCKET/S3_ENDPOINT
+    # to the fleet's R2 account.
+    STORAGE_BACKEND: "s3"
+    S3_BUCKET: "artifact-keeper-cloud"
+    S3_ENDPOINT: "https://CHANGEME.r2.cloudflarestorage.com"
+    S3_REGION: "auto"
+    # Serve downloads as 302 redirects to presigned R2 URLs (offloads bytes).
+    S3_REDIRECT_DOWNLOADS: "true"
+    S3_PRESIGN_EXPIRY_SECS: "3600"
+    # Shared search and scanner endpoints (services in the shared namespaces).
+    OPENSEARCH_URL: "http://opensearch.search.svc.cluster.local:9200"
+    TRIVY_URL: "http://trivy.trivy.svc.cluster.local:8090"
+    # Trust the ingress-nginx pod network for per-client login rate-limit keying.
+    RATE_LIMIT_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+# -----------------------------------------------------------------------------
+# Web frontend
+# -----------------------------------------------------------------------------
+web:
+  enabled: true
+  image:
+    tag: ""
+    pullPolicy: IfNotPresent
+  podDisruptionBudget:
+    enabled: false
+  env:
+    # Same-origin: the browser reaches the API through the tenant ingress host.
+    NEXT_PUBLIC_API_URL: ""
+    NODE_ENV: "production"
+
+# -----------------------------------------------------------------------------
+# Shared external database (CloudNativePG). The connection string is read from
+# the per-tenant Secret (existingSecret), so no credentials are templated here.
+# host/port are the shared cluster's read-write service; the per-tenant role and
+# database (t_<slug>) are created by the bootstrap Job and encoded in the Secret.
+# -----------------------------------------------------------------------------
+postgres:
+  enabled: false
+
+externalDatabase:
+  host: "artifact-keeper-pg-rw.cnpg-system.svc.cluster.local"
+  port: 5432
+  # username/database are derived per tenant (t_<slug>) and encoded in the
+  # DATABASE_URL held by the Secret below; left blank here on purpose.
+  username: ""
+  database: ""
+  existingSecret: tenant-db
+  existingSecretKey: DATABASE_URL
+
+# -----------------------------------------------------------------------------
+# Shared / unused in-release components: all disabled for cloud tenants.
+# -----------------------------------------------------------------------------
+opensearch:
+  enabled: false
+
+trivy:
+  enabled: false
+
+# Container-image scanning via the in-house adapter is a per-tenant follow-up;
+# disabled here to keep tenant pods minimal. Backend fs scans use shared Trivy.
+scannerAdapter:
+  enabled: false
+
+dependencyTrack:
+  enabled: false
+
+edge:
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Ingress: single host from cloud.host, TLS from the fleet wildcard certificate
+# (*.artifactkeeper.cloud presented by ingress-nginx), so no per-release cert.
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+  # host is taken from cloud.host by the ingress template; left blank here.
+  host: ""
+  tls:
+    enabled: false
+
+# -----------------------------------------------------------------------------
+# NetworkPolicy: the built-in per-component policies assume in-release Postgres,
+# search, and Trivy. Cloud tenants use the shared-service policy in
+# templates/cloud-networkpolicy.yaml instead, so the built-in set is disabled.
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+
+# Cosign verification is compatible with pinned release images; leave it to the
+# fleet default (off here to avoid blocking on unsigned pre-release tags).
+cosign:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Application secrets. These are still per-tenant and must be supplied by the
+# provisioner (external-secrets or an added valuesObject entry) rather than
+# committed here. Left empty so real values are never stored in git; a cloud
+# install must set at least secrets.jwtSecret. Tracking follow-up in the PR.
+# -----------------------------------------------------------------------------
+secrets:
+  jwtSecret: ""
+  # migrationEncryptionKey and webhookSecretKey enable the migration and webhook
+  # features respectively; provision per tenant when those features are used.
+  migrationEncryptionKey: ""
+  webhookSecretKey: ""
+
+externalSecrets:
+  enabled: false

@@ -888,3 +888,70 @@ gke:
     dependencyTrack:
       # -- Health-check path for the DependencyTrack BackendService.
       requestPath: /api/version
+
+# -- Cloud tenant overlay (instance-per-tenant SaaS)
+# All cloud behavior is gated on cloud.slug being set. Left empty here so the
+# default (self-hosted) profile is completely unaffected: no cloud templates
+# render and backend/web sizing and replica counts come from the per-component
+# values above. The values-cloud.yaml overlay and the tenants ApplicationSet
+# supply real values for these keys. See values-cloud.yaml for the full cloud
+# configuration and the shared-service wiring.
+cloud:
+  # -- Tenant slug. Empty means "not a cloud tenant" and disables every cloud
+  # code path in the chart. When set, it drives the namespace (t-<slug>), the
+  # storage prefix, and the derived Postgres role/database name (t_<slug>).
+  slug: ""
+  # -- Billing plan label. Informational; surfaced as a label by the ApplicationSet.
+  plan: ""
+  # -- Sizing preset: small | medium | large. Maps to chart-owned backend/web
+  # resource requests/limits and replica counts (see _helpers.tpl).
+  preset: small
+  # -- Lifecycle status: active | suspended | pending-delete. When suspended,
+  # backend and web scale to zero replicas.
+  status: active
+  # -- Public hostname for this tenant (e.g. <slug>.artifactkeeper.cloud). Used
+  # as the single ingress host. TLS is terminated by the fleet wildcard cert,
+  # so no per-release certificate is provisioned.
+  host: ""
+  features:
+    # -- Enable WASM format plugins for this tenant.
+    plugins: false
+  # -- Object storage (Cloudflare R2 via the backend S3 backend). Non-secret
+  # settings live in values-cloud.yaml (backend.env); credentials are read from
+  # a per-tenant Kubernetes Secret referenced here.
+  storage:
+    # -- Name of an existing Secret holding R2 credentials. Keys default to
+    # S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY (override below).
+    existingSecret: ""
+    accessKeyIdKey: S3_ACCESS_KEY_ID
+    secretAccessKeyKey: S3_SECRET_ACCESS_KEY
+  # -- Shared CloudNativePG database. The Postgres cluster is external to the
+  # release; the chart derives the per-tenant role/database name from the slug
+  # and reads the runtime connection string from a per-tenant Secret.
+  database:
+    # -- Name of an existing Secret with the tenant DATABASE_URL (consumed by
+    # the backend) and a plain password used by the bootstrap Job to set the
+    # role password. externalDatabase.existingSecret should point at the same
+    # Secret in values-cloud.yaml.
+    existingSecret: ""
+    # -- Key in existingSecret holding the tenant role password (bootstrap Job).
+    passwordKey: password
+    # -- Name of an existing Secret with superuser credentials for the shared
+    # CNPG cluster, used only by the pre-install bootstrap Job to create the
+    # tenant role and database. Expected keys: username, password.
+    bootstrapSecret: ""
+    # -- Run the pre-install/pre-upgrade Job that creates the tenant role and
+    # database on the shared cluster if absent. The backend runs its own schema
+    # migrations on startup.
+    bootstrap:
+      enabled: true
+  # -- Shared in-cluster service namespaces, used by the per-tenant NetworkPolicy
+  # to scope egress. These are the namespaces of the shared CNPG cluster, search,
+  # and Trivy that every tenant reaches.
+  shared:
+    databaseNamespace: cnpg-system
+    searchNamespace: search
+    scannerNamespace: trivy
+  # -- ingress-nginx controller namespace, used by the per-tenant NetworkPolicy
+  # to scope ingress.
+  ingressNamespace: ingress-nginx

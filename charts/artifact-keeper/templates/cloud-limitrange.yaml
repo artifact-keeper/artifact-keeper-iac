@@ -1,0 +1,32 @@
+{{/*
+=============================================================================
+Cloud tenant overlay: per-namespace LimitRange
+=============================================================================
+Renders only for cloud tenants (cloud.slug set). Applies default container
+requests/limits (so unbounded pods cannot be scheduled) and a per-container
+ceiling, sized per cloud.preset. The ceiling sits above the preset backend
+limits so the tenant workloads themselves are always admissible.
+=============================================================================
+*/}}
+{{- if eq (include "artifact-keeper.cloud.enabled" .) "true" }}
+{{- $lr := (fromYaml (include "artifact-keeper.cloud.guardrailSpec" .)).limitRange }}
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-limits
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cloud-guardrail
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: {{ $lr.defaultRequest.cpu | quote }}
+        memory: {{ $lr.defaultRequest.memory | quote }}
+      default:
+        cpu: {{ $lr.default.cpu | quote }}
+        memory: {{ $lr.default.memory | quote }}
+      max:
+        cpu: {{ $lr.max.cpu | quote }}
+        memory: {{ $lr.max.memory | quote }}
+{{- end }}

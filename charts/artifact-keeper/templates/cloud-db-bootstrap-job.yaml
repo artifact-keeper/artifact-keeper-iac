@@ -1,0 +1,139 @@
+{{/*
+=============================================================================
+Cloud tenant overlay: shared-database bootstrap Job
+=============================================================================
+Renders only for cloud tenants (cloud.slug set) with the bootstrap enabled.
+Runs as a pre-install/pre-upgrade Helm hook: connects to the shared
+CloudNativePG cluster with the superuser credentials from
+cloud.database.bootstrapSecret and creates the tenant role and database
+(named t_<slug>) if they are absent. Schema migrations are NOT run here; the
+backend runs its own migrations on startup (see backend/src/main.rs), so this
+Job only has to guarantee the role and empty database exist before the backend
+pod connects.
+
+The tenant role password is read from cloud.database.existingSecret so it
+matches the DATABASE_URL the backend consumes from the same Secret.
+=============================================================================
+*/}}
+{{- if and (eq (include "artifact-keeper.cloud.enabled" .) "true") .Values.cloud.database.bootstrap.enabled }}
+{{- $ident := include "artifact-keeper.cloud.dbIdentifier" . }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-db-bootstrap
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cloud-db-bootstrap
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "artifact-keeper.labels" . | nindent 8 }}
+        app.kubernetes.io/component: cloud-db-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      {{- with (.Values.backend.tolerations | default .Values.global.tolerations) }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.backend.nodeSelector | default .Values.global.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        fsGroup: 70
+      containers:
+        - name: db-bootstrap
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+              ephemeral-storage: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+              ephemeral-storage: 64Mi
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PGHOST
+              value: {{ .Values.externalDatabase.host | quote }}
+            - name: PGPORT
+              value: {{ .Values.externalDatabase.port | quote }}
+            # Superuser connection to the shared cluster (bootstrap only).
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloud.database.bootstrapSecret }}
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloud.database.bootstrapSecret }}
+                  key: password
+            # Tenant role password, kept in sync with the tenant DATABASE_URL.
+            - name: TENANT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloud.database.existingSecret }}
+                  key: {{ .Values.cloud.database.passwordKey }}
+            - name: TENANT_IDENT
+              value: {{ $ident | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              echo "[db-bootstrap] Waiting for shared Postgres at ${PGHOST}:${PGPORT} ..."
+              for i in $(seq 1 60); do
+                if pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" >/dev/null 2>&1; then break; fi
+                if [ "$i" -eq 60 ]; then echo "[db-bootstrap] ERROR: database not reachable"; exit 1; fi
+                sleep 3
+              done
+
+              # Create or update the tenant role (idempotent). Identifier is
+              # derived from the slug (alphanumerics and underscores only), so it
+              # is safe to interpolate. The password is passed as a parameter.
+              psql -v ON_ERROR_STOP=1 -d postgres \
+                -v ident="$TENANT_IDENT" -v pw="$TENANT_DB_PASSWORD" <<'SQL'
+              SELECT format('CREATE ROLE %I LOGIN', :'ident')
+              WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'ident')
+              \gexec
+              SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'ident', :'pw')
+              \gexec
+              SQL
+
+              # Create the tenant database owned by the role if it does not exist.
+              # CREATE DATABASE cannot run inside a transaction/DO block, so use
+              # the \gexec conditional-create pattern.
+              psql -v ON_ERROR_STOP=1 -d postgres \
+                -v ident="$TENANT_IDENT" <<'SQL'
+              SELECT format('CREATE DATABASE %I OWNER %I', :'ident', :'ident')
+              WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'ident')
+              \gexec
+              SQL
+
+              echo "[db-bootstrap] Role and database ${TENANT_IDENT} ready"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+{{- end }}

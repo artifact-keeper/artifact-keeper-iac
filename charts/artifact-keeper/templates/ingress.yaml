@@ -26,11 +26,11 @@ spec:
   {{- if .Values.ingress.tls.enabled }}
   tls:
     - hosts:
-        - {{ .Values.ingress.host }}
+        - {{ include "artifact-keeper.ingressHost" . }}
       secretName: {{ .Values.ingress.tls.secretName }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.host }}
+    - host: {{ include "artifact-keeper.ingressHost" . }}
       http:
         paths:
           # API and health endpoints

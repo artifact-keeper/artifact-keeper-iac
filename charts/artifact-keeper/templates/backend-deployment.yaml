@@ -175,26 +175,26 @@ spec:
               {{- else }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: DATABASE_URL
               {{- end }}
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: JWT_SECRET
             {{- if or (and .Values.externalSecrets.enabled .Values.externalSecrets.secrets.migrationEncryptionKey) (and (not .Values.externalSecrets.enabled) .Values.secrets.migrationEncryptionKey) }}
             - name: MIGRATION_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: MIGRATION_ENCRYPTION_KEY
             {{- end }}
             {{- if or (and .Values.externalSecrets.enabled .Values.externalSecrets.secrets.webhookSecretKey) (and (not .Values.externalSecrets.enabled) .Values.secrets.webhookSecretKey) }}
             - name: AK_WEBHOOK_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: AK_WEBHOOK_SECRET_KEY
             {{- end }}
             {{- if .Values.opensearch.enabled }}
@@ -204,12 +204,12 @@ spec:
             - name: OPENSEARCH_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: OPENSEARCH_USERNAME
             - name: OPENSEARCH_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: OPENSEARCH_PASSWORD
             - name: OPENSEARCH_ALLOW_INVALID_CERTS
               value: {{ .Values.opensearch.allowInvalidCerts | quote }}
@@ -242,7 +242,7 @@ spec:
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ include "artifact-keeper.secretName" . }}
                   key: SMTP_PASSWORD
             {{- end }}
             {{- if .Values.backend.metricsListener.enabled }}

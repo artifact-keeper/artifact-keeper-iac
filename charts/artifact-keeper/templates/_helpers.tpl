@@ -157,8 +157,25 @@ ServiceAccount name
 {{- end }}
 {{- end }}
 
+{{/*
+Name of the Secret holding core application credentials (JWT_SECRET and, when
+applicable, DATABASE_URL/POSTGRES_PASSWORD). When secrets.existingSecret is set
+the chart does not render its own Secret and workloads read from the
+operator-supplied Secret; otherwise this is the chart-managed
+"<fullname>-secrets" (the same name used by the externalSecrets target).
+*/}}
+{{- define "artifact-keeper.secretName" -}}
+{{- if .Values.secrets.existingSecret -}}
+{{- .Values.secrets.existingSecret -}}
+{{- else -}}
+{{- printf "%s-secrets" (include "artifact-keeper.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "artifact-keeper.validateSecrets" -}}
-{{- if not .Values.externalSecrets.enabled -}}
+{{- if or .Values.externalSecrets.enabled .Values.secrets.existingSecret -}}
+{{- /* Secrets are supplied externally; no chart-owned Secret to validate. */ -}}
+{{- else -}}
 {{- if eq .Values.secrets.jwtSecret "" -}}
 {{- fail "secrets.jwtSecret is required when externalSecrets is not enabled. Set it with --set secrets.jwtSecret=<value>" -}}
 {{- end -}}

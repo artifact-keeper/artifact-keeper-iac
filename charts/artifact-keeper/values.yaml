@@ -812,6 +812,13 @@ ingress:
 # These are development defaults. For production, override via --set or
 # use existingSecret references. Never commit real credentials here.
 secrets:
+  # -- Name of an existing Secret that already holds the core application
+  # credentials (JWT_SECRET, and DATABASE_URL/POSTGRES_PASSWORD when the chart
+  # would otherwise manage them). When set, the chart does not render its own
+  # Secret and all workloads read from this Secret instead, so the values under
+  # `secrets` and `postgres.auth.password` are not required. Useful for GitOps
+  # and secret-manager workflows where the Secret is provisioned out of band.
+  existingSecret: ""
   jwtSecret: ""
   s3AccessKey: ""
   s3SecretKey: ""

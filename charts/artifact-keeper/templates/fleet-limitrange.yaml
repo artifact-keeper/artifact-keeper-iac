@@ -1,0 +1,33 @@
+{{/*
+=============================================================================
+Fleet mode: per-namespace LimitRange
+=============================================================================
+Renders in fleet mode when fleet.guardrails.limitRange is enabled. Applies
+default container requests/limits (so unbounded pods cannot be scheduled) and a
+per-container ceiling, sized from fleet.preset. The ceiling sits above the
+preset backend limits so the instance workloads themselves are always
+admissible.
+=============================================================================
+*/}}
+{{- if and (eq (include "artifact-keeper.fleet.enabled" .) "true") .Values.fleet.guardrails.limitRange }}
+{{- $lr := (fromYaml (include "artifact-keeper.fleet.guardrailSpec" .)).limitRange }}
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-limits
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fleet-guardrail
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: {{ $lr.defaultRequest.cpu | quote }}
+        memory: {{ $lr.defaultRequest.memory | quote }}
+      default:
+        cpu: {{ $lr.default.cpu | quote }}
+        memory: {{ $lr.default.memory | quote }}
+      max:
+        cpu: {{ $lr.max.cpu | quote }}
+        memory: {{ $lr.max.memory | quote }}
+{{- end }}

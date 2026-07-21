@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.6.0](https://img.shields.io/badge/Version-1.6.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.6.0](https://img.shields.io/badge/AppVersion-1.6.0-informational?style=flat-square)
+![Version: 1.7.0](https://img.shields.io/badge/Version-1.7.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.7.0](https://img.shields.io/badge/AppVersion-1.7.0-informational?style=flat-square)
 
 ## TL;DR
 
@@ -98,6 +98,31 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | edge.tolerations | list | `[]` | Per-component scheduling (overrides global) |
 | externalDatabase | object | `{"database":"artifact_registry","existingSecret":"","existingSecretKey":"DATABASE_URL","host":"","password":"","port":5432,"username":""}` | External database (used when postgres.enabled=false) |
 | externalSecrets | object | `{"enabled":false,"refreshInterval":"1h","secrets":{"dbCredentials":"artifact-keeper/${ENVIRONMENT}/db-credentials","dtAdminPassword":"artifact-keeper/${ENVIRONMENT}/dt-admin-password","jwtSecret":"artifact-keeper/${ENVIRONMENT}/jwt-secret","migrationEncryptionKey":"","opensearchAuth":"artifact-keeper/${ENVIRONMENT}/opensearch-auth","s3Keys":"artifact-keeper/${ENVIRONMENT}/s3-keys","smtpPassword":"artifact-keeper/${ENVIRONMENT}/smtp-password","webhookSecretKey":""},"storeKind":"ClusterSecretStore","storeName":"aws-secrets-manager"}` | External Secrets Operator When enabled, ExternalSecret CRDs replace the static Secret template. Requires External Secrets Operator installed on the cluster and a SecretStore or ClusterSecretStore configured for your provider. |
+| fleet | object | `{"enabled":false,"externalDatabaseBootstrap":{"adminSecret":"","enabled":true,"existingSecret":"","host":"","passwordKey":"password","port":5432},"guardrails":{"databaseNamespace":"","ingressNamespace":"ingress-nginx","limitRange":false,"networkPolicy":false,"resourceQuota":false,"scannerNamespace":"","searchNamespace":""},"hibernate":false,"host":"","instanceId":"","preset":"","storage":{"accessKeyIdKey":"S3_ACCESS_KEY_ID","existingSecret":"","secretAccessKeyKey":"S3_SECRET_ACCESS_KEY"}}` | Fleet mode: many instances per cluster sharing external services. Opt-in and off by default. When fleet.enabled is false none of the fleet templates render and backend/web sizing and replica counts come from the per-component values above, so a standard single-instance install is unaffected. When enabled, one release is one instance: sizing comes from a preset, the ingress serves a single host, and the instance uses a shared PostgreSQL server and shared object storage instead of in-release services. See templates/_helpers.tpl for the preset tables. |
+| fleet.enabled | bool | `false` | Enable fleet mode. Master switch for every fleet template and helper. |
+| fleet.externalDatabaseBootstrap | object | `{"adminSecret":"","enabled":true,"existingSecret":"","host":"","passwordKey":"password","port":5432}` | Bootstrap of the instance role and database on a shared PostgreSQL server. Runs as a pre-install/pre-upgrade hook Job that creates the role and database (named ak_<instanceId>) if they are absent. The backend runs its own schema migrations on startup, so the Job only guarantees the empty database and its owning role exist before the backend connects. |
+| fleet.externalDatabaseBootstrap.adminSecret | string | `""` | Name of an existing Secret holding superuser credentials for the shared server, used only by the bootstrap Job. Expected keys: username, password. |
+| fleet.externalDatabaseBootstrap.enabled | bool | `true` | Run the bootstrap Job. |
+| fleet.externalDatabaseBootstrap.existingSecret | string | `""` | Name of an existing Secret holding the instance role password. The same Secret is expected to hold the DATABASE_URL the backend consumes. |
+| fleet.externalDatabaseBootstrap.host | string | `""` | Host of the shared PostgreSQL read-write service. |
+| fleet.externalDatabaseBootstrap.passwordKey | string | `"password"` | Key in existingSecret holding the instance role password. |
+| fleet.externalDatabaseBootstrap.port | int | `5432` | Port of the shared PostgreSQL read-write service. |
+| fleet.guardrails | object | `{"databaseNamespace":"","ingressNamespace":"ingress-nginx","limitRange":false,"networkPolicy":false,"resourceQuota":false,"scannerNamespace":"","searchNamespace":""}` | Per-namespace guardrails. Each toggle is independent and off by default. ResourceQuota and LimitRange are sized from the preset; the NetworkPolicy restricts ingress to the named ingress-controller namespace and egress to the named shared-service namespaces plus DNS and outbound HTTPS. |
+| fleet.guardrails.databaseNamespace | string | `""` | Namespace of the shared PostgreSQL server (NetworkPolicy egress). |
+| fleet.guardrails.ingressNamespace | string | `"ingress-nginx"` | Namespace of the ingress controller allowed to reach the instance (NetworkPolicy ingress). |
+| fleet.guardrails.limitRange | bool | `false` | Emit a LimitRange sized from the preset. |
+| fleet.guardrails.networkPolicy | bool | `false` | Emit a NetworkPolicy scoping ingress and egress. |
+| fleet.guardrails.resourceQuota | bool | `false` | Emit a ResourceQuota sized from the preset. |
+| fleet.guardrails.scannerNamespace | string | `""` | Namespace of the shared scanner service (NetworkPolicy egress). |
+| fleet.guardrails.searchNamespace | string | `""` | Namespace of the shared search service (NetworkPolicy egress). |
+| fleet.hibernate | bool | `false` | Hibernate this instance by scaling backend and web to zero replicas. The release and its data stay in place; set back to false to resume. |
+| fleet.host | string | `""` | Public hostname for this instance, used as the single ingress host. When set, TLS for the host is expected to be terminated upstream (for example by a shared wildcard certificate on the ingress controller), so the chart does not emit a per-release ingress TLS block. |
+| fleet.instanceId | string | `""` | Stable identifier for this instance. Drives the derived database role and database name (ak_<instanceId>, with dashes normalized to underscores) and the object storage key prefix. |
+| fleet.preset | string | `""` | Sizing preset: small, medium, or large. Selects chart-owned backend and web replica counts and resource requests/limits (see _helpers.tpl). An empty value falls back to small; any other value fails the render. |
+| fleet.storage | object | `{"accessKeyIdKey":"S3_ACCESS_KEY_ID","existingSecret":"","secretAccessKeyKey":"S3_SECRET_ACCESS_KEY"}` | Object storage credentials for the shared S3-compatible backend. The non-secret settings (endpoint, bucket, region) are supplied through backend.env; the access keys are read from an existing Secret referenced here and injected into the backend as S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY. |
+| fleet.storage.accessKeyIdKey | string | `"S3_ACCESS_KEY_ID"` | Key in the Secret holding the access key id. |
+| fleet.storage.existingSecret | string | `""` | Name of an existing Secret holding the object storage access keys. |
+| fleet.storage.secretAccessKeyKey | string | `"S3_SECRET_ACCESS_KEY"` | Key in the Secret holding the secret access key. |
 | fullnameOverride | string | `""` |  |
 | gke.healthCheckPolicies.backend.requestPath | string | `"/livez"` | Health-check path for the backend BackendService. |
 | gke.healthCheckPolicies.dependencyTrack.requestPath | string | `"/api/version"` | Health-check path for the DependencyTrack BackendService. |

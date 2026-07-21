@@ -23,14 +23,14 @@ spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
   {{- end }}
-  {{- if .Values.ingress.tls.enabled }}
+  {{- if and .Values.ingress.tls.enabled (ne (include "artifact-keeper.fleet.enabled" .) "true") }}
   tls:
     - hosts:
-        - {{ .Values.ingress.host }}
+        - {{ include "artifact-keeper.ingressHost" . }}
       secretName: {{ .Values.ingress.tls.secretName }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.host }}
+    - host: {{ include "artifact-keeper.ingressHost" . }}
       http:
         paths:
           # API and health endpoints

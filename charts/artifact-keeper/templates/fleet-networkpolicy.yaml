@@ -1,0 +1,88 @@
+{{/*
+=============================================================================
+Fleet mode: per-namespace NetworkPolicy
+=============================================================================
+Renders in fleet mode when fleet.guardrails.networkPolicy is enabled, replacing
+the default in-namespace NetworkPolicy set (turn networkPolicy.enabled off for
+fleet instances). Ingress is allowed only from the named ingress-controller
+namespace and from pods within the instance namespace (web to backend). Egress
+is allowed only to the named shared-service namespaces (database, search,
+scanner), plus DNS and outbound HTTPS for object storage and external identity
+providers. Each shared-service egress rule renders only when its namespace is
+set. namespaceSelector uses the kubernetes.io/metadata.name label that
+Kubernetes stamps on every namespace automatically.
+=============================================================================
+*/}}
+{{- if and (eq (include "artifact-keeper.fleet.enabled" .) "true") .Values.fleet.guardrails.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-fleet
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fleet-guardrail
+spec:
+  # Applies to every pod in the instance namespace.
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Ingress controller reaching backend and web.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.fleet.guardrails.ingressNamespace | quote }}
+      ports:
+        - port: {{ .Values.backend.service.httpPort }}
+          protocol: TCP
+        - port: {{ .Values.web.service.port }}
+          protocol: TCP
+    # Intra-namespace traffic (web to backend, backend gRPC).
+    - from:
+        - podSelector: {}
+  egress:
+    # DNS resolution.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Intra-namespace traffic.
+    - to:
+        - podSelector: {}
+    {{- if .Values.fleet.guardrails.databaseNamespace }}
+    # Shared PostgreSQL server.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.fleet.guardrails.databaseNamespace | quote }}
+      ports:
+        - port: {{ .Values.fleet.externalDatabaseBootstrap.port }}
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.fleet.guardrails.searchNamespace }}
+    # Shared search service.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.fleet.guardrails.searchNamespace | quote }}
+      ports:
+        - port: 9200
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.fleet.guardrails.scannerNamespace }}
+    # Shared scanner service.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.fleet.guardrails.scannerNamespace | quote }}
+      ports:
+        - port: 8090
+          protocol: TCP
+    {{- end }}
+    # Outbound HTTPS for object storage and any external identity or registry.
+    - ports:
+        - port: 443
+          protocol: TCP
+{{- end }}

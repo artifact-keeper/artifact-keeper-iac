@@ -888,3 +888,82 @@ gke:
     dependencyTrack:
       # -- Health-check path for the DependencyTrack BackendService.
       requestPath: /api/version
+
+# -- Fleet mode: many instances per cluster sharing external services.
+# Opt-in and off by default. When fleet.enabled is false none of the fleet
+# templates render and backend/web sizing and replica counts come from the
+# per-component values above, so a standard single-instance install is
+# unaffected. When enabled, one release is one instance: sizing comes from a
+# preset, the ingress serves a single host, and the instance uses a shared
+# PostgreSQL server and shared object storage instead of in-release services.
+# See templates/_helpers.tpl for the preset tables.
+fleet:
+  # -- Enable fleet mode. Master switch for every fleet template and helper.
+  enabled: false
+  # -- Stable identifier for this instance. Drives the derived database role and
+  # database name (ak_<instanceId>, with dashes normalized to underscores) and
+  # the object storage key prefix.
+  instanceId: ""
+  # -- Public hostname for this instance, used as the single ingress host. When
+  # set, TLS for the host is expected to be terminated upstream (for example by
+  # a shared wildcard certificate on the ingress controller), so the chart does
+  # not emit a per-release ingress TLS block.
+  host: ""
+  # -- Sizing preset: small, medium, or large. Selects chart-owned backend and
+  # web replica counts and resource requests/limits (see _helpers.tpl). An empty
+  # value falls back to small; any other value fails the render.
+  preset: ""
+  # -- Hibernate this instance by scaling backend and web to zero replicas. The
+  # release and its data stay in place; set back to false to resume.
+  hibernate: false
+  # -- Object storage credentials for the shared S3-compatible backend. The
+  # non-secret settings (endpoint, bucket, region) are supplied through
+  # backend.env; the access keys are read from an existing Secret referenced
+  # here and injected into the backend as S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY.
+  storage:
+    # -- Name of an existing Secret holding the object storage access keys.
+    existingSecret: ""
+    # -- Key in the Secret holding the access key id.
+    accessKeyIdKey: S3_ACCESS_KEY_ID
+    # -- Key in the Secret holding the secret access key.
+    secretAccessKeyKey: S3_SECRET_ACCESS_KEY
+  # -- Bootstrap of the instance role and database on a shared PostgreSQL server.
+  # Runs as a pre-install/pre-upgrade hook Job that creates the role and database
+  # (named ak_<instanceId>) if they are absent. The backend runs its own schema
+  # migrations on startup, so the Job only guarantees the empty database and its
+  # owning role exist before the backend connects.
+  externalDatabaseBootstrap:
+    # -- Run the bootstrap Job.
+    enabled: true
+    # -- Host of the shared PostgreSQL read-write service.
+    host: ""
+    # -- Port of the shared PostgreSQL read-write service.
+    port: 5432
+    # -- Name of an existing Secret holding the instance role password. The same
+    # Secret is expected to hold the DATABASE_URL the backend consumes.
+    existingSecret: ""
+    # -- Key in existingSecret holding the instance role password.
+    passwordKey: password
+    # -- Name of an existing Secret holding superuser credentials for the shared
+    # server, used only by the bootstrap Job. Expected keys: username, password.
+    adminSecret: ""
+  # -- Per-namespace guardrails. Each toggle is independent and off by default.
+  # ResourceQuota and LimitRange are sized from the preset; the NetworkPolicy
+  # restricts ingress to the named ingress-controller namespace and egress to
+  # the named shared-service namespaces plus DNS and outbound HTTPS.
+  guardrails:
+    # -- Emit a ResourceQuota sized from the preset.
+    resourceQuota: false
+    # -- Emit a LimitRange sized from the preset.
+    limitRange: false
+    # -- Emit a NetworkPolicy scoping ingress and egress.
+    networkPolicy: false
+    # -- Namespace of the ingress controller allowed to reach the instance
+    # (NetworkPolicy ingress).
+    ingressNamespace: ingress-nginx
+    # -- Namespace of the shared PostgreSQL server (NetworkPolicy egress).
+    databaseNamespace: ""
+    # -- Namespace of the shared search service (NetworkPolicy egress).
+    searchNamespace: ""
+    # -- Namespace of the shared scanner service (NetworkPolicy egress).
+    scannerNamespace: ""

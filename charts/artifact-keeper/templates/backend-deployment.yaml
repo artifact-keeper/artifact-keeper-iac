@@ -17,7 +17,7 @@ metadata:
     app.kubernetes.io/component: backend
 spec:
   {{- if not .Values.backend.autoscaling.enabled }}
-  replicas: {{ .Values.backend.replicaCount }}
+  replicas: {{ include "artifact-keeper.backend.replicaCount" . }}
   {{- end }}
   strategy:
     type: Recreate
@@ -249,8 +249,28 @@ spec:
             - name: METRICS_PORT
               value: {{ .Values.backend.metricsListener.port | quote }}
             {{- end }}
+            {{- if eq (include "artifact-keeper.fleet.enabled" .) "true" }}
+            # Object storage for this instance. Artifacts share one bucket with
+            # a per-instance key prefix; the non-secret settings (STORAGE_BACKEND,
+            # S3_BUCKET, S3_ENDPOINT, S3_REGION and any redirect flags) come from
+            # backend.env, and the prefix and access keys are injected here.
+            - name: S3_PREFIX
+              value: {{ .Values.fleet.instanceId | quote }}
+            {{- if .Values.fleet.storage.existingSecret }}
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.fleet.storage.existingSecret }}
+                  key: {{ .Values.fleet.storage.accessKeyIdKey }}
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.fleet.storage.existingSecret }}
+                  key: {{ .Values.fleet.storage.secretAccessKeyKey }}
+            {{- end }}
+            {{- end }}
           resources:
-            {{- toYaml .Values.backend.resources | nindent 12 }}
+            {{- include "artifact-keeper.backend.resources" . | nindent 12 }}
           startupProbe:
             httpGet:
               path: /readyz

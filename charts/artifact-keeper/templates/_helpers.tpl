@@ -170,3 +170,180 @@ ServiceAccount name
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+=============================================================================
+Fleet mode helpers
+=============================================================================
+Fleet mode runs many instances per cluster, one Helm release per instance,
+sharing external database, search, scanning, and object storage. Every helper
+below is gated on fleet.enabled. When fleet mode is off (the default) each
+helper falls back to the existing per-component values, so rendered output is
+unchanged from a standard single-instance install.
+*/}}
+
+{{/*
+Returns the string "true" when this release runs in fleet mode.
+Callers gate on: eq (include "artifact-keeper.fleet.enabled" .) "true"
+*/}}
+{{- define "artifact-keeper.fleet.enabled" -}}
+{{- if and .Values.fleet .Values.fleet.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Returns "true" when a fleet instance is hibernated. Hibernated instances scale
+their backend and web workloads to zero replicas.
+*/}}
+{{- define "artifact-keeper.fleet.hibernate" -}}
+{{- if and (eq (include "artifact-keeper.fleet.enabled" .) "true") .Values.fleet.hibernate -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+PostgreSQL identifier for an instance (role and database share the name).
+Instance ids may use dashes; PostgreSQL identifiers use underscores, so the id
+is normalized and prefixed with ak_ to give a stable role/database name.
+*/}}
+{{- define "artifact-keeper.fleet.dbIdentifier" -}}
+{{- printf "ak_%s" (.Values.fleet.instanceId | replace "-" "_") -}}
+{{- end -}}
+
+{{/*
+Preset sizing table keyed on fleet.preset (small|medium|large). Returns YAML
+for the selected preset with backend/web replica counts and resource blocks.
+Presets are chart-owned so an instance spec only carries the preset name.
+An empty preset falls back to small; any other value fails the render.
+*/}}
+{{- define "artifact-keeper.fleet.presetSpec" -}}
+{{- $preset := default "small" .Values.fleet.preset -}}
+{{- $table := dict
+  "small" (dict
+    "backendReplicas" 1
+    "webReplicas" 1
+    "backend" (dict
+      "requests" (dict "cpu" "250m" "memory" "512Mi" "ephemeral-storage" "256Mi")
+      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "1Gi"))
+    "web" (dict
+      "requests" (dict "cpu" "100m" "memory" "128Mi" "ephemeral-storage" "128Mi")
+      "limits" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "1Gi")))
+  "medium" (dict
+    "backendReplicas" 2
+    "webReplicas" 2
+    "backend" (dict
+      "requests" (dict "cpu" "500m" "memory" "1Gi" "ephemeral-storage" "512Mi")
+      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi"))
+    "web" (dict
+      "requests" (dict "cpu" "250m" "memory" "256Mi" "ephemeral-storage" "256Mi")
+      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "2Gi")))
+  "large" (dict
+    "backendReplicas" 3
+    "webReplicas" 2
+    "backend" (dict
+      "requests" (dict "cpu" "1" "memory" "2Gi" "ephemeral-storage" "1Gi")
+      "limits" (dict "cpu" "4" "memory" "4Gi" "ephemeral-storage" "4Gi"))
+    "web" (dict
+      "requests" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "512Mi")
+      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi")))
+  -}}
+{{- $spec := index $table $preset -}}
+{{- if not $spec -}}
+{{- fail (printf "fleet.preset=%q is not valid; use one of small, medium, large" $preset) -}}
+{{- end -}}
+{{- $spec | toYaml -}}
+{{- end -}}
+
+{{/*
+Backend replica count. Zero when hibernated, the preset count in fleet mode,
+otherwise the per-component value.
+*/}}
+{{- define "artifact-keeper.backend.replicaCount" -}}
+{{- if eq (include "artifact-keeper.fleet.hibernate" .) "true" -}}
+0
+{{- else if eq (include "artifact-keeper.fleet.enabled" .) "true" -}}
+{{- (fromYaml (include "artifact-keeper.fleet.presetSpec" .)).backendReplicas -}}
+{{- else -}}
+{{- .Values.backend.replicaCount -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Web replica count. Zero when hibernated, the preset count in fleet mode,
+otherwise the per-component value.
+*/}}
+{{- define "artifact-keeper.web.replicaCount" -}}
+{{- if eq (include "artifact-keeper.fleet.hibernate" .) "true" -}}
+0
+{{- else if eq (include "artifact-keeper.fleet.enabled" .) "true" -}}
+{{- (fromYaml (include "artifact-keeper.fleet.presetSpec" .)).webReplicas -}}
+{{- else -}}
+{{- .Values.web.replicaCount -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Backend resources. Preset block in fleet mode, otherwise the per-component
+value (identical output to the previous direct toYaml of backend.resources).
+*/}}
+{{- define "artifact-keeper.backend.resources" -}}
+{{- if eq (include "artifact-keeper.fleet.enabled" .) "true" -}}
+{{- (fromYaml (include "artifact-keeper.fleet.presetSpec" .)).backend | toYaml -}}
+{{- else -}}
+{{- toYaml .Values.backend.resources -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Web resources. Preset block in fleet mode, otherwise the per-component value.
+*/}}
+{{- define "artifact-keeper.web.resources" -}}
+{{- if eq (include "artifact-keeper.fleet.enabled" .) "true" -}}
+{{- (fromYaml (include "artifact-keeper.fleet.presetSpec" .)).web | toYaml -}}
+{{- else -}}
+{{- toYaml .Values.web.resources -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Ingress host. Fleet instances derive it from fleet.host; otherwise ingress.host.
+*/}}
+{{- define "artifact-keeper.ingressHost" -}}
+{{- if and .Values.fleet .Values.fleet.host -}}
+{{- .Values.fleet.host -}}
+{{- else -}}
+{{- .Values.ingress.host -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Per-namespace guardrail sizing keyed on fleet.preset. Returns YAML with the
+ResourceQuota totals and the LimitRange container defaults/bounds for the
+selected preset. The quota totals sit above the summed backend+web
+requests/limits to leave headroom for init containers and the bootstrap Job.
+*/}}
+{{- define "artifact-keeper.fleet.guardrailSpec" -}}
+{{- $preset := default "small" .Values.fleet.preset -}}
+{{- $table := dict
+  "small" (dict
+    "quota" (dict "requestsCpu" "1" "requestsMemory" "1Gi" "limitsCpu" "4" "limitsMemory" "4Gi" "pods" "12" "pvcs" "4")
+    "limitRange" (dict
+      "defaultRequest" (dict "cpu" "100m" "memory" "128Mi")
+      "default" (dict "cpu" "500m" "memory" "512Mi")
+      "max" (dict "cpu" "2" "memory" "2Gi")))
+  "medium" (dict
+    "quota" (dict "requestsCpu" "2" "requestsMemory" "3Gi" "limitsCpu" "8" "limitsMemory" "8Gi" "pods" "20" "pvcs" "6")
+    "limitRange" (dict
+      "defaultRequest" (dict "cpu" "250m" "memory" "256Mi")
+      "default" (dict "cpu" "1" "memory" "1Gi")
+      "max" (dict "cpu" "3" "memory" "3Gi")))
+  "large" (dict
+    "quota" (dict "requestsCpu" "4" "requestsMemory" "6Gi" "limitsCpu" "16" "limitsMemory" "16Gi" "pods" "30" "pvcs" "8")
+    "limitRange" (dict
+      "defaultRequest" (dict "cpu" "500m" "memory" "512Mi")
+      "default" (dict "cpu" "2" "memory" "2Gi")
+      "max" (dict "cpu" "6" "memory" "6Gi")))
+  -}}
+{{- $spec := index $table $preset -}}
+{{- if not $spec -}}
+{{- fail (printf "fleet.preset=%q is not valid; use one of small, medium, large" $preset) -}}
+{{- end -}}
+{{- $spec | toYaml -}}
+{{- end -}}

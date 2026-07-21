@@ -282,22 +282,3 @@ on.
 - **The registry-cache and mesh instances have independent lifecycles.** Never
   point the registry cache at `dev` or `latest`, and never enable image-updater
   on it; a broken cache breaks every CI pull.
-
-## Forward-looking note: instance-per-tenant reuse
-
-This chart is about to be reused for a cloud deployment where each tenant gets
-its own Helm release, one release per tenant driven by an ApplicationSet, in
-the same shape the mesh ApplicationSet already demonstrates. Chart changes
-should keep that multi-instance reuse in mind:
-
-- Keep every resource name derived from `fullname`, so `fullnameOverride` alone
-  fully namespaces a release. Watch for anything that hardcodes a name; the
-  smoke overlay pins `fullnameOverride: artifact-keeper` and test URLs depend on
-  it, which is the kind of assumption that breaks under many releases.
-- Keep per-instance state and secrets per-namespace, so one Secrets Manager
-  path prefix or one native Secret maps to exactly one tenant.
-- Avoid cluster-singleton assumptions in templates (fixed cluster-wide names,
-  shared PVs, global CRDs owned by the release). Anything cluster-scoped should
-  stay in a separate, singly-owned Application rather than the per-tenant chart.
-- The mesh ApplicationSet is the working reference for fanning out one chart
-  into many isolated instances with per-element parameters.

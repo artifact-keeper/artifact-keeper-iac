@@ -820,6 +820,10 @@ secrets:
   # and secret-manager workflows where the Secret is provisioned out of band.
   existingSecret: ""
   jwtSecret: ""
+  # S3-compatible object storage credentials. Injected into the backend as
+  # S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY when backend.env.STORAGE_BACKEND is
+  # "s3" and the fleet object-storage Secret is not in use. Leave empty for
+  # filesystem storage or when using IAM roles (IRSA) for credentials.
   s3AccessKey: ""
   s3SecretKey: ""
   # SMTP password (only used when backend.env.SMTP_HOST is set)

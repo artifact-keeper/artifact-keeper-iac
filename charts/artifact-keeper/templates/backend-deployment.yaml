@@ -269,6 +269,33 @@ spec:
                   key: {{ .Values.fleet.storage.secretAccessKeyKey }}
             {{- end }}
             {{- end }}
+            {{- /*
+            S3 credentials for a standard (non-fleet) install. The backend reads
+            S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY; these come from the
+            chart-managed Secret (secrets.s3AccessKey / secrets.s3SecretKey) or
+            the ExternalSecret. Skipped when the fleet object-storage Secret
+            supplies them (that path takes precedence, injected above) and when
+            secrets.existingSecret is in use, since a user-managed Secret may
+            store the keys under different names.
+            */}}
+            {{- $fleetManagedS3 := false }}
+            {{- if eq (include "artifact-keeper.fleet.enabled" .) "true" }}
+            {{- $fleetManagedS3 = .Values.fleet.storage.existingSecret }}
+            {{- end }}
+            {{- if and (not $fleetManagedS3) (eq (lower (.Values.backend.env.STORAGE_BACKEND | default "")) "s3") }}
+            {{- if or .Values.externalSecrets.enabled (and (not .Values.secrets.existingSecret) .Values.secrets.s3AccessKey) }}
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.secretName" . }}
+                  key: S3_ACCESS_KEY_ID
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.secretName" . }}
+                  key: S3_SECRET_ACCESS_KEY
+            {{- end }}
+            {{- end }}
           resources:
             {{- include "artifact-keeper.backend.resources" . | nindent 12 }}
           startupProbe:

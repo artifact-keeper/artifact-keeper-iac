@@ -138,13 +138,14 @@ app.kubernetes.io/component: dependency-track
 {{/*
 Database mode selection. The in-cluster postgres wins when enabled and
 ignores every other database setting. With postgres disabled the legacy
-externalDatabase remains the default; setting externalDatabase.enabled to
-false switches backend and DependencyTrack to their per-service
-database.existingSecret references (e.g. CloudNativePG `<cluster>-app`
-Secrets). Returns "true" when the per-service references are active.
+externalDatabase remains the default (externalDatabase.enabled defaults to
+true); setting externalDatabase.enabled to false switches backend and
+DependencyTrack to their per-service database.existingSecret references
+(e.g. CloudNativePG `<cluster>-app` Secrets). Returns "true" when the
+per-service references are active.
 */}}
 {{- define "artifact-keeper.dedicatedDatabase" -}}
-{{- if and (not .Values.postgres.enabled) (hasKey .Values.externalDatabase "enabled") (not .Values.externalDatabase.enabled) -}}
+{{- if and (not .Values.postgres.enabled) (not .Values.externalDatabase.enabled) -}}
 true
 {{- end -}}
 {{- end }}

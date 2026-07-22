@@ -151,9 +151,10 @@ backend:
     httpPort: 8080
     grpcPort: 9090
   # -- Dedicated backend database via an existing Secret (e.g. the CloudNativePG
-  # `<cluster>-app` Secret). Takes precedence over postgres.enabled and
-  # externalDatabase. Key names default to the CNPG layout and can be remapped;
-  # use `fqdn-uri`/`fqdn-*` keys when the cluster is in another namespace.
+  # `<cluster>-app` Secret). Only used when postgres.enabled=false AND
+  # externalDatabase.enabled=false. Key names default to the CNPG layout and
+  # can be remapped; use `fqdn-uri`/`fqdn-*` keys when the database cluster
+  # lives in another namespace.
   database:
     existingSecret: ""
     secretKeys:
@@ -519,8 +520,12 @@ postgres:
   nodeSelector: {}
   topologySpreadConstraints: []
 
-# -- External database (used when postgres.enabled=false)
+# -- External database (the default when postgres.enabled=false). Set
+# enabled to false to switch the backend and DependencyTrack to their
+# per-service database.existingSecret references instead (see
+# backend.database / dependencyTrack.database and values-cnpg.yaml).
 externalDatabase:
+  enabled: true
   host: ""
   port: 5432
   username: ""
@@ -791,8 +796,8 @@ dependencyTrack:
         - ALL
   adminPassword: ""
   # -- Dedicated DependencyTrack database via an existing Secret (e.g. the
-  # CloudNativePG `<cluster>-app` Secret). Takes precedence over the shared
-  # postgres and externalDatabase. username/password are passed separately
+  # CloudNativePG `<cluster>-app` Secret). Only used when postgres.enabled=false
+  # AND externalDatabase.enabled=false. username/password are passed separately
   # from jdbcUri because DependencyTrack expects them as distinct variables.
   database:
     existingSecret: ""
@@ -826,17 +831,23 @@ dependencyTrack:
     # -- Run the one-shot DependencyTrack bootstrap Job. Disabled by default
     # because the Job requires a non-empty `dependencyTrack.adminPassword`
     # (enforced by validateSecrets); enable it together with that password.
+    #
+    # UPGRADE NOTE: charts <= 1.7.x defaulted this to true. If your install
+    # relied on the bootstrap Job to provision the DependencyTrack admin
+    # password and Automation API key, set enabled=true and provide
+    # adminPassword explicitly when upgrading, or the Job will no longer run.
     enabled: false
     # -- Image for the one-shot DependencyTrack bootstrap Job. It MUST already
     # contain `curl` and `jq`. The bootstrap pod runs non-root (see
     # podSecurityContext below), so installing packages at runtime with
     # `apk add` fails ("Unable to lock database: Permission denied"); shipping
     # the tools in the image avoids any runtime package install or network
-    # egress. Pin to a digest or mirror this into your own registry for
-    # production.
+    # egress. The upstream image publishes only rolling tags, so the default
+    # pins by digest to keep pre-pull lists and supply-chain review stable;
+    # mirror it into your own registry for production.
     image:
       repository: badouralix/curl-jq
-      tag: latest
+      tag: "latest@sha256:1e7c0284e24572ace7170df9fc91f15fd3b79ebf056d4dde17244d5d74bbfabc"
       pullPolicy: IfNotPresent
     podSecurityContext:
       runAsNonRoot: true

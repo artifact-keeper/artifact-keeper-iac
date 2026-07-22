@@ -152,6 +152,10 @@ spec:
               containerPort: {{ .Values.backend.metricsListener.port }}
               protocol: TCP
             {{- end }}
+          {{- with .Values.backend.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             {{- if .Values.dependencyTrack.enabled }}
             # The backend reads the Dependency-Track API key from this file

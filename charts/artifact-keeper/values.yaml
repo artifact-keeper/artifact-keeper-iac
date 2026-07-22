@@ -94,6 +94,9 @@ cosign:
 # and artifact storage. It runs as a single Rust binary (Axum).
 backend:
   enabled: true
+  # -- Additional envFrom sources (Secrets/ConfigMaps) for the backend container,
+  # rendered verbatim. Use for credentials that must come from existing Secrets.
+  extraEnvFrom: []
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-backend  # Docker Hub: artifactkeeper/backend

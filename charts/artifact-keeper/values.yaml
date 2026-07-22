@@ -334,6 +334,11 @@ backend:
   scanWorkspace:
     enabled: true
     size: 2Gi
+  # -- Image for the wait-for-opensearch init container.
+  waitForOpenSearch:
+    image:
+      repository: alpine
+      tag: "3.20"
   autoscaling:
     enabled: false
     minReplicas: 2
@@ -456,6 +461,7 @@ edge:
 # instance is suitable for dev/testing only.
 postgres:
   enabled: true
+  # -- Also reused by the backend and dtrack wait-for-postgres init containers.
   image:
     repository: postgres
     tag: "16-alpine"
@@ -548,6 +554,11 @@ opensearch:
     capabilities:
       drop:
         - ALL
+  # -- Image for the fix-ownership and sysctl-check init containers.
+  initContainers:
+    image:
+      repository: busybox
+      tag: "1.37"
   fixOwnership:
     enabled: true
     securityContext:

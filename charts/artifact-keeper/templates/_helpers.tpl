@@ -136,6 +136,35 @@ app.kubernetes.io/component: dependency-track
 {{- end }}
 
 {{/*
+Database mode selection. The in-cluster postgres wins when enabled and
+ignores every other database setting. With postgres disabled the legacy
+externalDatabase remains the default (externalDatabase.enabled defaults to
+true); setting externalDatabase.enabled to false switches backend and
+DependencyTrack to their per-service database.existingSecret references
+(e.g. CloudNativePG `<cluster>-app` Secrets). Returns "true" when the
+per-service references are active.
+*/}}
+{{- define "artifact-keeper.dedicatedDatabase" -}}
+{{- if and (not .Values.postgres.enabled) (not .Values.externalDatabase.enabled) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Per-service database secret key lookups, defaulting to the CloudNativePG
+application-secret key names when secretKeys (or an individual key) is unset.
+*/}}
+{{- define "artifact-keeper.backend.dbSecretKey" -}}
+{{- $keys := .root.Values.backend.database.secretKeys | default dict -}}
+{{- get $keys .key | default .default -}}
+{{- end }}
+
+{{- define "artifact-keeper.dtrack.dbSecretKey" -}}
+{{- $keys := .root.Values.dependencyTrack.database.secretKeys | default dict -}}
+{{- get $keys .key | default .default -}}
+{{- end }}
+
+{{/*
 Database URL helper — returns the full DATABASE_URL string
 */}}
 {{- define "artifact-keeper.databaseUrl" -}}
@@ -179,11 +208,25 @@ operator-supplied Secret; otherwise this is the chart-managed
 {{- if eq .Values.secrets.jwtSecret "" -}}
 {{- fail "secrets.jwtSecret is required when externalSecrets is not enabled. Set it with --set secrets.jwtSecret=<value>" -}}
 {{- end -}}
+{{- if lt (len .Values.secrets.jwtSecret) 32 -}}
+{{- fail "secrets.jwtSecret must be at least 32 characters; the backend refuses shorter secrets at startup. Generate one with e.g. `openssl rand -base64 48`" -}}
+{{- end -}}
 {{- if and .Values.postgres.enabled (eq .Values.postgres.auth.password "") -}}
 {{- fail "postgres.auth.password is required when postgres is enabled. Set it with --set postgres.auth.password=<value>" -}}
 {{- end -}}
 {{- if and .Values.opensearch.enabled (not .Values.opensearch.disableSecurityPlugin) (eq .Values.opensearch.auth.password "") -}}
 {{- fail "opensearch.auth.password is required when opensearch is enabled and disableSecurityPlugin is false. Set it with --set opensearch.auth.password=<value>" -}}
+{{- end -}}
+{{- if and .Values.dependencyTrack.enabled .Values.dependencyTrack.bootstrap.enabled (eq .Values.dependencyTrack.adminPassword "") -}}
+{{- fail "dependencyTrack.adminPassword is required when dependencyTrack.bootstrap.enabled is true: the bootstrap Job changes the DependencyTrack admin password from its default and provisions the Automation API key, and an empty password makes that Job fail. Set it with --set dependencyTrack.adminPassword=<value> (use only URL-safe characters, e.g. alphanumerics, since the bootstrap script sends it as form data), or disable the Job with --set dependencyTrack.bootstrap.enabled=false." -}}
+{{- end -}}
+{{- end -}}
+{{- if include "artifact-keeper.dedicatedDatabase" . -}}
+{{- if not .Values.backend.database.existingSecret -}}
+{{- fail "backend.database.existingSecret is required when externalDatabase.enabled is false" -}}
+{{- end -}}
+{{- if and .Values.dependencyTrack.enabled (not .Values.dependencyTrack.database.existingSecret) -}}
+{{- fail "dependencyTrack.database.existingSecret is required when externalDatabase.enabled is false" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -1001,8 +1001,13 @@ postgres:
   nodeSelector: {}
   topologySpreadConstraints: []
 
-# -- External database (used when postgres.enabled=false)
+# -- External database (the default when postgres.enabled=false). Set enabled
+# to false to switch the backend and Dependency-Track to their per-service
+# dedicatedDatabase.existingSecret references instead (see
+# backend.dedicatedDatabase, dependencyTrack.dedicatedDatabase and
+# values-cnpg.yaml).
 externalDatabase:
+  enabled: true
   host: ""
   port: 5432
   username: ""

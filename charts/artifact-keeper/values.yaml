@@ -23,20 +23,28 @@
 #
 # IMAGE TAGS
 # ----------
-# The backend/web/edge image tag is load-bearing: when image.tag is left
-# empty (""), the chart falls back to the chart's appVersion, so a given
-# chart release is reproducible. `helm install foo --version 1.2.3` then
-# pulls image tag 1.2.3 without any extra wiring. Bumping appVersion in
-# Chart.yaml auto-pins any component whose tag is left empty.
+# The backend and web images release on independent cadences. They are
+# decoupled at runtime through the versioned REST API, so only the MAJOR
+# version has to align for compatibility; minor and patch drift on purpose
+# (a backend-only release does not force a no-op web rebuild). Because of
+# that drift there is no single number that names both, so each component
+# pins its own default tag: backend.image.tag and web.image.tag each track
+# that component's latest published release.
 #
-# This development profile keeps an explicit floating tag instead:
-#   - "dev" follows the latest build from main (backend/web/edge here)
-#   - values-production.yaml pins "latest" (the most recent release)
-# An explicit tag always wins over the appVersion fallback. Leave a tag
-# empty only when you want it to track appVersion (handy for tagged
-# chart releases). ArgoCD Image Updater pins floating tags to specific
-# digests so rollouts stay deterministic. For manual deploys with a
-# floating tag, set imagePullPolicy: Always so restarts pick up new builds.
+# appVersion (Chart.yaml) describes the application generation the chart
+# ships, which tracks the backend. The image tag is still load-bearing:
+# when a component's image.tag is left empty (""), the chart falls back to
+# appVersion. That fallback is kept for operators who deliberately want a
+# tagged chart release to drive the image tag (`helm install foo --version
+# 1.6.0` then pulls the backend at 1.6.0 without extra wiring). Leave web's
+# tag empty only when the web image actually publishes at appVersion;
+# otherwise the fallback resolves to a tag web has not built.
+#
+# An explicit tag always wins over the appVersion fallback. Overlays pin
+# their own tags (values-production.yaml, values-staging.yaml, etc.).
+# ArgoCD Image Updater pins tags to specific digests so rollouts stay
+# deterministic. For a floating tag such as "dev", set imagePullPolicy:
+# Always so restarts pick up new builds.
 #
 # RESOURCE SIZING
 # ---------------
@@ -100,12 +108,15 @@ backend:
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-backend  # Docker Hub: artifactkeeper/backend
-    # -- "dev" is a floating tag built from main. Leave this empty ("") to
-    # inherit the chart's appVersion instead (see the IMAGE TAGS note at the
-    # top of this file). ArgoCD Image Updater pins floating tags to a digest
-    # automatically. For manual deploys with a floating tag, consider a
-    # specific version tag (e.g. 1.1.0) or set pullPolicy: Always.
-    tag: dev
+    # -- Backend image tag. Defaults to the backend's latest published release.
+    # The backend and web images release on independent cadences (see the IMAGE
+    # TAGS note at the top of this file), so each pins its own default here
+    # rather than sharing one number. Leave this empty ("") to fall back to the
+    # chart's appVersion instead, which is handy when you deliberately want a
+    # tagged chart release to drive the image tag. ArgoCD Image Updater pins
+    # tags to a digest automatically. For a floating tag such as "dev", set
+    # pullPolicy: Always so restarts pick up new builds.
+    tag: "1.6.0"
     pullPolicy: Always
   # -- Pod-level securityContext. Defaults are image-native: the backend
   # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
@@ -362,9 +373,13 @@ web:
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-web  # Docker Hub: artifactkeeper/web
-    # -- "dev" floating tag for the development profile. Leave empty ("") to
-    # inherit the chart's appVersion (see backend.image.tag).
-    tag: dev
+    # -- Web image tag. Defaults to the web frontend's latest published release,
+    # which drifts from the backend's version because the two release
+    # independently (only the major must align for API compatibility). Leave
+    # empty ("") to fall back to the chart's appVersion (see backend.image.tag).
+    # Note the appVersion tracks the backend generation, so an empty web tag can
+    # resolve to a version the web image has not published; pin it here instead.
+    tag: "1.5.8"
     pullPolicy: Always
   podSecurityContext:
     runAsNonRoot: true

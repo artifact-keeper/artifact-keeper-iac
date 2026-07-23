@@ -252,6 +252,21 @@ The chart deploys the following components:
 | **Scanner-adapter** | In-house Harbor scanner-adapter for container-image Trivy scans (`TRIVY_ADAPTER_URL`); stateless, multi-arch, no PVC | Enabled |
 | **DependencyTrack** | SBOM analysis platform for license and vulnerability correlation | Enabled |
 
+### Optional components
+
+OpenSearch, Trivy, the scanner-adapter, and DependencyTrack are optional. Each is
+controlled by its own `enabled` flag (`opensearch.enabled`, `trivy.enabled`,
+`scannerAdapter.enabled`, `dependencyTrack.enabled`). Turning one off removes both
+its workload and the matching backend environment wiring, so the backend runs
+without it and without pointing at a service that is not there.
+
+OpenSearch in particular is a search accelerator, not a hard dependency. With
+`opensearch.enabled: false` the backend serves artifact search from PostgreSQL
+full-text search instead, so search keeps working (at lower scale) with no extra
+memory footprint. Plan for roughly 1Gi to 2Gi of memory for a single-node
+OpenSearch pod (JVM heap plus off-heap and page cache) when you do enable it; see
+`opensearch.javaOpts` and the OpenSearch OOMKill note under Troubleshooting.
+
 ### Component Diagram
 
 ```

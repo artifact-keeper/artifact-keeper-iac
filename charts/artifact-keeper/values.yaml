@@ -85,6 +85,22 @@ global:
 nameOverride: ""
 fullnameOverride: ""
 
+# -- Extra raw Kubernetes manifests to render alongside the chart.
+# Each entry is a YAML string (templated) emitted as its own document.
+# Useful for objects the chart does not natively model (ExternalSecret,
+# SealedSecret, custom CRs, etc.) without forking the chart.
+#
+# extraManifests:
+#   - |
+#     apiVersion: v1
+#     kind: Secret
+#     metadata:
+#       name: otel-collector-auth
+#     type: Opaque
+#     stringData:
+#       otlp-headers: "authorization=Bearer xxxxx"
+extraManifests: []
+
 # -- Cosign image signature verification
 # When enabled, an init container verifies the backend image signature
 # before the pod starts. Uses sigstore keyless verification (GitHub OIDC).
@@ -332,6 +348,17 @@ backend:
     # SMTP_USERNAME: ""
     # SMTP_FROM_ADDRESS: "noreply@artifact-keeper.local"
     # SMTP_TLS_MODE: "starttls"
+  # -- Extra environment variables sourced from existing Kubernetes Secrets.
+  # Use this for values that must not appear in plain text in `backend.env`
+  # (e.g. `OTEL_EXPORTER_OTLP_HEADERS` carrying an auth token).
+  # Each entry maps a container env var name to a Secret key reference.
+  #
+  # environmentSecrets:
+  #   - name: OTEL_EXPORTER_OTLP_HEADERS
+  #     secretKeyRef:
+  #       name: otel-collector-auth
+  #       key: otlp-headers
+  environmentSecrets: []
   resources:
     requests:
       cpu: 250m

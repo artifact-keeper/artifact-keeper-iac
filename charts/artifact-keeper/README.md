@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.7.5](https://img.shields.io/badge/Version-1.7.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.6.0](https://img.shields.io/badge/AppVersion-1.6.0-informational?style=flat-square)
+![Version: 1.8.0](https://img.shields.io/badge/Version-1.8.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.6.0](https://img.shields.io/badge/AppVersion-1.6.0-informational?style=flat-square)
 
 ## TL;DR
 
@@ -99,7 +99,7 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | edge.tolerations | list | `[]` | Per-component scheduling (overrides global) |
 | externalDatabase | object | `{"database":"artifact_registry","existingSecret":"","existingSecretKey":"DATABASE_URL","host":"","password":"","port":5432,"username":""}` | External database (used when postgres.enabled=false) |
 | externalSecrets | object | `{"enabled":false,"refreshInterval":"1h","secrets":{"dbCredentials":"artifact-keeper/${ENVIRONMENT}/db-credentials","dtAdminPassword":"artifact-keeper/${ENVIRONMENT}/dt-admin-password","jwtSecret":"artifact-keeper/${ENVIRONMENT}/jwt-secret","migrationEncryptionKey":"","opensearchAuth":"artifact-keeper/${ENVIRONMENT}/opensearch-auth","s3Keys":"artifact-keeper/${ENVIRONMENT}/s3-keys","smtpPassword":"artifact-keeper/${ENVIRONMENT}/smtp-password","webhookSecretKey":""},"storeKind":"ClusterSecretStore","storeName":"aws-secrets-manager"}` | External Secrets Operator When enabled, ExternalSecret CRDs replace the static Secret template. Requires External Secrets Operator installed on the cluster and a SecretStore or ClusterSecretStore configured for your provider. |
-| fleet | object | `{"enabled":false,"externalDatabaseBootstrap":{"adminSecret":"","enabled":true,"existingSecret":"","host":"","passwordKey":"password","port":5432},"guardrails":{"databaseNamespace":"","ingressNamespace":"ingress-nginx","limitRange":false,"networkPolicy":false,"resourceQuota":false,"scannerNamespace":"","searchNamespace":""},"hibernate":false,"host":"","instanceId":"","preset":"","storage":{"accessKeyIdKey":"S3_ACCESS_KEY_ID","existingSecret":"","secretAccessKeyKey":"S3_SECRET_ACCESS_KEY"}}` | Fleet mode: many instances per cluster sharing external services. Opt-in and off by default. When fleet.enabled is false none of the fleet templates render and backend/web sizing and replica counts come from the per-component values above, so a standard single-instance install is unaffected. When enabled, one release is one instance: sizing comes from a preset, the ingress serves a single host, and the instance uses a shared PostgreSQL server and shared object storage instead of in-release services. See templates/_helpers.tpl for the preset tables. |
+| fleet | object | `{"enabled":false,"externalDatabaseBootstrap":{"adminSecret":"","enabled":true,"existingSecret":"","host":"","passwordKey":"password","port":5432},"guardrails":{"databaseNamespace":"","ingressNamespace":"ingress-nginx","limitRange":false,"networkPolicy":false,"quotaOverrides":{},"resourceQuota":false,"scannerNamespace":"","searchNamespace":""},"hibernate":false,"host":"","instanceId":"","preset":"","storage":{"accessKeyIdKey":"S3_ACCESS_KEY_ID","existingSecret":"","secretAccessKeyKey":"S3_SECRET_ACCESS_KEY"}}` | Fleet mode: many instances per cluster sharing external services. Opt-in and off by default. When fleet.enabled is false none of the fleet templates render and backend/web sizing and replica counts come from the per-component values above, so a standard single-instance install is unaffected. When enabled, one release is one instance: sizing comes from a preset, the ingress serves a single host, and the instance uses a shared PostgreSQL server and shared object storage instead of in-release services. See templates/_helpers.tpl for the preset tables. |
 | fleet.enabled | bool | `false` | Enable fleet mode. Master switch for every fleet template and helper. |
 | fleet.externalDatabaseBootstrap | object | `{"adminSecret":"","enabled":true,"existingSecret":"","host":"","passwordKey":"password","port":5432}` | Bootstrap of the instance role and database on a shared PostgreSQL server. Runs as a pre-install/pre-upgrade hook Job that creates the role and database (named ak_<instanceId>) if they are absent. The backend runs its own schema migrations on startup, so the Job only guarantees the empty database and its owning role exist before the backend connects. |
 | fleet.externalDatabaseBootstrap.adminSecret | string | `""` | Name of an existing Secret holding superuser credentials for the shared server, used only by the bootstrap Job. Expected keys: username, password. |
@@ -108,11 +108,12 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | fleet.externalDatabaseBootstrap.host | string | `""` | Host of the shared PostgreSQL read-write service. |
 | fleet.externalDatabaseBootstrap.passwordKey | string | `"password"` | Key in existingSecret holding the instance role password. |
 | fleet.externalDatabaseBootstrap.port | int | `5432` | Port of the shared PostgreSQL read-write service. |
-| fleet.guardrails | object | `{"databaseNamespace":"","ingressNamespace":"ingress-nginx","limitRange":false,"networkPolicy":false,"resourceQuota":false,"scannerNamespace":"","searchNamespace":""}` | Per-namespace guardrails. Each toggle is independent and off by default. ResourceQuota and LimitRange are sized from the preset; the NetworkPolicy restricts ingress to the named ingress-controller namespace and egress to the named shared-service namespaces plus DNS and outbound HTTPS. |
+| fleet.guardrails | object | `{"databaseNamespace":"","ingressNamespace":"ingress-nginx","limitRange":false,"networkPolicy":false,"quotaOverrides":{},"resourceQuota":false,"scannerNamespace":"","searchNamespace":""}` | Per-namespace guardrails. Each toggle is independent and off by default. ResourceQuota and LimitRange are sized from the preset; the NetworkPolicy restricts ingress to the named ingress-controller namespace and egress to the named shared-service namespaces plus DNS and outbound HTTPS. |
 | fleet.guardrails.databaseNamespace | string | `""` | Namespace of the shared PostgreSQL server (NetworkPolicy egress). |
 | fleet.guardrails.ingressNamespace | string | `"ingress-nginx"` | Namespace of the ingress controller allowed to reach the instance (NetworkPolicy ingress). |
 | fleet.guardrails.limitRange | bool | `false` | Emit a LimitRange sized from the preset. |
 | fleet.guardrails.networkPolicy | bool | `false` | Emit a NetworkPolicy scoping ingress and egress. |
+| fleet.guardrails.quotaOverrides | object | `{}` | Explicit ResourceQuota overrides. By default the quota is sized from the preset and grows to account for each enabled optional component (trivy, scannerAdapter, opensearch, dependencyTrack). Set any of these keys to replace the corresponding computed total outright; unset keys stay component-aware. Values are used verbatim as Kubernetes quantities, for example limitsMemory: 32Gi or pods: 40. Keys: requestsCpu, requestsMemory, limitsCpu, limitsMemory, pods, pvcs. |
 | fleet.guardrails.resourceQuota | bool | `false` | Emit a ResourceQuota sized from the preset. |
 | fleet.guardrails.scannerNamespace | string | `""` | Namespace of the shared scanner service (NetworkPolicy egress). |
 | fleet.guardrails.searchNamespace | string | `""` | Namespace of the shared search service (NetworkPolicy egress). |
@@ -266,6 +267,17 @@ full-text search instead, so search keeps working (at lower scale) with no extra
 memory footprint. Plan for roughly 1Gi to 2Gi of memory for a single-node
 OpenSearch pod (JVM heap plus off-heap and page cache) when you do enable it; see
 `opensearch.javaOpts` and the OpenSearch OOMKill note under Troubleshooting.
+
+In fleet mode the per-namespace `ResourceQuota` (see `fleet.guardrails.resourceQuota`)
+is sized from the preset and then grows to account for whichever optional
+components are enabled, so their pods and PVCs actually fit within the quota. If
+the preset only covered backend and web, enabling trivy, the scanner-adapter,
+OpenSearch, or DependencyTrack would push the namespace over its pod and memory
+limits and leave those workloads (and the database bootstrap Job) unschedulable.
+To pin any total by hand, set the matching key under
+`fleet.guardrails.quotaOverrides` (for example `limitsMemory: 32Gi`); an override
+replaces the computed value outright while the remaining totals stay
+component-aware.
 
 ### Component Diagram
 

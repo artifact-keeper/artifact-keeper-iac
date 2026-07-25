@@ -331,28 +331,59 @@ Ingress host. Fleet instances derive it from fleet.host; otherwise ingress.host.
 {{- end -}}
 
 {{/*
+Formats an integer millicore count as a Kubernetes CPU quantity. Whole cores
+render bare (4000 -> "4"); anything else renders in millicores (9500 -> "9500m").
+*/}}
+{{- define "artifact-keeper.fleet.fmtCpu" -}}
+{{- $m := int . -}}
+{{- if eq (mod $m 1000) 0 -}}{{- div $m 1000 -}}{{- else -}}{{- printf "%dm" $m -}}{{- end -}}
+{{- end -}}
+
+{{/*
+Formats an integer Mi count as a Kubernetes memory quantity. Whole gibibytes
+render in Gi (4096 -> "4Gi"); anything else renders in Mi (3840 -> "3840Mi").
+*/}}
+{{- define "artifact-keeper.fleet.fmtMem" -}}
+{{- $mi := int . -}}
+{{- if eq (mod $mi 1024) 0 -}}{{- printf "%dGi" (div $mi 1024) -}}{{- else -}}{{- printf "%dMi" $mi -}}{{- end -}}
+{{- end -}}
+
+{{/*
 Per-namespace guardrail sizing keyed on fleet.preset. Returns YAML with the
 ResourceQuota totals and the LimitRange container defaults/bounds for the
 selected preset. The quota totals sit above the summed backend+web
 requests/limits to leave headroom for init containers and the bootstrap Job.
+
+The base preset is expressed in canonical integer units (CPU in millicores,
+memory in Mi, pods and PVCs as counts) and formatted back to Kubernetes
+quantities at the end, so a preset with no optional components enabled renders
+exactly as the previous hardcoded table did.
+
+Enabled optional components (trivy, scannerAdapter, opensearch, dependencyTrack)
+add their own workload footprint to the totals so the quota can actually admit
+those pods (and PVCs). Without this, a preset sized only for backend+web leaves
+scanner and search pods (and the bootstrap Job) unschedulable behind the quota.
+
+fleet.guardrails.quotaOverrides replaces any individual computed total outright;
+only the keys present there take effect, the rest stay component-aware.
 */}}
 {{- define "artifact-keeper.fleet.guardrailSpec" -}}
 {{- $preset := default "small" .Values.fleet.preset -}}
 {{- $table := dict
   "small" (dict
-    "quota" (dict "requestsCpu" "1" "requestsMemory" "1Gi" "limitsCpu" "4" "limitsMemory" "4Gi" "pods" "12" "pvcs" "4")
+    "requestsCpu" 1000 "requestsMemory" 1024 "limitsCpu" 4000 "limitsMemory" 4096 "pods" 12 "pvcs" 4
     "limitRange" (dict
       "defaultRequest" (dict "cpu" "100m" "memory" "128Mi")
       "default" (dict "cpu" "500m" "memory" "512Mi")
       "max" (dict "cpu" "2" "memory" "2Gi")))
   "medium" (dict
-    "quota" (dict "requestsCpu" "2" "requestsMemory" "3Gi" "limitsCpu" "8" "limitsMemory" "8Gi" "pods" "20" "pvcs" "6")
+    "requestsCpu" 2000 "requestsMemory" 3072 "limitsCpu" 8000 "limitsMemory" 8192 "pods" 20 "pvcs" 6
     "limitRange" (dict
       "defaultRequest" (dict "cpu" "250m" "memory" "256Mi")
       "default" (dict "cpu" "1" "memory" "1Gi")
       "max" (dict "cpu" "3" "memory" "3Gi")))
   "large" (dict
-    "quota" (dict "requestsCpu" "4" "requestsMemory" "6Gi" "limitsCpu" "16" "limitsMemory" "16Gi" "pods" "30" "pvcs" "8")
+    "requestsCpu" 4000 "requestsMemory" 6144 "limitsCpu" 16000 "limitsMemory" 16384 "pods" 30 "pvcs" 8
     "limitRange" (dict
       "defaultRequest" (dict "cpu" "500m" "memory" "512Mi")
       "default" (dict "cpu" "2" "memory" "2Gi")
@@ -362,5 +393,51 @@ requests/limits to leave headroom for init containers and the bootstrap Job.
 {{- if not $spec -}}
 {{- fail (printf "fleet.preset=%q is not valid; use one of small, medium, large" $preset) -}}
 {{- end -}}
-{{- $spec | toYaml -}}
+{{/* Start from the base preset totals (requests.cpu carries no per-component
+     increment) and add each enabled component's footprint. */}}
+{{- $limitsCpu := $spec.limitsCpu -}}
+{{- $limitsMemory := $spec.limitsMemory -}}
+{{- $requestsMemory := $spec.requestsMemory -}}
+{{- $pods := $spec.pods -}}
+{{- $pvcs := $spec.pvcs -}}
+{{- if .Values.trivy.enabled -}}
+{{- $limitsCpu = add $limitsCpu 1000 -}}
+{{- $limitsMemory = add $limitsMemory 2048 -}}
+{{- $requestsMemory = add $requestsMemory 512 -}}
+{{- $pods = add $pods 2 -}}
+{{- end -}}
+{{- if .Values.scannerAdapter.enabled -}}
+{{- $limitsCpu = add $limitsCpu 500 -}}
+{{- $limitsMemory = add $limitsMemory 1024 -}}
+{{- $requestsMemory = add $requestsMemory 256 -}}
+{{- $pods = add $pods 2 -}}
+{{- end -}}
+{{- if .Values.opensearch.enabled -}}
+{{- $limitsCpu = add $limitsCpu 1000 -}}
+{{- $limitsMemory = add $limitsMemory 2048 -}}
+{{- $requestsMemory = add $requestsMemory 1024 -}}
+{{- $pods = add $pods 2 -}}
+{{- $pvcs = add $pvcs 1 -}}
+{{- end -}}
+{{- if .Values.dependencyTrack.enabled -}}
+{{- $limitsCpu = add $limitsCpu 2000 -}}
+{{- $limitsMemory = add $limitsMemory 4096 -}}
+{{- $requestsMemory = add $requestsMemory 1024 -}}
+{{- $pods = add $pods 3 -}}
+{{- $pvcs = add $pvcs 1 -}}
+{{- end -}}
+{{- $quota := dict
+    "requestsCpu" (include "artifact-keeper.fleet.fmtCpu" $spec.requestsCpu)
+    "requestsMemory" (include "artifact-keeper.fleet.fmtMem" $requestsMemory)
+    "limitsCpu" (include "artifact-keeper.fleet.fmtCpu" $limitsCpu)
+    "limitsMemory" (include "artifact-keeper.fleet.fmtMem" $limitsMemory)
+    "pods" $pods
+    "pvcs" $pvcs -}}
+{{- $ov := default dict .Values.fleet.guardrails.quotaOverrides -}}
+{{- range $k := list "requestsCpu" "requestsMemory" "limitsCpu" "limitsMemory" "pods" "pvcs" -}}
+{{- if hasKey $ov $k -}}
+{{- $_ := set $quota $k (index $ov $k) -}}
+{{- end -}}
+{{- end -}}
+{{- (dict "quota" $quota "limitRange" $spec.limitRange) | toYaml -}}
 {{- end -}}

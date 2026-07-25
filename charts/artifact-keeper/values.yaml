@@ -1023,3 +1023,11 @@ fleet:
     searchNamespace: ""
     # -- Namespace of the shared scanner service (NetworkPolicy egress).
     scannerNamespace: ""
+    # -- Explicit ResourceQuota overrides. By default the quota is sized from the
+    # preset and grows to account for each enabled optional component (trivy,
+    # scannerAdapter, opensearch, dependencyTrack). Set any of these keys to
+    # replace the corresponding computed total outright; unset keys stay
+    # component-aware. Values are used verbatim as Kubernetes quantities, for
+    # example limitsMemory: 32Gi or pods: 40. Keys: requestsCpu, requestsMemory,
+    # limitsCpu, limitsMemory, pods, pvcs.
+    quotaOverrides: {}

@@ -198,48 +198,121 @@ metadata:
 data:
   init-dtrack.sh: |
     #!/bin/sh
-    set -e
+    # Bootstrap Dependency-Track: change the default admin password, then read
+    # the Automation team's API key onto a shared volume for the backend.
+    #
+    # Deliberately depends on curl only. An earlier version ran
+    # "apk add --no-cache curl jq" here, which failed on every cluster (the pod
+    # runs as non-root and apk needs root) and additionally on any cluster
+    # without egress to the Alpine CDN. The failure was swallowed, so the
+    # symptom was a five-minute wait loop and a Job that timed out with no
+    # useful message. See iac issue 202.
+    set -eu
+
     DT_URL="${DEPENDENCY_TRACK_URL:-http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080}"
     DT_ADMIN_USER="admin"
     DT_DEFAULT_PASS="admin"
-    DT_NEW_PASS="${DEPENDENCY_TRACK_ADMIN_PASSWORD}"
+    DT_NEW_PASS="${DEPENDENCY_TRACK_ADMIN_PASSWORD:-}"
     API_KEY_FILE="/shared/dtrack-api-key"
 
-    echo "[dtrack-init] Waiting for Dependency-Track at $DT_URL ..."
-    for i in $(seq 1 60); do
-      if curl -sf "$DT_URL/api/version" > /dev/null 2>&1; then break; fi
-      if [ "$i" -eq 60 ]; then echo "[dtrack-init] ERROR: timeout"; exit 1; fi
-      sleep 5
-    done
+    fail() {
+      echo "[dtrack-init] ERROR: $1" >&2
+      exit 1
+    }
+
+    # Fail before touching the API rather than sending an empty password to
+    # forceChangePassword, which Dependency-Track rejects with 406.
+    if [ -z "$DT_NEW_PASS" ]; then
+      fail "DEPENDENCY_TRACK_ADMIN_PASSWORD is empty. The chart generates one when dependencyTrack.adminPassword is unset; an empty value here means the Secret was supplied externally without this key."
+    fi
 
     if [ -f "$API_KEY_FILE" ] && [ -s "$API_KEY_FILE" ]; then
-      echo "[dtrack-init] API key already provisioned -- skipping"
+      echo "[dtrack-init] API key already provisioned, nothing to do"
       exit 0
     fi
 
-    TOKEN=$(curl -sf -X POST "$DT_URL/api/v1/user/login" \
-      -H "Content-Type: application/x-www-form-urlencoded" \
-      -d "username=${DT_ADMIN_USER}&password=${DT_NEW_PASS}" 2>/dev/null || true)
+    echo "[dtrack-init] Waiting for Dependency-Track at $DT_URL"
+    i=1
+    while [ "$i" -le 60 ]; do
+      if curl -sf -o /dev/null "$DT_URL/api/version"; then
+        echo "[dtrack-init] Dependency-Track is up after $((i * 5))s"
+        break
+      fi
+      if [ "$i" -eq 60 ]; then
+        # Report what curl actually said. A silent timeout here was the single
+        # most confusing symptom of issue 202.
+        echo "[dtrack-init] last attempt output:" >&2
+        curl -sS -o /dev/null "$DT_URL/api/version" >&2 || true
+        fail "Dependency-Track did not become ready at $DT_URL within 300s"
+      fi
+      i=$((i + 1))
+      sleep 5
+    done
 
-    if [ -z "$TOKEN" ] || echo "$TOKEN" | grep -qi "FORCE_PASSWORD_CHANGE"; then
-      curl -sf -o /dev/null -X POST "$DT_URL/api/v1/user/forceChangePassword" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "username=${DT_ADMIN_USER}&password=${DT_DEFAULT_PASS}&newPassword=${DT_NEW_PASS}&confirmPassword=${DT_NEW_PASS}"
-      TOKEN=$(curl -sf -X POST "$DT_URL/api/v1/user/login" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "username=${DT_ADMIN_USER}&password=${DT_NEW_PASS}" 2>/dev/null || true)
+    # --data-urlencode, not -d: a generated password is alphanumeric, but an
+    # operator-supplied dependencyTrack.adminPassword may contain characters
+    # ('&', '=', '+', '%') that raw form bodies would misparse as field
+    # separators or decode, silently breaking auth.
+    login() {
+      curl -sf -X POST "$DT_URL/api/v1/user/login" \
+        --data-urlencode "username=${DT_ADMIN_USER}" \
+        --data-urlencode "password=$1" || true
+    }
+
+    TOKEN=$(login "$DT_NEW_PASS")
+
+    if [ -z "$TOKEN" ]; then
+      echo "[dtrack-init] Admin password not yet changed, performing first-run change"
+      curl -sS -f -o /dev/null -X POST "$DT_URL/api/v1/user/forceChangePassword" \
+        --data-urlencode "username=${DT_ADMIN_USER}" \
+        --data-urlencode "password=${DT_DEFAULT_PASS}" \
+        --data-urlencode "newPassword=${DT_NEW_PASS}" \
+        --data-urlencode "confirmPassword=${DT_NEW_PASS}" \
+        || fail "forceChangePassword failed. If this deployment previously bootstrapped with a different password, the admin password no longer matches the Secret and must be reconciled by hand. See the chart README, section 'Recovering a Dependency-Track password mismatch'."
+      TOKEN=$(login "$DT_NEW_PASS")
     fi
 
-    if [ -z "$TOKEN" ]; then echo "[dtrack-init] ERROR: auth failed"; exit 1; fi
+    [ -n "$TOKEN" ] || fail "authentication failed after password change"
 
-    API_KEY=$(curl -sf "$DT_URL/api/v1/team" \
-      -H "Authorization: Bearer $TOKEN" | \
-      jq -r '.[] | select(.name == "Automation") | .apiKeys[0].key // empty')
+    TEAMS=$(curl -sS -f "$DT_URL/api/v1/team" -H "Authorization: Bearer $TOKEN") \
+      || fail "could not list teams"
 
-    if [ -z "$API_KEY" ]; then echo "[dtrack-init] ERROR: no API key"; exit 1; fi
+    # Extract the Automation team's first API key without jq. /api/v1/team
+    # returns a JSON array of team objects; put each object on its own line so
+    # the match cannot run across a team boundary and pick up a different
+    # team's key, keep only the Automation line, then take the first key from
+    # inside that object's apiKeys array.
+    #
+    # This assumes Dependency-Track < 4.13. From 4.13 the server hashes API
+    # keys and no longer returns them in plaintext here, so this extraction
+    # (and any other read-the-key-back approach, jq included) stops working.
+    # The version guard lives on dependencyTrack.image.tag in values.yaml.
+    AUTOMATION=$(printf '%s' "$TEAMS" | sed 's/{"uuid"/\
+    {"uuid"/g' | grep '"name":"Automation"' | head -n 1)
 
-    echo "$API_KEY" > "$API_KEY_FILE"
-    echo "[dtrack-init] Done"
+    [ -n "$AUTOMATION" ] || fail "no Automation team found in Dependency-Track. Expected the default team created on first run."
+
+    API_KEY=$(printf '%s' "$AUTOMATION" \
+      | sed -n 's/.*"apiKeys":\[[^]]*"key":"\([A-Za-z0-9_-]\{16,\}\)".*/\1/p' \
+      | head -n 1)
+
+    # Validate rather than trust the parse. A malformed extraction fails the
+    # deploy loudly instead of writing a bad key that surfaces later as
+    # confusing 401s from the backend.
+    case "$API_KEY" in
+      "") fail "could not extract an API key from the Automation team. The Dependency-Track response shape may have changed; set dependencyTrack.enabled=false and configure DEPENDENCY_TRACK_API_KEY directly if this persists." ;;
+      *[!A-Za-z0-9_-]*) fail "extracted API key contains unexpected characters, refusing to write it" ;;
+    esac
+
+    # umask 077 keeps the key from being world-readable on the shared PVC.
+    # The backend pod runs as a different UID (1001, fsGroup 0) than this Job
+    # (1000/1000); it can read the 0600 file because the kubelet re-applies
+    # fsGroup ownership on volume mount (fsGroupChangePolicy defaults to
+    # Always). If you override fsGroupChangePolicy to OnRootMismatch on the
+    # backend pod, verify it can still read this file.
+    umask 077
+    printf '%s\n' "$API_KEY" > "$API_KEY_FILE"
+    echo "[dtrack-init] API key written to $API_KEY_FILE"
 ---
 apiVersion: batch/v1
 kind: Job
@@ -248,6 +321,19 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: dependency-track
+  annotations:
+    # Run as a hook, not a chart-managed resource. A Job's pod template is
+    # immutable, so a plain Job breaks every "helm upgrade" that touches its
+    # spec with a "field is immutable" error until someone deletes the old Job
+    # by hand. before-hook-creation deletes the previous Job before each run
+    # (same pattern as fleet-db-bootstrap-job.yaml). post-install/post-upgrade
+    # rather than pre-*: the Job needs the Dependency-Track Deployment, the
+    # Secret, and the script ConfigMap to exist first. The script exits 0
+    # immediately when the API key is already provisioned, so re-running on
+    # every upgrade is cheap.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 3
   template:
@@ -257,6 +343,10 @@ spec:
     spec:
       restartPolicy: OnFailure
       automountServiceAccountToken: false
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with (.Values.dependencyTrack.tolerations | default .Values.global.tolerations) }}
       tolerations:
         {{- toYaml . | nindent 8 }}
@@ -279,7 +369,12 @@ spec:
       {{- end }}
       containers:
         - name: dtrack-init
-          image: alpine:3.20
+          # An image that already carries curl. The script installs nothing at
+          # runtime, so this works on clusters with no egress to a package
+          # mirror. Override dependencyTrack.bootstrap.image to point at your
+          # own registry in an air-gapped environment.
+          image: "{{ .Values.dependencyTrack.bootstrap.image.repository }}:{{ .Values.dependencyTrack.bootstrap.image.tag }}"
+          imagePullPolicy: {{ .Values.dependencyTrack.bootstrap.image.pullPolicy | default "IfNotPresent" }}
           {{- with .Values.dependencyTrack.bootstrap.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -293,11 +388,7 @@ spec:
               cpu: 200m
               memory: 128Mi
               ephemeral-storage: 128Mi
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              apk add --no-cache curl jq >/dev/null 2>&1
-              /bin/sh /scripts/init-dtrack.sh
+          command: ["/bin/sh", "/scripts/init-dtrack.sh"]
           env:
             - name: DEPENDENCY_TRACK_URL
               value: "http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080"

@@ -759,6 +759,12 @@ dependencyTrack:
   enabled: true
   image:
     repository: dependencytrack/apiserver
+    # UPGRADE LANDMINE: keep this below 4.13.0 until the bootstrap changes.
+    # Dependency-Track 4.13 started hashing API keys, so GET /api/v1/team no
+    # longer returns them in plaintext and the bootstrap Job's key extraction
+    # (templates/dtrack-deployment.yaml) stops working. The script fails
+    # loudly rather than writing a bad key, but the integration stays broken
+    # until the bootstrap is reworked for the 4.13+ key model.
     tag: "4.11.4"
   podSecurityContext:
     runAsNonRoot: true
@@ -776,6 +782,16 @@ dependencyTrack:
     capabilities:
       drop:
         - ALL
+  # -- Dependency-Track admin password. Leave empty and the chart generates a
+  # strong one on first install and keeps it stable across upgrades by reading
+  # the value back out of its own Secret. Set it explicitly if you want to know
+  # the password (to log into the Dependency-Track UI yourself) or if you
+  # manage the Secret externally, in which case this key must be present there.
+  # Stability relies on Helm's lookup, which only works when Helm talks to a
+  # live cluster. GitOps engines that render with "helm template" (ArgoCD,
+  # Flux) never see the stored value; this repo's ApplicationSet compensates
+  # with ignoreDifferences + RespectIgnoreDifferences on this Secret key. Other
+  # template-mode consumers should replicate that or set the password here.
   adminPassword: ""
   # -- Size limit for the `/tmp` emptyDir volume. DependencyTrack writes
   # ~1-2Gi into /tmp during startup (NVD mirror sync, DB migrations, JVM
@@ -797,6 +813,14 @@ dependencyTrack:
       ephemeral-storage: 1Gi
   bootstrap:
     enabled: true
+    # -- Image for the one-shot bootstrap Job. It needs curl and nothing else.
+    # The job installs no packages at runtime, so this works on clusters with
+    # no egress to a package mirror; point the repository at your own registry
+    # for air-gapped installs.
+    image:
+      repository: curlimages/curl
+      tag: "8.11.1"
+      pullPolicy: IfNotPresent
     podSecurityContext:
       runAsNonRoot: true
       runAsUser: 1000

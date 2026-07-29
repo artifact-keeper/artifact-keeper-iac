@@ -370,9 +370,17 @@ jobs:
         # dtrack, trivy) and cold can easily take 8-10 minutes. chart-testing
         # forwards anything in --helm-extra-args to the underlying
         # `helm upgrade --install` invocation.
+        # --upgrade makes ct install the main-branch chart version first and
+        # then upgrade to the PR's version (when the chart version was bumped),
+        # which catches changes that a fresh install can't: immutable-field
+        # errors on Jobs, breaking changes to existing resources, and hook
+        # ordering problems. Note the install test runs with ci/*-values.yaml,
+        # which currently disables dependencyTrack; see the follow-up issue on
+        # DT-enabled install coverage.
         run: |
           ct install \
             --target-branch main \
+            --upgrade \
             --charts charts/artifact-keeper/ \
             --helm-extra-args "--timeout=20m"
 

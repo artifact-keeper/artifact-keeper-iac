@@ -305,6 +305,21 @@ When `replicaCount >= 2`, the chart renders a StatefulSet with `cluster.initial_
 
 DependencyTrack loads its vulnerability database on first boot, which requires 4Gi+ of memory and can take several minutes. The readiness probe is configured with a generous initial delay. If the pod is killed before initialization completes, increase `dependencyTrack.resources.limits.memory`.
 
+### Recovering a Dependency-Track password mismatch
+
+The bootstrap Job logs in with `DEPENDENCY_TRACK_ADMIN_PASSWORD` from the chart Secret. When `dependencyTrack.adminPassword` is unset, the chart generates that password on first install and keeps it stable by reading it back from the Secret on later renders. Two situations break the pairing between the Secret and the password Dependency-Track actually has:
+
+1. `helm uninstall` followed by `helm install`. Uninstall deletes the Secret, but the Dependency-Track database lives on a PVC that survives, so the new install generates a fresh password while Dependency-Track still has the old one.
+2. The Secret was edited or replaced out of band.
+
+The bootstrap Job then fails with `forceChangePassword failed` (it assumes the current password is either the Secret's value or the factory default `admin`). To recover, pick one:
+
+- **Restore the old password**: if you still have it (a Secret backup, a values file), write it back into the Secret under `DEPENDENCY_TRACK_ADMIN_PASSWORD`, or set it as `dependencyTrack.adminPassword`, and re-run the upgrade.
+- **Reset Dependency-Track**: delete the Dependency-Track PVC (`kubectl delete pvc <release>-dtrack-data`) and its pod. Dependency-Track reinitializes from scratch with the default password and the next bootstrap run completes the pairing again. This loses Dependency-Track's local state (projects, findings history); SBOMs are re-ingested by the backend on the next scan cycle.
+- **Reconcile by hand**: log into the Dependency-Track UI with the password it actually has, change it to the Secret's current value, and re-run the Job (`kubectl delete job <release>-dtrack-init`, then sync/upgrade).
+
+GitOps note: engines that render with `helm template` (ArgoCD, Flux) never see the stored Secret value, so they would regenerate the password on every sync. The ApplicationSet shipped in this repo pins the live value with `ignoreDifferences` on `DEPENDENCY_TRACK_ADMIN_PASSWORD` plus the `RespectIgnoreDifferences=true` sync option. Replicate that if you deploy this chart with your own GitOps tooling and leave `adminPassword` unset.
+
 ### Backend PVC Permissions
 
 If the backend fails to write artifacts, verify that the PVC is writable by the container user. The init container in the backend deployment sets ownership to the correct UID.

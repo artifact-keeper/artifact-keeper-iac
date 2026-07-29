@@ -759,6 +759,12 @@ dependencyTrack:
   enabled: true
   image:
     repository: dependencytrack/apiserver
+    # UPGRADE LANDMINE: keep this below 4.13.0 until the bootstrap changes.
+    # Dependency-Track 4.13 started hashing API keys, so GET /api/v1/team no
+    # longer returns them in plaintext and the bootstrap Job's key extraction
+    # (templates/dtrack-deployment.yaml) stops working. The script fails
+    # loudly rather than writing a bad key, but the integration stays broken
+    # until the bootstrap is reworked for the 4.13+ key model.
     tag: "4.11.4"
   podSecurityContext:
     runAsNonRoot: true
@@ -781,6 +787,11 @@ dependencyTrack:
   # the value back out of its own Secret. Set it explicitly if you want to know
   # the password (to log into the Dependency-Track UI yourself) or if you
   # manage the Secret externally, in which case this key must be present there.
+  # Stability relies on Helm's lookup, which only works when Helm talks to a
+  # live cluster. GitOps engines that render with "helm template" (ArgoCD,
+  # Flux) never see the stored value; this repo's ApplicationSet compensates
+  # with ignoreDifferences + RespectIgnoreDifferences on this Secret key. Other
+  # template-mode consumers should replicate that or set the password here.
   adminPassword: ""
   # -- Size limit for the `/tmp` emptyDir volume. DependencyTrack writes
   # ~1-2Gi into /tmp during startup (NVD mirror sync, DB migrations, JVM
@@ -925,22 +936,6 @@ externalSecrets:
 # -- Network policies
 networkPolicy:
   enabled: true
-  # -- Namespace the ingress controller runs in. The backend and web
-  # NetworkPolicies allow traffic from pods labelled
-  # `app.kubernetes.io/name: ingress-nginx` in THIS namespace only.
-  #
-  # Previously the namespace was unrestricted, so a pod carrying that label in
-  # ANY namespace was allowed through. On a multi-tenant cluster that is a
-  # cross-tenant path: NetworkPolicies are additive, so one permissive rule
-  # overrides stricter ones elsewhere and lets a workload in another namespace
-  # reach this instance directly, bypassing the ingress and anything enforced
-  # there (source-IP allowlists, rate limits, WAF rules).
-  #
-  # UPGRADE NOTE: if your ingress controller does not run in `ingress-nginx`,
-  # set this to its namespace or the controller will be denied and your instance
-  # will stop serving external traffic. Set to "" to restore the old
-  # any-namespace behaviour, which is NOT recommended on a shared cluster.
-  ingressNamespace: ingress-nginx
 
 # -- Prometheus ServiceMonitor
 serviceMonitor:

@@ -69,6 +69,18 @@ spec:
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{ .namespace }}"
+      # The chart generates DEPENDENCY_TRACK_ADMIN_PASSWORD with randAlphaNum
+      # when dependencyTrack.adminPassword is unset. The chart's lookup-based
+      # stability only works when Helm runs against a live cluster; ArgoCD
+      # renders with `helm template` where lookup returns nothing, so every
+      # sync would otherwise mint a fresh password and desync the Secret from
+      # the password Dependency-Track actually has. Ignoring that one field
+      # (together with RespectIgnoreDifferences below) makes ArgoCD keep the
+      # live value after the initial creation.
+      ignoreDifferences:
+        - kind: Secret
+          jsonPointers:
+            - /data/DEPENDENCY_TRACK_ADMIN_PASSWORD
       syncPolicy:
         {{- if eq .autoSync "true" }}
         automated:
@@ -78,6 +90,7 @@ spec:
         syncOptions:
           - CreateNamespace=true
           - ServerSideApply=true
+          - RespectIgnoreDifferences=true
         retry:
           limit: 3
           backoff:

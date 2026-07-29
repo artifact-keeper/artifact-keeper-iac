@@ -249,10 +249,14 @@ data:
       sleep 5
     done
 
+    # --data-urlencode, not -d: a generated password is alphanumeric, but an
+    # operator-supplied dependencyTrack.adminPassword may contain characters
+    # ('&', '=', '+', '%') that raw form bodies would misparse as field
+    # separators or decode, silently breaking auth.
     login() {
       curl -sf -X POST "$DT_URL/api/v1/user/login" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "username=${DT_ADMIN_USER}&password=$1" || true
+        --data-urlencode "username=${DT_ADMIN_USER}" \
+        --data-urlencode "password=$1" || true
     }
 
     TOKEN=$(login "$DT_NEW_PASS")
@@ -260,9 +264,11 @@ data:
     if [ -z "$TOKEN" ]; then
       echo "[dtrack-init] Admin password not yet changed, performing first-run change"
       curl -sS -f -o /dev/null -X POST "$DT_URL/api/v1/user/forceChangePassword" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "username=${DT_ADMIN_USER}&password=${DT_DEFAULT_PASS}&newPassword=${DT_NEW_PASS}&confirmPassword=${DT_NEW_PASS}" \
-        || fail "forceChangePassword failed. If this deployment previously bootstrapped with a different password, the admin password no longer matches the Secret and must be reconciled by hand."
+        --data-urlencode "username=${DT_ADMIN_USER}" \
+        --data-urlencode "password=${DT_DEFAULT_PASS}" \
+        --data-urlencode "newPassword=${DT_NEW_PASS}" \
+        --data-urlencode "confirmPassword=${DT_NEW_PASS}" \
+        || fail "forceChangePassword failed. If this deployment previously bootstrapped with a different password, the admin password no longer matches the Secret and must be reconciled by hand. See the chart README, section 'Recovering a Dependency-Track password mismatch'."
       TOKEN=$(login "$DT_NEW_PASS")
     fi
 
@@ -276,6 +282,11 @@ data:
     # the match cannot run across a team boundary and pick up a different
     # team's key, keep only the Automation line, then take the first key from
     # inside that object's apiKeys array.
+    #
+    # This assumes Dependency-Track < 4.13. From 4.13 the server hashes API
+    # keys and no longer returns them in plaintext here, so this extraction
+    # (and any other read-the-key-back approach, jq included) stops working.
+    # The version guard lives on dependencyTrack.image.tag in values.yaml.
     AUTOMATION=$(printf '%s' "$TEAMS" | sed 's/{"uuid"/\
     {"uuid"/g' | grep '"name":"Automation"' | head -n 1)
 
@@ -293,6 +304,12 @@ data:
       *[!A-Za-z0-9_-]*) fail "extracted API key contains unexpected characters, refusing to write it" ;;
     esac
 
+    # umask 077 keeps the key from being world-readable on the shared PVC.
+    # The backend pod runs as a different UID (1001, fsGroup 0) than this Job
+    # (1000/1000); it can read the 0600 file because the kubelet re-applies
+    # fsGroup ownership on volume mount (fsGroupChangePolicy defaults to
+    # Always). If you override fsGroupChangePolicy to OnRootMismatch on the
+    # backend pod, verify it can still read this file.
     umask 077
     printf '%s\n' "$API_KEY" > "$API_KEY_FILE"
     echo "[dtrack-init] API key written to $API_KEY_FILE"
@@ -304,6 +321,19 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: dependency-track
+  annotations:
+    # Run as a hook, not a chart-managed resource. A Job's pod template is
+    # immutable, so a plain Job breaks every "helm upgrade" that touches its
+    # spec with a "field is immutable" error until someone deletes the old Job
+    # by hand. before-hook-creation deletes the previous Job before each run
+    # (same pattern as fleet-db-bootstrap-job.yaml). post-install/post-upgrade
+    # rather than pre-*: the Job needs the Dependency-Track Deployment, the
+    # Secret, and the script ConfigMap to exist first. The script exits 0
+    # immediately when the API key is already provisioned, so re-running on
+    # every upgrade is cheap.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 3
   template:
@@ -313,6 +343,10 @@ spec:
     spec:
       restartPolicy: OnFailure
       automountServiceAccountToken: false
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with (.Values.dependencyTrack.tolerations | default .Values.global.tolerations) }}
       tolerations:
         {{- toYaml . | nindent 8 }}

@@ -75,17 +75,25 @@ spec:
               value: {{ .Values.fleet.externalDatabaseBootstrap.host | quote }}
             - name: PGPORT
               value: {{ .Values.fleet.externalDatabaseBootstrap.port | quote }}
-            # Superuser connection to the shared server (bootstrap only).
-            - name: PGUSER
+            # Privileged connection to the shared server, used ONLY when this
+            # instance still needs provisioning. Marked optional so that
+            # removing the credential after provisioning (which is the desired
+            # end state: it should not live in an instance namespace any longer
+            # than it must) does not wedge every later sync in
+            # CreateContainerConfigError. When the secret is absent and the
+            # instance is already provisioned, the Job exits cleanly.
+            - name: ADMIN_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.fleet.externalDatabaseBootstrap.adminSecret }}
                   key: username
-            - name: PGPASSWORD
+                  optional: true
+            - name: ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.fleet.externalDatabaseBootstrap.adminSecret }}
                   key: password
+                  optional: true
             # Instance role password, kept in sync with the instance DATABASE_URL.
             - name: INSTANCE_DB_PASSWORD
               valueFrom:
@@ -100,10 +108,42 @@ spec:
               set -eu
               echo "[db-bootstrap] Waiting for shared PostgreSQL at ${PGHOST}:${PGPORT} ..."
               for i in $(seq 1 60); do
-                if pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" >/dev/null 2>&1; then break; fi
+                if pg_isready -h "$PGHOST" -p "$PGPORT" >/dev/null 2>&1; then break; fi
                 if [ "$i" -eq 60 ]; then echo "[db-bootstrap] ERROR: database not reachable"; exit 1; fi
                 sleep 3
               done
+
+              # Already provisioned? Ask the server rather than assuming. The
+              # instance role's own password is available here, so a successful
+              # login to the instance database proves both the role and the
+              # database exist and the password matches what the application
+              # will use. This runs first so that a provisioned instance never
+              # touches the privileged credential, which is what lets that
+              # credential be removed from the namespace after provisioning.
+              if PGPASSWORD="$INSTANCE_DB_PASSWORD" psql -q -w \
+                   -h "$PGHOST" -p "$PGPORT" \
+                   -U "$INSTANCE_IDENT" -d "$INSTANCE_IDENT" \
+                   -c 'SELECT 1' >/dev/null 2>&1; then
+                echo "[db-bootstrap] ${INSTANCE_IDENT} is already provisioned, nothing to do"
+                exit 0
+              fi
+
+              # Provisioning is required, so the privileged credential must be
+              # present. Say so precisely: the most likely cause is that it was
+              # removed after an earlier provisioning run and this instance has
+              # since lost its role, database, or password.
+              if [ -z "${ADMIN_USER:-}" ] || [ -z "${ADMIN_PASSWORD:-}" ]; then
+                echo "[db-bootstrap] ERROR: ${INSTANCE_IDENT} is not reachable with its own credentials and no admin credential is available." >&2
+                echo "[db-bootstrap] Expected secret '{{ .Values.fleet.externalDatabaseBootstrap.adminSecret }}' with keys username and password in this namespace." >&2
+                echo "[db-bootstrap] Restore it to let this Job provision the role and database, then remove it again." >&2
+                exit 1
+              fi
+
+              PGUSER="$ADMIN_USER"
+              PGPASSWORD="$ADMIN_PASSWORD"
+              export PGUSER PGPASSWORD
+
+              echo "[db-bootstrap] Provisioning role and database ${INSTANCE_IDENT}"
 
               # Create or update the instance role (idempotent). The identifier is
               # derived from the instance id (alphanumerics and underscores only),
@@ -126,6 +166,16 @@ spec:
               WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'ident')
               \gexec
               SQL
+
+              # Verify the end state the same way the check above does, so a
+              # silent partial provision cannot report success.
+              if ! PGPASSWORD="$INSTANCE_DB_PASSWORD" psql -q -w \
+                     -h "$PGHOST" -p "$PGPORT" \
+                     -U "$INSTANCE_IDENT" -d "$INSTANCE_IDENT" \
+                     -c 'SELECT 1' >/dev/null 2>&1; then
+                echo "[db-bootstrap] ERROR: provisioning ran but ${INSTANCE_IDENT} still cannot authenticate to its own database" >&2
+                exit 1
+              fi
 
               echo "[db-bootstrap] Role and database ${INSTANCE_IDENT} ready"
           volumeMounts:

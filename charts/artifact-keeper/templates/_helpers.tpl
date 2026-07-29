@@ -172,6 +172,46 @@ operator-supplied Secret; otherwise this is the chart-managed
 {{- end -}}
 {{- end -}}
 
+{{/*
+Dependency-Track admin password.
+
+Resolution order, and the order matters:
+
+  1. An explicit dependencyTrack.adminPassword, if set.
+  2. The password already stored in the chart's Secret, read back with lookup.
+  3. A freshly generated 32-character password.
+
+Step 2 is what makes this safe across "helm upgrade". Without it, randAlphaNum
+would mint a new password on every render, the Secret would change, and the
+bootstrap Job would then try to log in to a Dependency-Track that still has the
+old one. The lookup keeps the first generated password stable for the life of
+the release.
+
+Note that lookup returns nothing during "helm template" and "--dry-run", since
+there is no cluster to read. That is expected: a rendered-but-not-installed
+manifest simply shows a throwaway value.
+
+Previously this defaulted to an empty string, which the bootstrap script then
+passed to forceChangePassword; Dependency-Track rejects an empty password with
+406 and the integration never completed (iac issue 202).
+*/}}
+{{- define "artifact-keeper.dtrackAdminPassword" -}}
+{{- if .Values.dependencyTrack.adminPassword -}}
+{{- .Values.dependencyTrack.adminPassword -}}
+{{- else -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace (include "artifact-keeper.secretName" .) -}}
+{{- $existing := "" -}}
+{{- if and $secret $secret.data -}}
+{{- $existing = index $secret.data "DEPENDENCY_TRACK_ADMIN_PASSWORD" | default "" -}}
+{{- end -}}
+{{- if $existing -}}
+{{- $existing | b64dec -}}
+{{- else -}}
+{{- randAlphaNum 32 -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "artifact-keeper.validateSecrets" -}}
 {{- if or .Values.externalSecrets.enabled .Values.secrets.existingSecret -}}
 {{- /* Secrets are supplied externally; no chart-owned Secret to validate. */ -}}

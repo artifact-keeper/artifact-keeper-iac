@@ -98,7 +98,10 @@ spec:
                 port:
                   number: {{ $backendPort }}
           {{- end }}
-          {{- if .Values.dependencyTrack.enabled }}
+          # Dependency-Track UI/API. Off by default; opt in with
+          # ingress.dtrack.enabled. Reachable via port-forward otherwise
+          # (see NOTES.txt).
+          {{- if and .Values.dependencyTrack.enabled .Values.ingress.dtrack.enabled }}
           - path: /dtrack
             pathType: Prefix
             backend:

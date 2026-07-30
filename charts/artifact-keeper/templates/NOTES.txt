@@ -30,6 +30,28 @@ PostgreSQL (in-cluster):
 
 DependencyTrack:
   kubectl port-forward svc/{{ include "artifact-keeper.fullname" . }}-dtrack 8092:8080
+  {{- if .Values.ingress.enabled }}
+  {{- if .Values.ingress.dtrack.enabled }}
+  The Dependency-Track UI/API is also routed publicly at /dtrack on the
+  ingress host (ingress.dtrack.enabled=true). Make sure it sits behind
+  authentication you control.
+  {{- else }}
+  The Dependency-Track UI/API is NOT exposed on the ingress. Use the
+  port-forward above, or set ingress.dtrack.enabled=true to route /dtrack
+  publicly.
+  {{- end }}
+  {{- end }}
+{{- end }}
+
+{{- if eq (include "artifact-keeper.allowHttpIntegrations" .) "true" }}
+
+WARNING: ALLOW_HTTP_INTEGRATIONS=1 is set on the backend
+  (backend.allowHttpIntegrations={{ .Values.backend.allowHttpIntegrations | default "auto" }}).
+  The backend may call integrations over plain HTTP. This relaxes outbound
+  TLS posture for ALL integrations, not just the bundled Dependency-Track.
+  Set backend.allowHttpIntegrations: "false" (or ALLOW_HTTP_INTEGRATIONS in
+  backend.env) to turn it off; note the bundled Dependency-Track
+  integration requires it unless you put TLS in front of Dependency-Track.
 {{- end }}
 
 {{- if .Values.serviceMonitor.enabled }}

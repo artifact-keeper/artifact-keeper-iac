@@ -237,6 +237,33 @@ passed to forceChangePassword; Dependency-Track rejects an empty password with
 {{- end -}}
 
 {{/*
+Returns "true" when the chart should inject ALLOW_HTTP_INTEGRATIONS=1 into
+the backend, "" otherwise. An explicit ALLOW_HTTP_INTEGRATIONS entry in
+backend.env wins over backend.allowHttpIntegrations entirely (the chart
+renders nothing in that case). Invalid modes fail the render.
+*/}}
+{{- define "artifact-keeper.allowHttpIntegrations" -}}
+{{- if hasKey .Values.backend.env "ALLOW_HTTP_INTEGRATIONS" -}}
+{{- else -}}
+{{- /* Do not use `default "auto"` here: helm's default treats a boolean
+   false (--set backend.allowHttpIntegrations=false) as empty and would
+   silently fall back to auto. */ -}}
+{{- $mode := "auto" -}}
+{{- if not (kindIs "invalid" .Values.backend.allowHttpIntegrations) -}}
+{{- $mode = toString .Values.backend.allowHttpIntegrations -}}
+{{- end -}}
+{{- if eq $mode "true" -}}
+true
+{{- else if eq $mode "false" -}}
+{{- else if eq $mode "auto" -}}
+{{- if .Values.dependencyTrack.enabled -}}true{{- end -}}
+{{- else -}}
+{{- fail (printf "backend.allowHttpIntegrations must be one of \"auto\", \"true\", or \"false\"; got %q" $mode) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 =============================================================================
 Fleet mode helpers
 =============================================================================

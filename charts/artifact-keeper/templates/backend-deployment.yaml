@@ -257,10 +257,16 @@ spec:
               value: "http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080"
             - name: DEPENDENCY_TRACK_ENABLED
               value: "true"
-            {{- if not (hasKey .Values.backend.env "ALLOW_HTTP_INTEGRATIONS") }}
+            {{- end }}
+            {{- /*
+            ALLOW_HTTP_INTEGRATIONS relaxes outbound TLS verification for all
+            backend integrations. Injected only per backend.allowHttpIntegrations
+            (auto/true/false); an explicit entry in backend.env overrides this.
+            See values.yaml for the security trade-off.
+            */}}
+            {{- if eq (include "artifact-keeper.allowHttpIntegrations" .) "true" }}
             - name: ALLOW_HTTP_INTEGRATIONS
               value: "1"
-            {{- end }}
             {{- end }}
             {{- if .Values.secrets.smtpPassword }}
             - name: SMTP_PASSWORD

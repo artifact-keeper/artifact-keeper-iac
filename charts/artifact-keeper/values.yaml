@@ -332,6 +332,21 @@ backend:
     # SMTP_USERNAME: ""
     # SMTP_FROM_ADDRESS: "noreply@artifact-keeper.local"
     # SMTP_TLS_MODE: "starttls"
+  # -- Controls whether the backend may make plain-HTTP outbound integration
+  # calls (the ALLOW_HTTP_INTEGRATIONS env var). This weakens outbound TLS
+  # posture for EVERY integration the backend talks to, not just the bundled
+  # Dependency-Track, so think of it as a cluster-wide relaxation.
+  #   "auto"  (default): set ALLOW_HTTP_INTEGRATIONS=1 only when
+  #           dependencyTrack.enabled is true, because the bundled
+  #           Dependency-Track is reached over plain HTTP in-cluster and the
+  #           integration fails without it. A warning is printed in the
+  #           install notes whenever the variable is active.
+  #   "true":  always set ALLOW_HTTP_INTEGRATIONS=1.
+  #   "false": never set it. Note the bundled Dependency-Track integration
+  #           will not work unless you put TLS in front of it.
+  # An explicit ALLOW_HTTP_INTEGRATIONS entry in backend.env above overrides
+  # this setting entirely.
+  allowHttpIntegrations: auto
   resources:
     requests:
       cpu: 250m
@@ -600,7 +615,11 @@ opensearch:
   auth:
     username: "admin"
     # -- OpenSearch 2.12+ requires a strong initial admin password.
-    password: "ArtifactKeeper2026!Strong"
+    # The chart ships none: with the Security plugin enabled
+    # (disableSecurityPlugin: false) an empty value fails the render with a
+    # validation error. Never commit a real credential here; use --set, an
+    # existingSecret, or externalSecrets instead.
+    password: ""
   persistence:
     # -- When false and replicaCount == 1, data lives in an emptyDir
     # sized according to `size`. Set to true (and configure storageClass)
@@ -852,8 +871,30 @@ ingress:
   # derived value, so you can raise a single timeout through the dedicated value
   # without restating the whole annotation block, or override an annotation
   # outright by setting it here.
-  annotations:
-    nginx.ingress.kubernetes.io/enable-cors: "true"
+  #
+  # CORS: the backend handles CORS itself (backend.env.CORS_ORIGINS), so no
+  # controller-level CORS annotation is set by default. If you want the nginx
+  # ingress controller to handle CORS instead, opt in explicitly and restrict
+  # the origin, e.g.:
+  #   annotations:
+  #     nginx.ingress.kubernetes.io/enable-cors: "true"
+  #     nginx.ingress.kubernetes.io/cors-allow-origin: "https://your-ui.example.com"
+  annotations: {}
+  # -- Exposure of the bundled Dependency-Track UI/API on the public ingress.
+  # Default false: Dependency-Track ships its own admin console and API with
+  # separate credentials, so the chart does not route it publicly. The backend
+  # reaches it in-cluster, and operators can reach the UI with
+  # `kubectl port-forward svc/<release>-dtrack 8092:8080` (see NOTES).
+  # Enable only behind authentication you control.
+  dtrack:
+    # -- Route /<host>/dtrack to the bundled Dependency-Track service.
+    # Only has an effect when dependencyTrack.enabled is true.
+    enabled: false
+    # -- Value for Dependency-Track's ALPINE_CORS_ALLOW_ORIGIN, applied only
+    # when ingress.dtrack.enabled is true (otherwise CORS is disabled
+    # entirely). "*" preserves the chart's previous behavior; restrict it to
+    # the origin(s) that should call the Dependency-Track API cross-origin.
+    corsAllowOrigin: "*"
   # Maximum client request body size, rendered as the nginx `proxy-body-size`
   # annotation when className is `nginx`. Registries host large artifacts, so
   # this defaults high; "0" disables the limit entirely. Set to "" to omit the

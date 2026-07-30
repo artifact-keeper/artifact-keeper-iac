@@ -10,7 +10,7 @@ on:
 jobs:
   verify:
     name: Verify helm-docs output
-    runs-on: ak-ci-runners
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
     permissions:
       contents: read
     steps:

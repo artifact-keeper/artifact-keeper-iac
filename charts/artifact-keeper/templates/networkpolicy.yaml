@@ -44,9 +44,22 @@ spec:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
     {{- end }}
-    # Allow ingress controller
+    # Allow ingress controller. The namespace is pinned via
+    # networkPolicy.ingressNamespace: an unrestricted namespaceSelector would
+    # admit any pod carrying this label in ANY namespace, which on a shared
+    # cluster is a cross-tenant path that bypasses the ingress entirely.
     - from:
+        {{- if .Values.networkPolicy.ingressNamespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | quote }}
+        {{- else }}
+        # Explicit empty selector = ALL namespaces. It must be `{}` and not an
+        # omitted/null value: a nil namespaceSelector means "this namespace
+        # only", which would deny the ingress controller and take the instance
+        # offline.
         - namespaceSelector: {}
+        {{- end }}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: ingress-nginx
@@ -126,8 +139,19 @@ spec:
     - Ingress
     - Egress
   ingress:
+    # Namespace pinned; see the note on the backend policy above.
     - from:
+        {{- if .Values.networkPolicy.ingressNamespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | quote }}
+        {{- else }}
+        # Explicit empty selector = ALL namespaces. It must be `{}` and not an
+        # omitted/null value: a nil namespaceSelector means "this namespace
+        # only", which would deny the ingress controller and take the instance
+        # offline.
         - namespaceSelector: {}
+        {{- end }}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: ingress-nginx

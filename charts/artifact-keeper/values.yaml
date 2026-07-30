@@ -983,6 +983,17 @@ externalSecrets:
 # -- Network policies
 networkPolicy:
   enabled: true
+  # -- Namespace the ingress controller pods run in. The backend and web
+  # policies admit pods labeled `app.kubernetes.io/name: ingress-nginx`, and
+  # this pins WHICH namespace those pods may come from. An empty value renders
+  # `namespaceSelector: {}`, which admits pods carrying that label from ANY
+  # namespace — on a shared cluster that lets any workload that can set its
+  # own pod labels reach the backend and web ports directly, bypassing the
+  # ingress controller and everything enforced there (TLS, rate limiting,
+  # allowlist annotations). The default matches the conventional namespace of
+  # the community ingress-nginx controller chart; set it to the namespace your
+  # controller actually runs in. Set to "" only if you understand the above.
+  ingressNamespace: ingress-nginx
 
 # -- Prometheus ServiceMonitor
 serviceMonitor:

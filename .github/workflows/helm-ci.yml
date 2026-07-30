@@ -15,7 +15,7 @@ on:
 jobs:
   lint:
     name: Lint
-    runs-on: ak-ci-runners
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
     permissions:
       contents: read
     steps:
@@ -45,7 +45,7 @@ jobs:
 
   template-validation:
     name: "Template & Validate (${{ matrix.variant }})"
-    runs-on: ak-ci-runners
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
     permissions:
       contents: read
     strategy:
@@ -104,7 +104,7 @@ jobs:
 
   verify-image-references:
     name: "Verify Image References (${{ matrix.variant }})"
-    runs-on: ak-ci-runners
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
     permissions:
       contents: read
     strategy:
@@ -229,7 +229,7 @@ jobs:
   version-check:
     name: Chart Version Check
     if: github.event_name == 'pull_request'
-    runs-on: ak-ci-runners
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
     permissions:
       contents: read
     steps:
@@ -265,7 +265,7 @@ jobs:
     #
     # Requires argocd/arc-beefy-runners-values.yaml to be deployed to the
     # cluster.
-    runs-on: ak-beefy-runners
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-beefy-runners' }}
     needs: [lint, template-validation]
     permissions:
       contents: read

@@ -66,11 +66,13 @@ spec:
       ports:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
-    # Allow Prometheus scraping
+    # Allow Prometheus scraping. The selector matches the
+    # kubernetes.io/metadata.name label Kubernetes stamps on every namespace
+    # automatically; a bare `name` label matches nothing.
     - from:
         - namespaceSelector:
             matchLabels:
-              name: monitoring
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
@@ -81,7 +83,9 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # PostgreSQL (in-cluster or external)
+    # PostgreSQL (in-cluster or external). Intentionally no destination
+    # selector: the database may live outside this namespace (externalDatabase)
+    # and a pod/namespace selector here would break those installs.
     - ports:
         - port: 5432
           protocol: TCP
@@ -119,7 +123,13 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
-    # HTTPS (S3, external registries, OIDC providers)
+    # HTTPS (S3, external registries, OIDC providers). Deliberately
+    # unrestricted on destination: the backend legitimately reaches arbitrary
+    # external endpoints (object storage, OIDC/JWKS issuers, upstream
+    # registries), and pinning destinations here would break those. Operators
+    # wanting a stricter, namespace-scoped egress model should look at the
+    # fleet guardrail policy (templates/fleet-networkpolicy.yaml), which
+    # scopes egress to named shared-service namespaces plus DNS and 443.
     - ports:
         - port: 443
           protocol: TCP
@@ -158,11 +168,12 @@ spec:
       ports:
         - port: {{ .Values.web.service.port }}
           protocol: TCP
-    # Allow Prometheus scraping
+    # Allow Prometheus scraping. Uses the auto-stamped
+    # kubernetes.io/metadata.name namespace label; see the backend policy.
     - from:
         - namespaceSelector:
             matchLabels:
-              name: monitoring
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: {{ .Values.web.service.port }}
           protocol: TCP
@@ -181,6 +192,72 @@ spec:
       ports:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
+{{- if .Values.edge.enabled }}
+---
+# Edge: accept traffic from the ingress controller; reach the primary backend
+# (pull-through cache) plus DNS/HTTPS for the case where PRIMARY_URL points at
+# an external, TLS-terminating primary.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-edge
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.edge.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Namespace pinned; see the note on the backend policy above.
+    - from:
+        {{- if .Values.networkPolicy.ingressNamespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | quote }}
+        {{- else }}
+        # Explicit empty selector = ALL namespaces. It must be `{}` and not an
+        # omitted/null value: a nil namespaceSelector means "this namespace
+        # only", which would deny the ingress controller and take the instance
+        # offline.
+        - namespaceSelector: {}
+        {{- end }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - port: {{ .Values.edge.service.port }}
+          protocol: TCP
+    # Allow Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: {{ .Values.edge.service.port }}
+          protocol: TCP
+  egress:
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Primary backend (PRIMARY_URL)
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.backend.service.httpPort }}
+          protocol: TCP
+    # HTTPS (external primary or upstream registries)
+    - ports:
+        - port: 443
+          protocol: TCP
+{{- end }}
 ---
 # OpenSearch: accept traffic from backend on 9200 and from peer OpenSearch
 # pods on 9300 (transport for multi-node clustering).

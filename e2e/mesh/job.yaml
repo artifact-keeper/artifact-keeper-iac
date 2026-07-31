@@ -16,9 +16,26 @@ spec:
         app.kubernetes.io/component: e2e-test
     spec:
       restartPolicy: Never
+      # The job's ServiceAccount has no RBAC bindings; the token is useless to
+      # the test and pure attack surface, so don't mount it.
+      automountServiceAccountToken: false
       containers:
         - name: mesh-e2e
           image: alpine:3.20
+          # The container still runs as root (the Alpine image ships no
+          # non-root user and the runtime `apk add` below needs root to write
+          # the package database), so runAsNonRoot is not possible here. What
+          # we CAN do is drop every capability and forbid privilege
+          # escalation; verified against alpine:3.20 that
+          # `apk add --no-cache curl jq` works with all capabilities dropped.
+          # NOTE: the runtime `apk add` requires egress to the Alpine CDN
+          # (dl-cdn.alpinelinux.org); any NetworkPolicy on ak-mesh-main must
+          # allow TCP/443 out.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           command: ["/bin/sh", "-c"]
           args: ["apk add --no-cache curl jq && /scripts/mesh-e2e-test.sh"]
           env:

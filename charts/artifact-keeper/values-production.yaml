@@ -11,7 +11,9 @@
 backend:
   replicaCount: 3
   image:
-    tag: "1.2.0"
+    # Tracks the latest published backend release (see the IMAGE TAGS note in
+    # values.yaml — backend and web release on independent cadences).
+    tag: "1.6.0"
   env:
     RUST_LOG: "info"
     ENVIRONMENT: "production"
@@ -49,7 +51,7 @@ backend:
 web:
   replicaCount: 3
   image:
-    tag: "1.2.0"
+    tag: "1.5.8"
   resources:
     requests:
       cpu: 500m

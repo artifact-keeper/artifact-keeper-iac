@@ -97,6 +97,20 @@ resource "aws_eks_cluster" "this" {
     security_group_ids      = [aws_security_group.cluster.id]
     endpoint_private_access = true
     endpoint_public_access  = var.endpoint_public_access
+    public_access_cidrs     = var.endpoint_public_access_cidrs
+  }
+
+  # Optional envelope encryption of Kubernetes secrets with a customer-managed
+  # KMS key. Off by default for backwards compatibility; see the
+  # secrets_encryption_key_arn variable.
+  dynamic "encryption_config" {
+    for_each = var.secrets_encryption_key_arn != "" ? [var.secrets_encryption_key_arn] : []
+    content {
+      provider {
+        key_arn = encryption_config.value
+      }
+      resources = ["secrets"]
+    }
   }
 
   tags = var.tags

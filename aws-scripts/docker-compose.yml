@@ -41,14 +41,17 @@ services:
       retries: 10
 
   trivy:
-    image: aquasec/trivy:latest
+    image: aquasec/trivy:0.72.0
     restart: always
-    command: ["server", "--listen", "0.0.0.0:8090"]
+    # Run as the nobody user instead of the image's default root. Server
+    # mode only needs a writable cache dir, which the volume below provides.
+    user: "65534:65534"
+    command: ["server", "--listen", "0.0.0.0:8090", "--cache-dir", "/cache/trivy"]
     volumes:
-      - /data/trivy-cache:/root/.cache/trivy
+      - /data/trivy-cache:/cache/trivy
 
   backend:
-    image: ghcr.io/artifact-keeper/artifact-keeper-backend:${ARTIFACT_KEEPER_VERSION:-latest}
+    image: ghcr.io/artifact-keeper/artifact-keeper-backend:${ARTIFACT_KEEPER_BACKEND_VERSION:-1.6.0}
     restart: always
     environment:
       DATABASE_URL: postgresql://artifact_keeper:${DB_PASSWORD}@postgres:5432/artifact_keeper
@@ -71,7 +74,7 @@ services:
         condition: service_healthy
 
   web:
-    image: ghcr.io/artifact-keeper/artifact-keeper-web:${ARTIFACT_KEEPER_VERSION:-latest}
+    image: ghcr.io/artifact-keeper/artifact-keeper-web:${ARTIFACT_KEEPER_WEB_VERSION:-1.5.8}
     restart: always
     environment:
       BACKEND_URL: http://backend:8080

@@ -71,14 +71,22 @@ resource "aws_security_group_rule" "rds_ingress_eks" {
   description              = "Allow PostgreSQL access from EKS cluster nodes"
 }
 
+# Egress is scoped to PostgreSQL inside the VPC: the only outbound traffic the
+# instance originates is streaming replication to a Multi-AZ standby (or read
+# replica) in the same VPC. AWS-managed maintenance traffic is exempt from
+# security group rules, so nothing broader is needed.
+data "aws_vpc" "this" {
+  id = var.vpc_id
+}
+
 resource "aws_security_group_rule" "rds_egress" {
   type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
+  from_port         = 5432
+  to_port           = 5432
+  protocol          = "tcp"
+  cidr_blocks       = [data.aws_vpc.this.cidr_block]
   security_group_id = aws_security_group.rds.id
-  description       = "Allow all egress"
+  description       = "Allow PostgreSQL egress within the VPC (Multi-AZ replication)"
 }
 
 ################################################################################

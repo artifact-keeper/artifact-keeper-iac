@@ -36,10 +36,13 @@ spec:
           - env: production
             namespace: artifact-keeper-prod
             valuesFile: values-production.yaml
-            # Production tracks a specific release tag. Update this value
-            # to promote a new version (e.g., v1.2.0). Sync is manual.
-            targetRevision: v1.1.9
-            imageTag: ~1.1
+            # Production tracks a specific chart release tag. Update this
+            # value to promote a new version (e.g., artifact-keeper-1.9.1).
+            # Sync is manual.
+            targetRevision: artifact-keeper-1.9.1
+            # Backend and web release on independent cadences and only the
+            # MAJOR version has to align, so allow any 1.x image.
+            imageTag: ^1
             imageUpdateStrategy: semver
             autoSync: "false"
   template:

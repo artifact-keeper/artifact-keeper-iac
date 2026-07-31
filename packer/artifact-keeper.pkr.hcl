@@ -13,8 +13,8 @@ packer {
 
 variable "artifact_keeper_version" {
   type        = string
-  default     = "latest"
-  description = "Docker image tag to bake into the AMI (e.g. latest, 0.2.0, main)."
+  default     = "1.6.0"
+  description = "Backend image tag to bake into the AMI (the compose stack's web image is pinned separately in aws-scripts/docker-compose.yml)."
 }
 
 variable "aws_region" {
@@ -39,7 +39,7 @@ variable "ami_regions" {
 
 source "amazon-ebs" "artifact-keeper" {
   ami_name        = "artifact-keeper-${var.artifact_keeper_version}-{{timestamp}}"
-  ami_description = "Artifact Keeper ${var.artifact_keeper_version} - open-source artifact registry with PostgreSQL, Meilisearch, and Trivy."
+  ami_description = "Artifact Keeper ${var.artifact_keeper_version} - open-source artifact registry with PostgreSQL, OpenSearch, and Trivy."
   instance_type   = var.instance_type
   region          = var.aws_region
   ami_regions     = var.ami_regions
@@ -86,7 +86,7 @@ build {
 
   # Upload scripts and compose file
   provisioner "file" {
-    source      = "${path.root}/../scripts/"
+    source      = "${path.root}/../aws-scripts/"
     destination = "/tmp/ak-scripts"
   }
 
@@ -98,9 +98,9 @@ build {
     ]
     execute_command = "chmod +x {{ .Path }}; sudo -E {{ .Path }}"
     scripts = [
-      "${path.root}/../scripts/01-docker.sh",
-      "${path.root}/../scripts/02-artifact-keeper.sh",
-      "${path.root}/../scripts/99-cleanup.sh",
+      "${path.root}/../aws-scripts/01-docker.sh",
+      "${path.root}/../aws-scripts/02-artifact-keeper.sh",
+      "${path.root}/../aws-scripts/99-cleanup.sh",
     ]
   }
 }

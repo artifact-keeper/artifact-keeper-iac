@@ -468,26 +468,33 @@ only the keys present there take effect, the rest stay component-aware.
 {{- if not $spec -}}
 {{- fail (printf "fleet.preset=%q is not valid; use one of small, medium, large" $preset) -}}
 {{- end -}}
-{{/* Start from the base preset totals (requests.cpu carries no per-component
-     increment) and add each enabled component's footprint. */}}
+{{/* Start from the base preset totals and add each enabled component's
+     footprint. requests.cpu must grow too: the base preset covers only the
+     core workload, so enabling an optional component otherwise wedges the
+     namespace (new pods forbidden by the quota; observed live when search
+     was enabled on a medium tenant). */}}
+{{- $requestsCpu := $spec.requestsCpu -}}
 {{- $limitsCpu := $spec.limitsCpu -}}
 {{- $limitsMemory := $spec.limitsMemory -}}
 {{- $requestsMemory := $spec.requestsMemory -}}
 {{- $pods := $spec.pods -}}
 {{- $pvcs := $spec.pvcs -}}
 {{- if .Values.trivy.enabled -}}
+{{- $requestsCpu = add $requestsCpu 250 -}}
 {{- $limitsCpu = add $limitsCpu 1000 -}}
 {{- $limitsMemory = add $limitsMemory 2048 -}}
 {{- $requestsMemory = add $requestsMemory 512 -}}
 {{- $pods = add $pods 2 -}}
 {{- end -}}
 {{- if .Values.scannerAdapter.enabled -}}
+{{- $requestsCpu = add $requestsCpu 100 -}}
 {{- $limitsCpu = add $limitsCpu 500 -}}
 {{- $limitsMemory = add $limitsMemory 1024 -}}
 {{- $requestsMemory = add $requestsMemory 256 -}}
 {{- $pods = add $pods 2 -}}
 {{- end -}}
 {{- if .Values.opensearch.enabled -}}
+{{- $requestsCpu = add $requestsCpu 250 -}}
 {{- $limitsCpu = add $limitsCpu 1000 -}}
 {{- $limitsMemory = add $limitsMemory 2048 -}}
 {{- $requestsMemory = add $requestsMemory 1024 -}}
@@ -495,6 +502,7 @@ only the keys present there take effect, the rest stay component-aware.
 {{- $pvcs = add $pvcs 1 -}}
 {{- end -}}
 {{- if .Values.dependencyTrack.enabled -}}
+{{- $requestsCpu = add $requestsCpu 500 -}}
 {{- $limitsCpu = add $limitsCpu 2000 -}}
 {{- $limitsMemory = add $limitsMemory 4096 -}}
 {{- $requestsMemory = add $requestsMemory 1024 -}}
@@ -502,7 +510,7 @@ only the keys present there take effect, the rest stay component-aware.
 {{- $pvcs = add $pvcs 1 -}}
 {{- end -}}
 {{- $quota := dict
-    "requestsCpu" (include "artifact-keeper.fleet.fmtCpu" $spec.requestsCpu)
+    "requestsCpu" (include "artifact-keeper.fleet.fmtCpu" $requestsCpu)
     "requestsMemory" (include "artifact-keeper.fleet.fmtMem" $requestsMemory)
     "limitsCpu" (include "artifact-keeper.fleet.fmtCpu" $limitsCpu)
     "limitsMemory" (include "artifact-keeper.fleet.fmtMem" $limitsMemory)

@@ -472,12 +472,16 @@ only the keys present there take effect, the rest stay component-aware.
      footprint. requests.cpu must grow too: the base preset covers only the
      core workload, so enabling an optional component otherwise wedges the
      namespace (new pods forbidden by the quota; observed live when search
-     was enabled on a medium tenant). */}}
+     was enabled on a medium tenant). limits.cpu increments match each
+     component's actual pod limit, plus headroom for ONE backend pod and
+     ONE web pod: a RollingUpdate surge otherwise exceeds the quota
+     mid-rollout and wedges the deployment (observed live on the same
+     tenant once it could finally schedule OpenSearch). */}}
 {{- $requestsCpu := $spec.requestsCpu -}}
-{{- $limitsCpu := $spec.limitsCpu -}}
+{{- $limitsCpu := add $spec.limitsCpu 3000 -}}
 {{- $limitsMemory := $spec.limitsMemory -}}
 {{- $requestsMemory := $spec.requestsMemory -}}
-{{- $pods := $spec.pods -}}
+{{- $pods := add $spec.pods 2 -}}
 {{- $pvcs := $spec.pvcs -}}
 {{- if .Values.trivy.enabled -}}
 {{- $requestsCpu = add $requestsCpu 250 -}}
@@ -488,14 +492,14 @@ only the keys present there take effect, the rest stay component-aware.
 {{- end -}}
 {{- if .Values.scannerAdapter.enabled -}}
 {{- $requestsCpu = add $requestsCpu 100 -}}
-{{- $limitsCpu = add $limitsCpu 500 -}}
+{{- $limitsCpu = add $limitsCpu 1000 -}}
 {{- $limitsMemory = add $limitsMemory 1024 -}}
 {{- $requestsMemory = add $requestsMemory 256 -}}
 {{- $pods = add $pods 2 -}}
 {{- end -}}
 {{- if .Values.opensearch.enabled -}}
 {{- $requestsCpu = add $requestsCpu 250 -}}
-{{- $limitsCpu = add $limitsCpu 1000 -}}
+{{- $limitsCpu = add $limitsCpu 2000 -}}
 {{- $limitsMemory = add $limitsMemory 2048 -}}
 {{- $requestsMemory = add $requestsMemory 1024 -}}
 {{- $pods = add $pods 2 -}}

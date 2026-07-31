@@ -496,7 +496,20 @@ postgres:
     runAsNonRoot: true
     runAsUser: 999
     fsGroup: 999
-  containerSecurityContext: {}
+  # -- Container-level securityContext. Drops all capabilities and disables
+  # privilege escalation; the pod already runs as non-root UID 999
+  # (podSecurityContext above), so the postgres entrypoint takes its non-root
+  # path and never needs CHOWN/FOWNER on the data directory.
+  #
+  # readOnlyRootFilesystem is intentionally NOT set: postgres writes its unix
+  # socket, lock files, and initdb artifacts outside the data volume
+  # (/var/run/postgresql, /tmp), so a read-only rootfs prevents the pod from
+  # starting. To enable it, also mount emptyDir volumes at those paths.
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
   auth:
     username: registry
     password: ""
@@ -1058,8 +1071,23 @@ fleet:
   # non-secret settings (endpoint, bucket, region) are supplied through
   # backend.env; the access keys are read from an existing Secret referenced
   # here and injected into the backend as S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY.
+  #
+  # !!! WARNING — ISOLATION IS BY CONVENTION, NOT ENFORCEMENT !!!
+  # All fleet instances share ONE bucket, separated only by the per-instance
+  # S3_PREFIX key prefix. Object storage has no notion of per-prefix access
+  # control by itself: any credentials that can write to the bucket can read
+  # and overwrite EVERY instance's prefix. Isolation therefore depends entirely
+  # on you provisioning PER-INSTANCE credentials (one Secret per instance,
+  # each backed by an IAM/user policy scoped to that instance's prefix, e.g.
+  # an s3:prefix condition on "<instanceId>/*"). If two instances reference
+  # the same Secret — or one set of credentials with bucket-wide access —
+  # either instance can read, modify, or delete the other's artifacts.
+  # Do NOT reuse one Secret across fleet releases.
   storage:
     # -- Name of an existing Secret holding the object storage access keys.
+    # MUST be unique per fleet instance (see the WARNING above): scope the
+    # underlying credentials to this instance's S3_PREFIX so a compromised or
+    # misbehaving instance cannot reach other instances' artifacts.
     existingSecret: ""
     # -- Key in the Secret holding the access key id.
     accessKeyIdKey: S3_ACCESS_KEY_ID

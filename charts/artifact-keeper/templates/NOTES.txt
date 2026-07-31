@@ -59,3 +59,12 @@ WARNING: ALLOW_HTTP_INTEGRATIONS=1 is set on the backend
 Monitoring:
   ServiceMonitor is enabled. Prometheus will scrape /metrics from the backend.
 {{- end }}
+
+{{- if eq (include "artifact-keeper.fleet.enabled" .) "true" }}
+
+CAUTION: Fleet mode shares ONE object-storage bucket across instances,
+  separated only by key prefix. Isolation holds ONLY if each instance uses
+  its own credentials (fleet.storage.existingSecret) scoped to its own
+  prefix. Reusing one Secret across instances lets every instance read and
+  overwrite every other instance's artifacts.
+{{- end }}

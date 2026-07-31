@@ -214,13 +214,18 @@ data "aws_iam_policy_document" "flow_log_publish" {
   statement {
     effect = "Allow"
     actions = [
-      "logs:CreateLogGroup",
       "logs:CreateLogStream",
       "logs:PutLogEvents",
       "logs:DescribeLogGroups",
       "logs:DescribeLogStreams",
     ]
-    resources = ["*"]
+    # Scoped to the log group this module creates (and its log streams, which
+    # live under the "<group-arn>:*" resource). logs:CreateLogGroup is
+    # deliberately omitted: the group is module-managed.
+    resources = [
+      aws_cloudwatch_log_group.flow_log[0].arn,
+      "${aws_cloudwatch_log_group.flow_log[0].arn}:*",
+    ]
   }
 }
 

@@ -41,7 +41,7 @@ jobs:
         run: ct lint --target-branch main --charts charts/artifact-keeper/
 
       - name: Run helm lint
-        run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test --set meilisearch.masterKey=1228c08daebf202dfa77b9d7b062c195d3ab1c8f
+        run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test
 
   template-validation:
     name: "Template & Validate (${{ matrix.variant }})"
@@ -53,11 +53,11 @@ jobs:
       matrix:
         include:
           - variant: default
-            values_args: "--set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test --set meilisearch.masterKey=1228c08daebf202dfa77b9d7b062c195d3ab1c8f"
+            values_args: "--set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
           - variant: production
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
-            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test --set meilisearch.masterKey=1228c08daebf202dfa77b9d7b062c195d3ab1c8f"
+            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
           - variant: smoke
             values_args: "-f charts/artifact-keeper/values-smoke.yaml --set backend.image.tag=dev --set web.image.tag=dev"
           - variant: mesh-main
@@ -112,11 +112,11 @@ jobs:
       matrix:
         include:
           - variant: default
-            values_args: "--set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test --set meilisearch.masterKey=1228c08daebf202dfa77b9d7b062c195d3ab1c8f"
+            values_args: "--set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
           - variant: production
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
-            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test --set meilisearch.masterKey=1228c08daebf202dfa77b9d7b062c195d3ab1c8f"
+            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
           - variant: smoke
             values_args: "-f charts/artifact-keeper/values-smoke.yaml --set backend.image.tag=dev --set web.image.tag=dev"
     steps:
@@ -263,8 +263,8 @@ jobs:
     # opensearch, dtrack) can stand up inside chart-testing's timeout window.
     # The regular ak-ci-runners pool (4 CPU / 8 Gi) is too tight.
     #
-    # Requires argocd/arc-beefy-runners-values.yaml to be deployed to the
-    # cluster.
+    # Requires the ak-beefy-runners ARC scale set to be deployed to the
+    # runner cluster; its configuration is maintained outside this repo.
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-beefy-runners' }}
     needs: [lint, template-validation]
     permissions:

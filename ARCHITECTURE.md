@@ -2,8 +2,7 @@
 
 This repository holds the infrastructure for Artifact Keeper: the Helm chart
 that runs the application on Kubernetes, the Terraform that provisions the AWS
-platform underneath it, the ArgoCD manifests that drive delivery, and the CI
-runner and maintenance plumbing that supports the build pipeline. The
+platform underneath it, and the ArgoCD manifests that drive delivery. The
 application code lives in separate repositories (`artifact-keeper`,
 `artifact-keeper-web`, and so on); this repo only deploys the published
 container images.
@@ -20,15 +19,13 @@ install instructions, see `README.md`.
 | `charts/artifact-keeper/` | The umbrella Helm chart for the whole application (backend, web, edge, Postgres, OpenSearch, Trivy, scanner-adapter, DependencyTrack, ingress, secrets, policies). | Changing what runs in a cluster, adding a service, adjusting per-environment values. |
 | `terraform/modules/` | Reusable AWS building blocks: `vpc`, `eks`, `rds`, `s3`. | Changing how a class of AWS resource is built for every environment. |
 | `terraform/environments/` | One root module per environment (`dev`, `staging`, `production`) composing the four modules with environment-specific sizing. | Adding or resizing an environment's AWS footprint. |
-| `argocd/` | GitOps delivery: the `ApplicationSet`, `AppProject`, image updater config, ARC runner scale-set values, and the registry-cache / namespace-sweeper / mesh Applications. | Changing how ArgoCD syncs environments or how CI runners are shaped. |
+| `argocd/` | GitOps delivery: the `ApplicationSet`, `AppProject`, image updater config, and the mesh ApplicationSet. | Changing how ArgoCD syncs environments. |
 | `monitoring/` | `kube-prometheus-stack` values, a `PrometheusRule` with app alerts, and a Grafana dashboard JSON. | Changing alerting or dashboards. |
-| `e2e/` | In-cluster manifests for end-to-end and mesh tests (dind registry-mirror ConfigMap, mesh Job + RBAC, registry-cache static PVs, runner RBAC). | Changing the in-cluster test harness. |
-| `runner-images/` | Dockerfiles for the ARC runner images (`rust`, `e2e`). | Bumping runner toolchains. |
-| `ci-maintenance/` | The CI namespace-sweeper CronJob and its scoped RBAC. | Changing the leaked-namespace reclaim policy. |
+| `e2e/` | In-cluster manifests for mesh tests (mesh Job + RBAC). | Changing the in-cluster test harness. |
 | `aws-scripts/` | Single-node EC2 deployment: Docker install, a `docker-compose.yml`, an Nginx host config, and a first-boot secret-generation script. | Changing the all-in-one VM install path. |
 | `packer/` | A Packer template that bakes the single-node compose stack into an AMI. | Cutting a new prebuilt AMI. |
 | `demo/` | The `demo.artifactkeeper.com` compose file, reset script, and seed SQL. | Changing the public demo. |
-| `.github/` | Workflows (`helm-ci`, `helm-release`, `helm-docs`, `ci`, `runner-images`, `require-linked-issue`), the PR template, CODEOWNERS, Dependabot. | Changing CI or contribution rules. |
+| `.github/` | Workflows (`helm-ci`, `helm-release`, `helm-docs`, `ci`, `require-linked-issue`), the PR template, CODEOWNERS, Dependabot. | Changing CI or contribution rules. |
 
 There is no top-level git repo across the workspace; this directory is its own
 repository.
@@ -50,9 +47,8 @@ Values resolve in three layers, lowest precedence first:
    and backend/web/edge track the floating `dev` image tag. It is heavily
    commented and doubles as the reference for every tunable.
 2. Environment overlays layer on top: `values-staging.yaml`,
-   `values-production.yaml`, `values-smoke.yaml`, `values-mesh-main.yaml` /
-   `values-mesh-peer.yaml`, and `values-registry-cache.yaml`. Each only sets
-   what differs from the base.
+   `values-production.yaml`, `values-smoke.yaml`, and `values-mesh-main.yaml` /
+   `values-mesh-peer.yaml`. Each only sets what differs from the base.
 3. Deploy-time `--set` flags or ArgoCD Helm `parameters` win last. The mesh
    ApplicationSet, for example, injects `fullnameOverride` and peer identity
    this way.
@@ -183,7 +179,7 @@ Sync policy is deliberately not uniform:
 |-----|----------------|-------------|-----------|----------------|
 | dev | `main` | `values.yaml` | yes (selfHeal + prune) | digest |
 | staging | `main` | `values-staging.yaml` | yes (selfHeal + prune) | digest |
-| production | a chart tag (e.g. `v1.1.9`) | `values-production.yaml` | no (manual) | semver `~1.1` |
+| production | a chart tag (e.g. `artifact-keeper-1.9.1`) | `values-production.yaml` | no (manual) | semver `^1` |
 
 Promoting production is a deliberate act: bump the production element's
 `targetRevision` to the new chart tag and sync by hand. Dev and staging
@@ -196,11 +192,10 @@ CR (`argocd/image-updater-cr.yaml`) watches every Application matching
 `artifact-keeper-*` and `ak-*`, reading per-Application annotations for the
 image list and update strategy. Dev and staging resolve the `dev` tag to a
 concrete digest so rollouts are deterministic; production moves only within
-the `~1.1` semver range.
+the `^1` semver range (backend and web release on independent cadences, so
+only the major version is pinned).
 
-Two Applications live outside the main set: `registry-cache` (manual sync,
-pinned to a stable release, never auto-updated) and `ci-ns-sweeper` (auto-sync,
-sourced from `ci-maintenance/`). A separate mesh ApplicationSet
+A separate mesh ApplicationSet
 (`argocd/mesh-test-applicationset.yaml`) stands up four peer namespaces for
 replication testing, injecting per-instance identity via Helm parameters.
 
@@ -219,44 +214,19 @@ flowchart TD
     ghcr --> updater
     updater -->|digest pin| dev
     updater -->|digest pin| stg
-    updater -->|semver ~1.1| prod
+    updater -->|semver ^1| prod
 ```
 
 ## CI and runners
 
-CI runs on self-hosted Actions Runner Controller (ARC) v2 runner scale sets on
-a dedicated runner cluster. Three pools exist, each configured by a values
-file under `argocd/`:
-
-- `ak-ci-runners` (`arc-ci-runners-values.yaml`): the default pool for lint,
-  unit tests, and chart CI. Uses the `ak-runner-rust` image with a hostPath
-  `/cache` for shared cargo/sccache/npm caches. Max runners are capped (6) to
-  keep the per-runner memory limit from exhausting the node.
-- `ak-beefy-runners` (`arc-beefy-runners-values.yaml`): heavier jobs.
-- `ak-e2e-runners` (`arc-e2e-runners-values.yaml`): a Docker-in-Docker pool for
-  compose-based E2E stacks, using the `ak-runner-e2e` image with explicit
-  parallelism caps so cargo/nextest respect the pod's CPU limit instead of the
-  host core count.
-
-The scale-set chart is pinned to version `0.13.1` to match the ARC controller
-already on the cluster; newer chart minors render a CR the running controller
-silently drops. Both DinD pools route `docker.io` pulls through the in-cluster
-registry-cache via the `dind-registry-mirror` ConfigMap
-(`e2e/dind-registry-mirror-configmap.yaml`) and authenticate with a
-`dockerhub-pull` secret to lift anonymous rate limits.
-
-Runner images are built from `runner-images/{rust,e2e}/Dockerfile` and
-published by `.github/workflows/runner-images.yml` on merge to `main`. Base
-images and toolchains are pinned so the environment changes only through
-reviewed bumps.
-
-The namespace sweeper (`ci-maintenance/namespace-sweeper.yaml`) is a backstop
-for leaked CI test namespaces. It is an hourly CronJob that deletes namespaces
-matching an approved prefix (`smoke-self-`, `test-self-`) older than four
-hours, guarded by a protected-substring denylist. The blast radius is
-constrained in the script, not by RBAC, because namespace verbs cannot be
-name-scoped. It ships as the `ci-ns-sweeper` ArgoCD Application with self-heal
-on.
+CI selects its runner by event. `pull_request` jobs run on GitHub-hosted
+runners (`ubuntu-latest`) so untrusted PR code gets an ephemeral, isolated
+environment; `push` jobs run on self-hosted Actions Runner Controller (ARC)
+scale sets (`ak-ci-runners`, `ak-beefy-runners`) for speed and capacity. The
+`helm-ci` install test uses the larger `ak-beefy-runners` pool so the k3d
+cluster plus the full chart fit inside chart-testing's timeout window. The
+runner scale-set configuration and runner images are maintained outside this
+repository; the workflows here only select pools by label.
 
 ## Key invariants
 
@@ -279,6 +249,3 @@ on.
   promotion is a `targetRevision` bump plus a hand-triggered sync.
 - **Per-component scheduling replaces global.** It does not merge; there is no
   way to opt a single component out of global scheduling without restating it.
-- **The registry-cache and mesh instances have independent lifecycles.** Never
-  point the registry cache at `dev` or `latest`, and never enable image-updater
-  on it; a broken cache breaks every CI pull.

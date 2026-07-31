@@ -39,6 +39,18 @@ variable "endpoint_public_access" {
   default     = true
 }
 
+variable "endpoint_public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the public API server endpoint when endpoint_public_access is true. Defaults to fully open for backwards compatibility; restrict this to operator/VPN ranges in real deployments."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "secrets_encryption_key_arn" {
+  description = "ARN of a customer-managed KMS key used for envelope encryption of Kubernetes secrets (EKS encryption_config). Empty (the default) leaves envelope encryption off. Enabling it on an existing cluster is irreversible — the key must not be deleted afterwards."
+  type        = string
+  default     = ""
+}
+
 variable "node_groups" {
   description = "Map of managed node group configurations"
   type = map(object({

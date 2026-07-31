@@ -17,16 +17,14 @@ echo "==> Artifact Keeper first-boot configuration"
 # -------------------------------------------------------------------------
 DB_PASSWORD=$(openssl rand -hex 24)
 JWT_SECRET=$(openssl rand -hex 32)
-MEILI_KEY=$(openssl rand -hex 24)
 
 # -------------------------------------------------------------------------
 # 2. Write .env for Docker Compose
 # -------------------------------------------------------------------------
 cat > "${AK_DIR}/.env" <<EOF
-ARTIFACT_KEEPER_VERSION=$(grep ARTIFACT_KEEPER_VERSION "${AK_DIR}/.env" | cut -d= -f2)
+$(grep -E '^ARTIFACT_KEEPER_' "${AK_DIR}/.env")
 DB_PASSWORD=${DB_PASSWORD}
 JWT_SECRET=${JWT_SECRET}
-MEILI_MASTER_KEY=${MEILI_KEY}
 EOF
 chmod 600 "${AK_DIR}/.env"
 
@@ -93,7 +91,6 @@ cat > "$CREDS_FILE" <<CREDS
 Access URL: ${DOMAIN:+https://${DOMAIN}}${DOMAIN:-http://${PUBLIC_IP:-YOUR_IP}}
 
 Database Password:  ${DB_PASSWORD}
-Meilisearch Key:    ${MEILI_KEY}
 JWT Secret:         ${JWT_SECRET}
 
 Docker Compose Dir: ${AK_DIR}

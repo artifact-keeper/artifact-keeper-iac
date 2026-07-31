@@ -25,20 +25,23 @@ cp "${SRC}/first-boot.sh" "${AK_DIR}/first-boot.sh"
 cp "${SRC}/nginx-host.conf" "${AK_DIR}/nginx-host.conf"
 chmod +x "${AK_DIR}/first-boot.sh"
 
-# Create data directories
-mkdir -p /data/{postgres,meilisearch,storage,trivy-cache}
+# Create data directories. trivy-cache must be writable by the nobody user
+# the trivy container runs as (65534).
+mkdir -p /data/{postgres,opensearch,storage}
+install -d -o 65534 -g 65534 /data/trivy-cache
 
 # Pull images now so first boot is fast
-AK_VERSION="${ARTIFACT_KEEPER_VERSION:-latest}"
+BACKEND_VERSION="${ARTIFACT_KEEPER_BACKEND_VERSION:-${ARTIFACT_KEEPER_VERSION:-1.6.0}}"
+WEB_VERSION="${ARTIFACT_KEEPER_WEB_VERSION:-1.5.8}"
 cd "${AK_DIR}"
 
-# Write the .env with the version tag
+# Write the .env with the version tags
 cat > "${AK_DIR}/.env" <<EOF
-ARTIFACT_KEEPER_VERSION=${AK_VERSION}
+ARTIFACT_KEEPER_BACKEND_VERSION=${BACKEND_VERSION}
+ARTIFACT_KEEPER_WEB_VERSION=${WEB_VERSION}
 # Populated by first-boot:
 DB_PASSWORD=changeme
 JWT_SECRET=changeme
-MEILI_MASTER_KEY=changeme
 EOF
 chmod 600 "${AK_DIR}/.env"
 

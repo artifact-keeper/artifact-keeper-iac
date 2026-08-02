@@ -1006,6 +1006,21 @@ externalSecrets:
     # the ExternalSecret data entry (set this to a real path to enable).
     webhookSecretKey: ""
 
+# -- Extra raw Kubernetes manifests to render alongside the chart. Each entry
+# is a YAML string (templated) emitted as its own document. Useful for objects
+# the chart does not natively model (ExternalSecret, SealedSecret, custom CRs,
+# etc.) without forking the chart.
+# extraManifests:
+#   - |
+#     apiVersion: v1
+#     kind: Secret
+#     metadata:
+#       name: otel-collector-auth
+#     type: Opaque
+#     stringData:
+#       otlp-headers: "authorization=Bearer xxxxx"
+extraManifests: []
+
 # -- Network policies
 networkPolicy:
   enabled: true

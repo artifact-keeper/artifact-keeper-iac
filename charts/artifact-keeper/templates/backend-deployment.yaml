@@ -47,9 +47,7 @@ spec:
       serviceAccountName: {{ include "artifact-keeper.serviceAccountName" . }}
       automountServiceAccountToken: false
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
+        {{- toYaml (.Values.backend.podSecurityContext | default (dict "runAsNonRoot" true "runAsUser" 1000 "fsGroup" 1000)) | nindent 8 }}
       initContainers:
         {{- if .Values.cosign.enabled }}
         - name: verify-image-signature

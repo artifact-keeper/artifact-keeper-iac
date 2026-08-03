@@ -8,6 +8,7 @@ security policies, and operational needs before use in production.
 =============================================================================
 */}}
 {{- if .Values.backend.enabled }}
+{{- $secretName := .Values.secrets.existingSecret | default (printf "%s-secrets" (include "artifact-keeper.fullname" .)) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -181,13 +182,13 @@ spec:
               {{- else }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ $secretName }}
                   key: DATABASE_URL
               {{- end }}
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ $secretName }}
                   key: JWT_SECRET
             {{- if .Values.opensearch.enabled }}
             - name: OPENSEARCH_URL
@@ -196,12 +197,12 @@ spec:
             - name: OPENSEARCH_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ $secretName }}
                   key: OPENSEARCH_USERNAME
             - name: OPENSEARCH_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ $secretName }}
                   key: OPENSEARCH_PASSWORD
             - name: OPENSEARCH_ALLOW_INVALID_CERTS
               value: {{ .Values.opensearch.allowInvalidCerts | quote }}
@@ -227,7 +228,7 @@ spec:
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "artifact-keeper.fullname" . }}-secrets
+                  name: {{ $secretName }}
                   key: SMTP_PASSWORD
             {{- end }}
             {{- if .Values.backend.metricsListener.enabled }}

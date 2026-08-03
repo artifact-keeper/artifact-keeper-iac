@@ -552,6 +552,9 @@ ingress:
 # These are development defaults. For production, override via --set or
 # use existingSecret references. Never commit real credentials here.
 secrets:
+  # Use a pre-created Secret when credentials are managed outside the chart.
+  # The chart will not render or replace that Secret.
+  existingSecret: ""
   jwtSecret: ""
   s3AccessKey: ""
   s3SecretKey: ""

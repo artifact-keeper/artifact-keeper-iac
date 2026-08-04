@@ -62,7 +62,7 @@ spec:
       initContainers:
         {{- if .Values.opensearch.fixOwnership.enabled }}
         - name: fix-ownership
-          image: busybox:1.37
+          image: "{{ .Values.opensearch.initContainers.image.repository }}:{{ .Values.opensearch.initContainers.image.tag }}"
           {{- with .Values.opensearch.fixOwnership.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -82,7 +82,7 @@ spec:
               mountPath: /usr/share/opensearch/data
         {{- end }}
         - name: sysctl-check
-          image: busybox:1.37
+          image: "{{ .Values.opensearch.initContainers.image.repository }}:{{ .Values.opensearch.initContainers.image.tag }}"
           {{- with .Values.opensearch.initContainerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}

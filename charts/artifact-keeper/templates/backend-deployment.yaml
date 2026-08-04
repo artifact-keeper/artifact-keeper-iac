@@ -100,7 +100,7 @@ spec:
         {{- end }}
         {{- if .Values.opensearch.enabled }}
         - name: wait-for-opensearch
-          image: alpine:3.20
+          image: "{{ .Values.backend.waitForOpenSearch.image.repository }}:{{ .Values.backend.waitForOpenSearch.image.tag }}"
           {{- with .Values.backend.initContainerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}

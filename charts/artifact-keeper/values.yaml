@@ -159,6 +159,11 @@ backend:
     capabilities:
       drop:
         - ALL
+  # -- wait-for-opensearch init container image. Override for airgapped mirrors.
+  waitForOpenSearch:
+    image:
+      repository: alpine
+      tag: "3.20"
   service:
     type: ClusterIP
     httpPort: 8080
@@ -613,6 +618,11 @@ opensearch:
     capabilities:
       drop:
         - ALL
+  # -- fix-ownership and sysctl-check init container image. Override for airgapped mirrors.
+  initContainers:
+    image:
+      repository: busybox
+      tag: "1.37"
   fixOwnership:
     enabled: true
     securityContext:

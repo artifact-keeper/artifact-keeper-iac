@@ -21,6 +21,13 @@
 # clustering. Trivy and DependencyTrack keep the Recreate strategy for
 # the same single-writer PVC reason.
 #
+# The backend defaults to Recreate for that same reason (its storage and
+# scan-workspace PVCs are ReadWriteOnce) but is configurable via
+# backend.strategy, because Recreate means a gap in service on every
+# upgrade. Installs that keep artifacts in object storage instead of on a
+# PVC can set backend.strategy.type=RollingUpdate for a zero-downtime
+# rollout -- see the notes on backend.strategy below for the preconditions.
+#
 # IMAGE TAGS
 # ----------
 # The backend and web images release on independent cadences. They are
@@ -378,9 +385,51 @@ backend:
     enabled: true
     size: 10Gi
     storageClass: ""
+  # -- Scratch space for security scans (SCAN_WORKSPACE_PATH=/scan-workspace,
+  # set whenever trivy.enabled). `enabled: true` backs it with a
+  # ReadWriteOnce PVC, which pins every backend replica to one node. Set it
+  # to false to give each pod its own emptyDir of `size` instead -- required
+  # for a multi-replica backend, and for `strategy.type: RollingUpdate`
+  # below. The workspace only holds per-scan temp files, so nothing is lost
+  # when a pod goes away; `size` then counts against the node's
+  # ephemeral-storage.
   scanWorkspace:
     enabled: true
     size: 2Gi
+  # -- Deployment update strategy for the backend.
+  #
+  # `Recreate` (the default, and the behavior this chart hardcoded before the
+  # value existed) tears every old pod down before starting the new one. It is
+  # required whenever the backend holds a ReadWriteOnce PVC -- with
+  # `persistence.enabled: true` or `scanWorkspace.enabled: true` on an RWO
+  # storage class, a second pod cannot attach the same volume, so a rolling
+  # update wedges the new pod in ContainerCreating with a Multi-Attach error
+  # until the rollout times out. The cost is a hard gap in service on every
+  # image bump, chart change, or config-driven restart.
+  #
+  # Set `type: RollingUpdate` for an upgrade with no gap. That is only safe
+  # when the backend owns no RWO volume, which means all three of its volumes
+  # have to be off or on a ReadWriteMany class:
+  #   - `storage`: keep artifacts in object storage
+  #     (`env.STORAGE_BACKEND: s3`) and set `persistence.enabled: false`.
+  #   - `scan-workspace`: `scanWorkspace.enabled: false` (scanning still
+  #     works; the workspace becomes a per-pod emptyDir).
+  #   - `shared-config`: only mounted when `dependencyTrack.enabled` is true,
+  #     and there is no way around it today -- the DT bootstrap hands the
+  #     backend its API key through that PVC, so DT-enabled installs have to
+  #     stay on Recreate.
+  # It also wants `replicaCount` (or `autoscaling.minReplicas`) >= 2, since a
+  # single replica still goes away while its one pod restarts. Pair it with
+  # `podDisruptionBudget.enabled: true` so node drains keep the same floor.
+  #
+  # `rollingUpdate` is optional and passed through verbatim; it is only
+  # rendered when the type is RollingUpdate (the Deployment API rejects it
+  # under Recreate). Omit it to take Kubernetes' 25%/25% defaults.
+  strategy:
+    type: Recreate
+    # rollingUpdate:
+    #   maxUnavailable: 0
+    #   maxSurge: 1
   autoscaling:
     enabled: false
     minReplicas: 2

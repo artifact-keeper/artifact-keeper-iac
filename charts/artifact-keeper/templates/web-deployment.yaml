@@ -59,6 +59,9 @@ spec:
               containerPort: {{ .Values.web.service.port }}
               protocol: TCP
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.web.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
             - name: NEXT_PUBLIC_API_URL
               value: {{ .Values.web.env.NEXT_PUBLIC_API_URL | quote }}
             - name: BACKEND_URL

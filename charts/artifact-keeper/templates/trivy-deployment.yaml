@@ -99,6 +99,9 @@ spec:
           command: ["trivy"]
           args: ["server", "--listen", "0.0.0.0:8090", "--cache-dir", "/home/trivy/.cache"]
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.trivy.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
             - name: HOME
               value: /home/trivy
             - name: TMPDIR

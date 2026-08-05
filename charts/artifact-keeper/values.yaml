@@ -70,6 +70,15 @@ global:
   # scanner-adapter). Leave empty for public images.
   imagePullSecrets: []
 
+  # -- Cluster-wide egress proxy. Set httpProxy/httpsProxy to route every
+  # component's outbound traffic through it. NO_PROXY is built for you (cluster
+  # DNS + all in-chart Services), so noProxy only needs your extra external
+  # hosts. Override or switch off a single component under <component>.proxy.
+  proxy:
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+
   # -- Scheduling constraints applied to ALL workloads by default.
   # Per-component values (e.g. backend.nodeSelector) override these.
   #
@@ -102,6 +111,8 @@ cosign:
 # and artifact storage. It runs as a single Rust binary (Axum).
 backend:
   enabled: true
+  # Egress: inherits global.proxy. Override with proxy.httpProxy/httpsProxy/noProxy,
+  # or set proxy.enabled: false to cut this component off from egress.
   # -- Additional envFrom sources (Secrets/ConfigMaps) for the backend container,
   # rendered verbatim. Use for credentials that must come from existing Secrets.
   extraEnvFrom: []
@@ -403,6 +414,10 @@ backend:
 # -- Next.js web frontend
 web:
   enabled: true
+  # -- No egress proxy: the web UI only talks to the backend in-cluster, so it
+  # needs no outbound access. Set enabled: true to route it via global.proxy.
+  proxy:
+    enabled: false
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-web  # Docker Hub: artifactkeeper/web
@@ -456,6 +471,7 @@ web:
 # until the edge image ships. Tracking: issue #56.
 edge:
   enabled: false
+  # Egress: inherits global.proxy. Set proxy.enabled: false to cut off its egress.
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-edge
@@ -584,6 +600,10 @@ externalDatabase:
 #   into production by accident.
 opensearch:
   enabled: true
+  # -- No egress proxy: OpenSearch only serves the backend in-cluster and never
+  # calls out. Set enabled: true to route it via global.proxy.
+  proxy:
+    enabled: false
   # -- Seconds the backend's wait-for-opensearch init container waits for
   # OpenSearch to reach green/yellow before proceeding on the Postgres-native
   # search fallback. OpenSearch is an optional accelerator (the backend boots
@@ -686,6 +706,8 @@ opensearch:
 # prevents concurrent access from two pods.
 trivy:
   enabled: true
+  # Egress: inherits global.proxy. trivy fetches its vuln DB, so it usually needs
+  # egress; set proxy.enabled: false only if the DB is mirrored in-cluster.
   image:
     repository: aquasec/trivy
     tag: "0.62.1"
@@ -765,6 +787,8 @@ trivy:
 # which stays on TRIVY_URL for the fs/incus scan path.
 scannerAdapter:
   enabled: true
+  # Egress: inherits global.proxy. Fetches the Trivy DB, so it usually needs
+  # egress; set proxy.enabled: false to cut it off.
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter
     # -- The scanner-adapter is versioned independently of the AK
@@ -818,6 +842,8 @@ scannerAdapter:
 # admin user and API key for backend integration.
 dependencyTrack:
   enabled: true
+  # Egress: inherits global.proxy. Pulls vuln-intel feeds, so it usually needs
+  # egress; set proxy.enabled: false to cut it off.
   image:
     repository: dependencytrack/apiserver
     # UPGRADE LANDMINE: keep this below 4.13.0 until the bootstrap changes.

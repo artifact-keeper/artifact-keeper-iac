@@ -177,6 +177,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.backend.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
             {{- if .Values.dependencyTrack.enabled }}
             # The backend reads the Dependency-Track API key from this file
             # (see resolve_api_key in dependency_track_service.rs). This replaces

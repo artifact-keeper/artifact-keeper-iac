@@ -66,6 +66,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.scannerAdapter.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
             - name: HOME
               value: /home/scanner
             - name: TMPDIR

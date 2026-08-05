@@ -122,6 +122,9 @@ spec:
               containerPort: 9300
               protocol: TCP
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.opensearch.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
             - name: cluster.name
               value: {{ .Values.opensearch.clusterName | quote }}
             - name: node.name

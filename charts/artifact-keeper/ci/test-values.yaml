@@ -2,6 +2,16 @@
 # Disables heavy components and uses minimal resources so the chart
 # can be installed in a resource-constrained environment.
 
+# Exercise the egress-proxy templating: global.proxy flows into the egress
+# components (backend here), while web keeps its default proxy.enabled: false.
+# A dead proxy is install-safe: NO_PROXY auto-includes the in-cluster Services
+# and the DB, and /readyz only checks DB+migrations, so pods still go Ready.
+global:
+  proxy:
+    httpProxy: "http://proxy.ci.invalid:3128"
+    httpsProxy: "http://proxy.ci.invalid:3128"
+    noProxy: ".ci.invalid,.example.com"
+
 backend:
   replicaCount: 1
   image:

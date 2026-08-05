@@ -528,3 +528,69 @@ only the keys present there take effect, the rest stay component-aware.
 {{- end -}}
 {{- (dict "quota" $quota "limitRange" $spec.limitRange) | toYaml -}}
 {{- end -}}
+
+{{/*
+=============================================================================
+Egress proxy helpers
+=============================================================================
+*/}}
+
+{{/*
+NO_PROXY defaults: loopback, in-cluster DNS suffixes, and the short Service name
+of every enabled component. The bare names matter — a ".svc"/".cluster.local"
+suffix match misses "artifact-keeper-backend", which is how components call each
+other, so those hops would otherwise take the proxy. Fleet mode: the shared
+search/scan/DB Services live outside the release; add them via a noProxy.
+*/}}
+{{- define "artifact-keeper.noProxyDefaults" -}}
+{{- $full := include "artifact-keeper.fullname" . -}}
+{{- $n := list "localhost" "127.0.0.1" ".svc" ".svc.cluster.local" ".cluster.local" -}}
+{{- $n = append $n (printf "%s-backend" $full) -}}
+{{- $n = append $n (printf "%s-web" $full) -}}
+{{- if .Values.edge.enabled -}}{{- $n = append $n (printf "%s-edge" $full) -}}{{- end -}}
+{{- if .Values.opensearch.enabled -}}{{- $n = append $n (printf "%s-opensearch" $full) -}}{{- end -}}
+{{- if .Values.trivy.enabled -}}{{- $n = append $n (printf "%s-trivy" $full) -}}{{- end -}}
+{{- if .Values.scannerAdapter.enabled -}}{{- $n = append $n (printf "%s-scanner-adapter" $full) -}}{{- end -}}
+{{- if .Values.dependencyTrack.enabled -}}{{- $n = append $n (printf "%s-dtrack" $full) -}}{{- end -}}
+{{- if .Values.postgres.enabled -}}{{- $n = append $n (printf "%s-postgres" $full) -}}{{- else if .Values.externalDatabase.host -}}{{- $n = append $n .Values.externalDatabase.host -}}{{- end -}}
+{{- join "," $n -}}
+{{- end -}}
+
+{{/*
+Proxy env for a container. Effective proxy = component .proxy over global.proxy;
+emits nothing unless an http/https proxy resolves. proxy.enabled: false opts a
+component out even when global.proxy is set: with proxy-only egress that leaves
+it no route out of the cluster (in-cluster + DNS still work via NO_PROXY). Emits
+upper- and lower-case forms. NO_PROXY = noProxyDefaults + resolved noProxy.
+Call: include "artifact-keeper.proxyEnv" (dict "proxy" .Values.<component>.proxy "ctx" $)
+*/}}
+{{- define "artifact-keeper.proxyEnv" -}}
+{{- $svc := .proxy | default dict -}}
+{{- $global := dict -}}
+{{- if .ctx.Values.global -}}{{- $global = .ctx.Values.global.proxy | default dict -}}{{- end -}}
+{{- if ne (toString $svc.enabled) "false" -}}
+{{- $httpProxy := or $svc.httpProxy $global.httpProxy -}}
+{{- $httpsProxy := or $svc.httpsProxy $global.httpsProxy -}}
+{{- if or $httpProxy $httpsProxy -}}
+{{- if $httpProxy }}
+- name: HTTP_PROXY
+  value: {{ $httpProxy | quote }}
+- name: http_proxy
+  value: {{ $httpProxy | quote }}
+{{- end }}
+{{- if $httpsProxy }}
+- name: HTTPS_PROXY
+  value: {{ $httpsProxy | quote }}
+- name: https_proxy
+  value: {{ $httpsProxy | quote }}
+{{- end }}
+{{- $noProxy := include "artifact-keeper.noProxyDefaults" .ctx -}}
+{{- $extra := or $svc.noProxy $global.noProxy -}}
+{{- with $extra }}{{- $noProxy = printf "%s,%s" $noProxy . -}}{{- end }}
+- name: NO_PROXY
+  value: {{ $noProxy | quote }}
+- name: no_proxy
+  value: {{ $noProxy | quote }}
+{{- end -}}
+{{- end -}}
+{{- end -}}

@@ -344,6 +344,34 @@ An empty preset falls back to small; any other value fails the render.
 {{- end -}}
 
 {{/*
+Renders the body of a Deployment's .spec.strategy from a component's `strategy`
+value. Call with a dict of the value and the values-path it came from (the path
+is only used to make a validation failure point at the right key):
+
+  {{- include "artifact-keeper.deploymentStrategy" (dict "strategy" .Values.backend.strategy "path" "backend.strategy") | nindent 4 }}
+
+An unset or empty value renders `type: Recreate`, which is what every
+PVC-backed component in this chart shipped hardcoded before the value existed.
+`rollingUpdate` is passed through verbatim but only when the type is actually
+RollingUpdate -- the Deployment API rejects a rollingUpdate block under
+`type: Recreate`.
+*/}}
+{{- define "artifact-keeper.deploymentStrategy" -}}
+{{- $strategy := .strategy | default dict -}}
+{{- $type := $strategy.type | default "Recreate" -}}
+{{- if not (has $type (list "Recreate" "RollingUpdate")) -}}
+{{- fail (printf "%s.type=%q is not valid; use \"Recreate\" or \"RollingUpdate\"" .path $type) -}}
+{{- end -}}
+type: {{ $type }}
+{{- if eq $type "RollingUpdate" }}
+{{- with $strategy.rollingUpdate }}
+rollingUpdate:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
 Backend replica count. Zero when hibernated, the preset count in fleet mode,
 otherwise the per-component value.
 */}}

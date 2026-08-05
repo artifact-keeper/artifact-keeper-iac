@@ -20,7 +20,7 @@ spec:
   replicas: {{ include "artifact-keeper.backend.replicaCount" . }}
   {{- end }}
   strategy:
-    type: Recreate
+    {{- include "artifact-keeper.deploymentStrategy" (dict "strategy" .Values.backend.strategy "path" "backend.strategy") | nindent 4 }}
   selector:
     matchLabels:
       {{- include "artifact-keeper.backend.selectorLabels" . | nindent 6 }}
@@ -371,7 +371,7 @@ spec:
             - name: storage
               mountPath: /data/plugins
               subPath: plugins
-            {{- if .Values.backend.scanWorkspace.enabled }}
+            {{- if or .Values.backend.scanWorkspace.enabled .Values.trivy.enabled }}
             - name: scan-workspace
               mountPath: /scan-workspace
             {{- end }}
@@ -392,10 +392,22 @@ spec:
           emptyDir:
             sizeLimit: 10Gi
           {{- end }}
-        {{- if .Values.backend.scanWorkspace.enabled }}
+        {{- if or .Values.backend.scanWorkspace.enabled .Values.trivy.enabled }}
         - name: scan-workspace
+          {{- if .Values.backend.scanWorkspace.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-scan-workspace
+          {{- else }}
+          {{- /* Trivy is enabled, so SCAN_WORKSPACE_PATH=/scan-workspace is in
+                 the env above, but no PVC was requested. The container root
+                 filesystem is read-only, so without a volume here every scan
+                 fails on EROFS. Give each pod its own scratch dir instead --
+                 the workspace only holds per-scan temp files, and per-pod
+                 scratch is what lets the backend run more than one replica
+                 (an RWO PVC pins every replica to one node). */}}
+          emptyDir:
+            sizeLimit: {{ .Values.backend.scanWorkspace.size }}
+          {{- end }}
         {{- end }}
         {{- if .Values.dependencyTrack.enabled }}
         - name: shared-config

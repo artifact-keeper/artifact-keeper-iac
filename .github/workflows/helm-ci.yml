@@ -281,7 +281,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install PyYAML
-        run: pip install --disable-pip-version-check pyyaml
+        # --only-binary avoids executing a source-distribution setup script,
+        # --require-hashes pins the resolved artifact. See requirements.txt.
+        run: |
+          pip install --disable-pip-version-check \
+            --only-binary :all: \
+            --require-hashes \
+            -r .github/scripts/requirements.txt
 
       - name: Check image pins against latest published releases
         env:

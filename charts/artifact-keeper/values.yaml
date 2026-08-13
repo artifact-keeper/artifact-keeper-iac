@@ -129,7 +129,7 @@ backend:
     # tagged chart release to drive the image tag. ArgoCD Image Updater pins
     # tags to a digest automatically. For a floating tag such as "dev", set
     # pullPolicy: Always so restarts pick up new builds.
-    tag: "1.6.0"
+    tag: "1.7.1"
     pullPolicy: Always
   # -- Pod-level securityContext. Defaults are image-native: the backend
   # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
@@ -412,7 +412,11 @@ web:
     # empty ("") to fall back to the chart's appVersion (see backend.image.tag).
     # Note the appVersion tracks the backend generation, so an empty web tag can
     # resolve to a version the web image has not published; pin it here instead.
-    tag: "1.5.8"
+    # Concretely: appVersion is currently 1.7.1 and no web 1.7.1 image exists
+    # (web publishes 1.7.0 and 1.8.0), so clearing this tag WILL fail to pull.
+    # Because the two components version independently, expect the appVersion
+    # fallback to be unusable for web most of the time -- keep this pinned.
+    tag: "1.8.0"
     pullPolicy: Always
   podSecurityContext:
     runAsNonRoot: true

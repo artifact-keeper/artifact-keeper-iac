@@ -1,0 +1,16 @@
+# Dependencies for .github/scripts/*.py
+#
+# Version-pinned and hash-verified so CI installs a known artifact rather than
+# whatever the index resolves to at run time. Install with:
+#
+#   pip install --only-binary :all: --require-hashes -r .github/scripts/requirements.txt
+#
+# Hashes cover both linux arches and both interpreter ABIs that can appear:
+# pull_request runs use ubuntu-latest, push runs use the self-hosted
+# ak-ci-runners pool. pip verifies the file it actually selects against this
+# list, so listing extras is harmless.
+pyyaml==6.0.3 \
+    --hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28 \
+    --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \
+    --hash=sha256:ee2922902c45ae8ccada2c5b501ab86c36525b883eff4255313a253a3160861c \
+    --hash=sha256:0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6

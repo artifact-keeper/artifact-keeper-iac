@@ -5,8 +5,12 @@ chart repository on every push to `main` that bumps the chart version.
 
 ## TL;DR
 
-1. Bump `version` and `appVersion` in `charts/artifact-keeper/Chart.yaml`
-   to the same value (e.g. `1.2.0`).
+1. Bump `version` in `charts/artifact-keeper/Chart.yaml`, and repoint the
+   image pins to the components' latest published releases: set
+   `backend.image.tag` and `web.image.tag` in both `values.yaml` and
+   `values-production.yaml`, and set `appVersion` to the backend's version.
+   The chart `version` is independent of the application version (see
+   "Image pins" below).
 2. Open a PR. The `helm-ci` workflow renders the chart and verifies that
    every image reference resolves on its registry.
 3. Merge to `main`. The `helm-release` workflow tags the chart, packages
@@ -33,7 +37,8 @@ means:
   for backend, web, and edge, so day-to-day dev work tracks the floating
   `dev` build rather than a fixed release.
 - `values-staging.yaml` keeps `dev` and `values-production.yaml` pins the
-  release version (currently `1.2.0`) by overriding `image.tag` explicitly.
+  release versions by overriding `image.tag` explicitly. Because it pins its
+  own tags it does **not** inherit a fix to `values.yaml` — repoint both.
 - Edge keeps an explicit `dev` tag everywhere on purpose: no
   `artifact-keeper-edge` image is published at the chart's `appVersion`
   yet, so letting edge inherit `appVersion` would reference a missing
@@ -44,6 +49,33 @@ version. They stay in lockstep because the version-check job blocks the
 release if `Chart.yaml` is not bumped, and the image-reference gate
 (`helm-ci.yml`) blocks the merge if the rendered image tag does not
 exist on the registry.
+
+## Image pins
+
+The backend and web images release on independent cadences, so each pins
+its own tag and neither is derived from the chart `version`. Two gates in
+`helm-ci.yml` cover the two ways a pin goes wrong:
+
+| Gate | Question it answers | Failure it catches |
+|---|---|---|
+| `verify-image-references` | Does the pinned tag exist on the registry? | Pin to an unbuilt tag — breaks at pull time |
+| `image-tag-drift` | Is the pinned tag the current release? | Pin resolves fine but deploys old software |
+
+`image-tag-drift` compares `backend.image.tag`, `web.image.tag`, and
+`appVersion` against each component's latest published GitHub release. It
+covers `values.yaml` and `values-production.yaml`; files that pin a
+floating tag (`values-staging.yaml`, `values-mesh-*.yaml`) or leave the tag
+to the caller (`values-smoke.yaml`) are skipped automatically.
+
+Run it locally before opening a release PR:
+
+```bash
+pip install pyyaml
+python3 .github/scripts/check-image-tag-drift.py
+```
+
+If the chart is deliberately held back a cycle, label the PR
+`image-drift-ack` to skip the gate.
 
 ## Step-by-step
 
@@ -68,14 +100,16 @@ for that workflow to succeed.
 
 ```yaml
 # charts/artifact-keeper/Chart.yaml
-version: 1.2.0      # chart version
-appVersion: "1.2.0" # application version (drives default image tag)
+version: 1.9.7      # chart version, bumped on every chart change
+appVersion: "1.7.1" # application version; tracks the backend release
 ```
 
-Both fields should be the same number for normal application releases.
-If you ship a chart-only fix (template change, no app change), bump
-`version` only and leave `appVersion` pinned to the application release
-the templates target.
+These two fields are independent. `version` is the chart's own version and
+is bumped on every chart change. `appVersion` names the application
+generation the chart ships and tracks the **backend** release, so it moves
+only when you repoint to a new backend. If you ship a chart-only fix
+(template change, no app change), bump `version` only and leave
+`appVersion` pinned to the application release the templates target.
 
 ### 3. Open a PR and let CI verify
 
@@ -86,6 +120,9 @@ The `helm-ci` workflow on PRs runs:
 - `verify-image-references`: for every overlay, render the chart and
   probe each rendered image reference against its registry. Fails if any
   tag returns 404.
+- `image-tag-drift`: compares the backend/web pins and `appVersion`
+  against each component's latest published release. Fails if the chart
+  would deploy an older release than the one that shipped.
 
 If the image-reference job fails, you bumped the chart before the image
 shipped. Either wait, or revert.

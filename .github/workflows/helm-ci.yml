@@ -256,6 +256,44 @@ jobs:
             echo "Chart version bumped: $MAIN_VERSION -> $PR_VERSION"
           fi
 
+  image-tag-drift:
+    name: Image Tag Drift Check
+    # Complements verify-image-references above. That job asks "does the pinned
+    # tag exist on the registry?"; this one asks "is the pinned tag the current
+    # release?". The chart pins each component to its latest published release
+    # (see the IMAGE TAGS note in values.yaml), but nothing enforced it, so the
+    # pins fell two to three minors behind across several chart releases (#301).
+    #
+    # Escape hatch: label the PR `image-drift-ack` to skip, for the case where
+    # the chart is deliberately held back a cycle.
+    if: >-
+      !contains(github.event.pull_request.labels.*.name, 'image-drift-ack')
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        # --only-binary avoids executing a source-distribution setup script,
+        # --require-hashes pins the resolved artifact. See requirements.txt.
+        run: |
+          pip install --disable-pip-version-check \
+            --only-binary :all: \
+            --require-hashes \
+            -r .github/scripts/requirements.txt
+
+      - name: Check image pins against latest published releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/check-image-tag-drift.py
+
   install-test:
     name: Install Test (k3d)
     # Runs on the ak-beefy-runners ARC scale set (8 CPU / 16 Gi limit) so the

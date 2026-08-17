@@ -528,3 +528,59 @@ only the keys present there take effect, the rest stay component-aware.
 {{- end -}}
 {{- (dict "quota" $quota "limitRange" $spec.limitRange) | toYaml -}}
 {{- end -}}
+
+{{/*
+The native package-format path prefixes that route to the backend, as a
+space-separated string. Consumed by both the Ingress (ingress.yaml) and the
+OpenShift Routes (route.yaml) via `splitList " " (trim ...)`, so the two never
+drift out of sync. Does NOT include /api, /v2, /health, or /ready — those carry
+their own pathType/handling in each template.
+*/}}
+{{- define "artifact-keeper.backendFormatPaths" -}}
+/maven /npm /pypi /nuget /cargo /gems /go /helm /debian /rpm /alpine /composer /conan /conda /swift /terraform /cocoapods /hex /pub /lfs /ivy /chef /puppet /ansible /cran /huggingface /jetbrains /vscode /proto /incus /ext
+{{- end -}}
+
+{{/*
+Render one OpenShift Route. An OpenShift Route targets a single Service, so the
+single-host/many-paths Ingress is expressed as one Route per path; the HAProxy
+router does longest-path-prefix matching, so specific backend paths win over the
+"/" web catch-all. Call with a dict:
+  root        - the top-level "." (for labels)
+  name        - metadata.name
+  host        - shared external hostname (may be empty to let the router assign)
+  path        - spec.path prefix
+  service     - target Service name
+  targetPort  - service port name or number
+  annotations - route annotations map
+  tls         - .Values.route.tls (enabled/termination/insecureEdgeTerminationPolicy)
+*/}}
+{{- define "artifact-keeper.routeObject" -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "artifact-keeper.labels" .root | nindent 4 }}
+    app.kubernetes.io/component: route
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .host }}
+  host: {{ .host }}
+  {{- end }}
+  path: {{ .path }}
+  to:
+    kind: Service
+    name: {{ .service }}
+    weight: 100
+  port:
+    targetPort: {{ .targetPort }}
+  {{- if .tls.enabled }}
+  tls:
+    termination: {{ .tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .tls.insecureEdgeTerminationPolicy }}
+  {{- end }}
+  wildcardPolicy: None
+{{- end -}}

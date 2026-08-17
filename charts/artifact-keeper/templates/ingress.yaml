@@ -89,7 +89,7 @@ spec:
           # Native package format handlers — route directly to backend
           {{- $backendSvc := printf "%s-backend" (include "artifact-keeper.fullname" .) }}
           {{- $backendPort := .Values.backend.service.httpPort }}
-          {{- range list "/maven" "/npm" "/pypi" "/nuget" "/cargo" "/gems" "/go" "/helm" "/debian" "/rpm" "/alpine" "/composer" "/conan" "/conda" "/swift" "/terraform" "/cocoapods" "/hex" "/pub" "/lfs" "/ivy" "/chef" "/puppet" "/ansible" "/cran" "/huggingface" "/jetbrains" "/vscode" "/proto" "/incus" "/ext" }}
+          {{- range (splitList " " (trim (include "artifact-keeper.backendFormatPaths" .))) }}
           - path: {{ . }}
             pathType: Prefix
             backend:

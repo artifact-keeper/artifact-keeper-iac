@@ -45,10 +45,22 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /*
+        Pod securityContext is values-driven so an OpenShift overlay can blank
+        runAsUser/fsGroup and let the restricted-v2 SCC assign an arbitrary
+        UID. The default keeps the postgres image's own uid/gid 70 for plain
+        Kubernetes. The client tools only write to HOME=/tmp (an emptyDir), so
+        they run fine under any UID.
+      */}}
+      {{- with .Values.fleet.externalDatabaseBootstrap.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 70
         fsGroup: 70
+      {{- end }}
       containers:
         - name: db-bootstrap
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"

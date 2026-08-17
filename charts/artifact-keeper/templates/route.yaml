@@ -1,0 +1,47 @@
+{{/*
+=============================================================================
+OpenShift Route (alternative to Ingress)
+=============================================================================
+Renders only when route.enabled is set, which is the OpenShift path: the
+platform's HAProxy router serves Routes rather than a Kubernetes Ingress
+controller. Mutually exclusive with ingress.enabled in practice; enabling both
+would publish the same hostname twice.
+
+The Ingress puts every path on one host and fans them out to the backend, web,
+and (optionally) Dependency-Track services. A Route targets a single Service,
+so that fan-out becomes one Route per path prefix, all sharing route.host. The
+router matches the longest path prefix, so the specific backend/dtrack paths
+win over the "/" web catch-all.
+
+This file is a starting point; review it against your cluster's router,
+certificate, and hostname policies before production use.
+=============================================================================
+*/}}
+{{- if .Values.route.enabled }}
+{{- $fullName := include "artifact-keeper.fullname" . -}}
+{{- $host := default (include "artifact-keeper.ingressHost" .) .Values.route.host -}}
+{{- $common := dict "root" . "host" $host "annotations" (default dict .Values.route.annotations) "tls" .Values.route.tls -}}
+{{- $backendPaths := concat (list "/api" "/v2" "/health" "/ready") (splitList " " (trim (include "artifact-keeper.backendFormatPaths" .))) -}}
+{{- range $path := $backendPaths }}
+---
+{{ include "artifact-keeper.routeObject" (merge (dict
+    "name" (printf "%s-route-%s" $fullName (trimPrefix "/" $path))
+    "path" $path
+    "service" (printf "%s-backend" $fullName)
+    "targetPort" "http") $common) }}
+{{- end }}
+{{- if and .Values.dependencyTrack.enabled .Values.route.dtrack.enabled }}
+---
+{{ include "artifact-keeper.routeObject" (merge (dict
+    "name" (printf "%s-route-dtrack" $fullName)
+    "path" "/dtrack"
+    "service" (printf "%s-dtrack" $fullName)
+    "targetPort" 8080) $common) }}
+{{- end }}
+---
+{{ include "artifact-keeper.routeObject" (merge (dict
+    "name" (printf "%s-route-web" $fullName)
+    "path" "/"
+    "service" (printf "%s-web" $fullName)
+    "targetPort" "http") $common) }}
+{{- end }}

@@ -953,6 +953,36 @@ ingress:
     enabled: true
     secretName: artifact-keeper-tls
 
+# -- OpenShift Route configuration
+# Alternative to ingress for OpenShift clusters, whose HAProxy router serves
+# Route objects rather than a Kubernetes Ingress controller. Disabled by
+# default; the OpenShift values overlay (values-openshift.yaml) turns it on and
+# turns ingress off. Do not enable both route and ingress for the same host.
+route:
+  enabled: false
+  # -- External hostname for every Route. Empty falls back to ingress.host
+  # (or fleet.host in fleet mode). Leave empty to let the OpenShift router
+  # assign a generated <name>-<namespace>.<apps-domain> hostname per Route.
+  host: ""
+  # -- Extra annotations applied to every Route (e.g. router timeouts:
+  # haproxy.router.openshift.io/timeout: 300s).
+  annotations: {}
+  tls:
+    # -- Serve the Routes over TLS. edge termination uses the router's default
+    # certificate unless you supply your own via annotations/secret.
+    enabled: true
+    # -- edge | passthrough | reencrypt. edge terminates TLS at the router and
+    # forwards plain HTTP to the services, which matches the in-cluster
+    # ClusterIP services this chart creates.
+    termination: edge
+    # -- What to do with plain-HTTP requests. Redirect sends them to HTTPS.
+    insecureEdgeTerminationPolicy: Redirect
+  dtrack:
+    # -- Publish a /dtrack Route to the bundled Dependency-Track service.
+    # Mirrors ingress.dtrack.enabled; only has effect when
+    # dependencyTrack.enabled is true.
+    enabled: false
+
 # -- Secrets
 # These are development defaults. For production, override via --set or
 # use existingSecret references. Never commit real credentials here.
@@ -1155,6 +1185,12 @@ fleet:
     # -- Name of an existing Secret holding superuser credentials for the shared
     # server, used only by the bootstrap Job. Expected keys: username, password.
     adminSecret: ""
+    # -- Pod securityContext for the bootstrap Job. Empty ({}) keeps the chart
+    # default of runAsUser/fsGroup 70 (the postgres image's uid) for plain
+    # Kubernetes. On OpenShift, set this to omit runAsUser/fsGroup so the
+    # restricted-v2 SCC can assign an arbitrary UID (the OpenShift overlay does
+    # this). The client tools only write to HOME=/tmp, so any UID works.
+    podSecurityContext: {}
   # -- Per-namespace guardrails. Each toggle is independent and off by default.
   # ResourceQuota and LimitRange are sized from the preset; the NetworkPolicy
   # restricts ingress to the named ingress-controller namespace and egress to

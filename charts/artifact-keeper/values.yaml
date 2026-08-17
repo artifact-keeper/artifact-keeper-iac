@@ -392,7 +392,10 @@ backend:
   # for a multi-replica backend, and for `strategy.type: RollingUpdate`
   # below. The workspace only holds per-scan temp files, so nothing is lost
   # when a pod goes away; `size` then counts against the node's
-  # ephemeral-storage.
+  # ephemeral-storage. Raise `resources.limits.ephemeral-storage` (1Gi by
+  # default) to at least `size` when you do this, otherwise the pod is
+  # evicted at the container limit before the emptyDir's own sizeLimit ever
+  # applies.
   scanWorkspace:
     enabled: true
     size: 2Gi

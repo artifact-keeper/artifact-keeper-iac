@@ -220,8 +220,8 @@ Only switch to RollingUpdate when the backend holds no ReadWriteOnce volume: wit
 
 | Volume | Gated by | To free it |
 |--------|----------|------------|
-| `storage` (`/data/storage`, `/data/backups`, `/data/plugins`) | `backend.persistence.enabled` | Keep artifacts in object storage (`STORAGE_BACKEND=s3`) and set it to `false` — each pod then gets an emptyDir for backup/plugin scratch |
-| `scan-workspace` (`/scan-workspace`) | `backend.scanWorkspace.enabled` | Set it to `false` — scanning keeps working, the workspace becomes a per-pod emptyDir of `scanWorkspace.size` |
+| `storage` (`/data/storage`, `/data/backups`, `/data/plugins`) | `backend.persistence.enabled` | Keep artifacts in object storage (`STORAGE_BACKEND=s3`) and set it to `false`, so each pod then gets an emptyDir for backup/plugin scratch |
+| `scan-workspace` (`/scan-workspace`) | `backend.scanWorkspace.enabled` | Set it to `false`. Scanning keeps working, the workspace becomes a per-pod emptyDir of `scanWorkspace.size` |
 | `shared-config` (`/shared`) | `dependencyTrack.enabled` | No option today: the DT bootstrap passes its API key to the backend through this PVC, so DT-enabled installs stay on Recreate |
 
 A zero-downtime rollout also needs at least two replicas, since one pod on its own still disappears while it restarts. Trivy, DependencyTrack, and single-replica OpenSearch keep their hardcoded Recreate regardless: their caches use a single-writer file lock, so two concurrent pods are unsafe whatever the volume's access mode.

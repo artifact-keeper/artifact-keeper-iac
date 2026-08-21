@@ -55,11 +55,11 @@ metadata:
     app.kubernetes.io/component: shared
 spec:
   accessModes:
-    - ReadWriteOnce
+    - {{ .Values.backend.persistence.sharedAccessMode | default "ReadWriteOnce" }}
   resources:
     requests:
       storage: 1Gi
   {{- if .Values.backend.persistence.storageClass }}
-  storageClassName: {{ .Values.backend.persistence.storageClass | quote }}
+  storageClassName: {{ .Values.backend.persistence.sharedStorageClass | default .Values.backend.persistence.storageClass | quote }}
   {{- end }}
 {{- end }}

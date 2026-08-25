@@ -79,6 +79,8 @@ jobs:
     runs-on: ak-ci-runners
     permissions:
       contents: write
+      # Pushing the chart to ghcr.io as an OCI artifact.
+      packages: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -100,3 +102,28 @@ jobs:
           config: .github/cr.yaml
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      # Second, independent distribution channel for the same chart version. The Pages index is a
+      # single point of failure: when its deployment fails the release asset exists and no documented
+      # path can reach it, because a stale index and a current one both answer 200. An OCI reference
+      # also resolves to a digest, which is what lets a consumer pin the chart the way the images are
+      # already pinned.
+      - name: Push chart to ghcr.io as an OCI artifact
+        run: |
+          set -euo pipefail
+          version=$(grep '^version:' charts/artifact-keeper/Chart.yaml | awk '{print $2}')
+          helm package charts/artifact-keeper --destination "$RUNNER_TEMP/chart"
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin
+          helm push \
+            "$RUNNER_TEMP/chart/artifact-keeper-${version}.tgz" \
+            "oci://ghcr.io/${{ github.repository_owner }}/charts"
+          # The push is not the assertion: a tag that failed to publish and one that published are both
+          # silent here, so pull the version back by name before calling the release distributed.
+          helm show chart "oci://ghcr.io/${{ github.repository_owner }}/charts/artifact-keeper" \
+            --version "$version" > /dev/null
+          echo "chart $version is resolvable at oci://ghcr.io/${{ github.repository_owner }}/charts/artifact-keeper"
+        env:
+          # Passed as an environment variable rather than interpolated into the script body, so the
+          # token never becomes part of the shell command line.
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}

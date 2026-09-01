@@ -87,6 +87,9 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.dependencyTrack.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
             - name: ALPINE_DATABASE_MODE
               value: "external"
             - name: ALPINE_DATABASE_URL

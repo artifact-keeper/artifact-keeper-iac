@@ -1,0 +1,139 @@
+# =============================================================================
+# EXAMPLE CONFIGURATION - Getting Started Template
+# =============================================================================
+# This file is provided as a starting point for deployments. It should be
+# reviewed and modified to match your specific infrastructure requirements,
+# security policies, and operational needs before use in production.
+# =============================================================================
+
+# OpenShift overlay.
+#
+# Install with:
+#   helm install ak charts/artifact-keeper \
+#     -f charts/artifact-keeper/values-openshift.yaml
+#
+# What this overlay does:
+#   1. Serves the app through OpenShift Routes instead of a Kubernetes Ingress.
+#   2. Removes every hardcoded runAsUser/fsGroup so the default `restricted-v2`
+#      SCC can assign an arbitrary UID (always a member of GID 0). Setting a key
+#      to null deletes it from the base values (Helm 3 coalesce semantics), so
+#      only runAsNonRoot is left behind.
+#   3. Drops the OpenSearch root chown init container, relying on the
+#      platform-assigned fsGroup to make the data volume group-writable.
+#
+# The application tier (backend, web, edge, trivy, scanner-adapter,
+# Dependency-Track) uses UBI / arbitrary-UID-friendly images and runs cleanly
+# under restricted-v2 with the settings below. The two BUNDLED STATEFUL
+# services need attention before a strict cluster will run them; see the
+# postgres and opensearch notes further down.
+
+# --- Networking: Routes, not Ingress -----------------------------------------
+ingress:
+  enabled: false
+
+route:
+  enabled: true
+  # Empty host lets the OpenShift router generate a hostname per Route. Set this
+  # to your apps-domain hostname (e.g. artifacts.apps.<cluster>.example.com) to
+  # pin it, and add the matching Route/edge certificate via route.annotations.
+  host: ""
+  tls:
+    enabled: true
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  # Publish Dependency-Track only if you front it with your own auth.
+  dtrack:
+    enabled: false
+
+# --- Storage -----------------------------------------------------------------
+global:
+  # Empty uses the cluster's default StorageClass. On OpenShift Data Foundation
+  # that is typically ocs-storagecluster-ceph-rbd (block) or -cephfs (file).
+  # Set explicitly if the default is not what you want for the PVCs below.
+  storageClass: ""
+
+# --- Object storage: point the backend at ODF / NooBaa (optional) ------------
+# OpenShift Data Foundation exposes an S3-compatible endpoint (NooBaa / RGW).
+# The backend's S3 storage backend is fully endpoint-configurable, so no code
+# change is needed. To use it, create an ObjectBucketClaim, then uncomment and
+# fill in the following (credentials come from the OBC's generated Secret):
+#
+# backend:
+#   env:
+#     STORAGE_BACKEND: "s3"
+#     S3_ENDPOINT: "https://s3.openshift-storage.svc"   # in-cluster NooBaa svc
+#     S3_BUCKET: "<obc-bucket-name>"
+#     S3_REGION: "us-east-1"
+#   # S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY: wire from the OBC Secret.
+
+# --- Arbitrary-UID security contexts -----------------------------------------
+# runAsUser/fsGroup set to null so restricted-v2 assigns them; runAsNonRoot
+# (from base values) stays, which the SCC also requires.
+backend:
+  podSecurityContext:
+    runAsUser: null
+    fsGroup: null
+
+web:
+  podSecurityContext:
+    runAsUser: null
+    fsGroup: null
+
+edge:
+  podSecurityContext:
+    runAsUser: null
+    fsGroup: null
+
+trivy:
+  podSecurityContext:
+    runAsUser: null
+    fsGroup: null
+
+scannerAdapter:
+  podSecurityContext:
+    runAsUser: null
+    fsGroup: null
+
+dependencyTrack:
+  podSecurityContext:
+    runAsUser: null
+    fsGroup: null
+  bootstrap:
+    podSecurityContext:
+      runAsUser: null
+      fsGroup: null
+
+opensearch:
+  podSecurityContext:
+    runAsUser: null
+    fsGroup: null
+  # The opensearchproject image is arbitrary-UID friendly; the root chown init
+  # is both unnecessary and disallowed under restricted-v2 (it runs as UID 0).
+  # Disabling it lets the platform-assigned fsGroup own the data volume instead.
+  fixOwnership:
+    enabled: false
+
+fleet:
+  externalDatabaseBootstrap:
+    # Non-empty map with no runAsUser/fsGroup overrides the template default of
+    # uid/gid 70 so the SCC assigns a UID. The client tools only write to /tmp.
+    podSecurityContext:
+      runAsNonRoot: true
+
+# --- Bundled stateful services: read before enabling on a strict cluster -----
+# postgres:16-alpine (the docker-official image) runs initdb as a fixed UID and
+# will NOT come up under a fully random restricted-v2 UID: initdb refuses a data
+# directory it does not own. Choose one before deploying:
+#   (a) RECOMMENDED: use an external/managed PostgreSQL and set postgres.enabled
+#       false with the externalDatabase.* values (or a Postgres operator such as
+#       CloudNativePG / Crunchy).
+#   (b) Swap postgres.image for a UID-agnostic image (e.g. Red Hat
+#       rhel9/postgresql-16); note its data path and env vars differ from the
+#       docker-official image, so the statefulset template needs matching edits.
+#   (c) Grant the postgres ServiceAccount a UID-pinning SCC (nonroot-v2/anyuid).
+# The null overrides below are correct for options (b) and (c); they are inert
+# under (a) because the bundled postgres is not deployed.
+postgres:
+  podSecurityContext:
+    runAsUser: null
+    fsGroup: null

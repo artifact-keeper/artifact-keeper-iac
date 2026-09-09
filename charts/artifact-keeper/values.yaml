@@ -136,7 +136,7 @@ backend:
     # tagged chart release to drive the image tag. ArgoCD Image Updater pins
     # tags to a digest automatically. For a floating tag such as "dev", set
     # pullPolicy: Always so restarts pick up new builds.
-    tag: "1.7.1"
+    tag: "1.9.0"
     pullPolicy: Always
   # -- Pod-level securityContext. Defaults are image-native: the backend
   # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
@@ -464,8 +464,8 @@ web:
     # empty ("") to fall back to the chart's appVersion (see backend.image.tag).
     # Note the appVersion tracks the backend generation, so an empty web tag can
     # resolve to a version the web image has not published; pin it here instead.
-    # Concretely: appVersion is currently 1.7.1 and no web 1.7.1 image exists
-    # (web publishes 1.7.0 and 1.8.0), so clearing this tag WILL fail to pull.
+    # Concretely: appVersion is currently 1.9.0 and no web 1.9.0 image exists
+    # (web's latest release is 1.8.0), so clearing this tag WILL fail to pull.
     # Because the two components version independently, expect the appVersion
     # fallback to be unusable for web most of the time -- keep this pinned.
     tag: "1.8.0"
@@ -824,12 +824,16 @@ scannerAdapter:
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter
     # -- The scanner-adapter is versioned independently of the AK
-    # backend/web/edge images (major-only tags `1`/`1.0`/`latest`; there is no
-    # `scanner-adapter:<appVersion>`). Pin to the adapter's major tag `"1"` so
-    # the chart is decoupled from appVersion. The deployment renders the tag as
-    # `tag | default .Chart.AppVersion`, so leaving this empty ("") would fall
-    # back to appVersion and pull a non-existent tag — keep it pinned.
-    tag: "1"
+    # backend/web/edge images (its own `1.2.x` line; there is no
+    # `scanner-adapter:<appVersion>`). Pin the exact adapter release that the
+    # pinned backend release ships with, so every node runs the same digest:
+    # the floating `1`/`1.2`/`latest` tags move on each adapter release and,
+    # combined with pullPolicy IfNotPresent, would leave nodes on whichever
+    # build they first cached. Repoint this alongside backend.image.tag. The
+    # deployment renders the tag as `tag | default .Chart.AppVersion`, so
+    # leaving this empty ("") would fall back to appVersion and pull a
+    # non-existent tag — keep it pinned.
+    tag: "1.2.10"
     pullPolicy: IfNotPresent
   # -- Extra environment for the adapter. SCANNER_TRIVY_INSECURE defaults to
   # "true" because the adapter reaches the AK registry over the plain-HTTP

@@ -385,6 +385,8 @@ backend:
     enabled: true
     size: 10Gi
     storageClass: ""
+    sharedStorageClass: ""
+    sharedAccessMode: "ReadWriteOnce"
   # -- Scratch space for security scans (SCAN_WORKSPACE_PATH=/scan-workspace,
   # set whenever trivy.enabled). `enabled: true` backs it with a
   # ReadWriteOnce PVC, which pins every backend replica to one node. Set it

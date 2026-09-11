@@ -24,6 +24,9 @@ spec:
     metadata:
       labels:
         {{- include "artifact-keeper.web.selectorLabels" . | nindent 8 }}
+        {{- with .Values.web.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with (.Values.web.tolerations | default .Values.global.tolerations) }}
       tolerations:

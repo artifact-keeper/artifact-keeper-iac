@@ -447,6 +447,12 @@ backend:
   affinity: {}
   nodeSelector: {}
   topologySpreadConstraints: []
+  # -- Extra labels merged onto the backend pod template, in addition to the
+  # chart's own selector labels. Needed for label-driven admission webhooks
+  # such as AKS/GKE Workload Identity, which mutate a pod only when it carries
+  # a specific label (e.g. azure.workload.identity/use: "true") alongside a
+  # matching serviceAccount.annotations entry above.
+  podLabels: {}
   serviceAccount:
     create: true
     annotations: {}
@@ -504,6 +510,8 @@ web:
   affinity: {}
   nodeSelector: {}
   topologySpreadConstraints: []
+  # -- Extra labels merged onto the web pod template. See backend.podLabels.
+  podLabels: {}
 
 # -- Edge replication service
 # NOTE: The ghcr.io/artifact-keeper/artifact-keeper-edge image is not yet

@@ -23,10 +23,10 @@ chart repository on every push to `main` that bumps the chart version.
 tag to `.Chart.AppVersion`:
 
 ```yaml
-image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
+image: {{ include "artifact-keeper.image" (dict "image" .Values.backend.image "defaultTag" .Chart.AppVersion "context" .) | quote }}
 ```
 
-The `default` fires for any component whose `image.tag` is left empty
+The helper's `defaultTag` is used when that component's `image.tag` is left empty
 (`""`), so a value file that omits a tag inherits `appVersion`. This
 means:
 

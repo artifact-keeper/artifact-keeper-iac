@@ -43,6 +43,16 @@ jobs:
       - name: Run helm lint
         run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test
 
+      - name: Install rendering test dependencies
+        run: |
+          pip install --disable-pip-version-check \
+            --only-binary :all: \
+            --require-hashes \
+            -r .github/scripts/requirements.txt
+
+      - name: Test image registry rendering
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -v
+
   template-validation:
     name: "Template & Validate (${{ matrix.variant }})"
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}

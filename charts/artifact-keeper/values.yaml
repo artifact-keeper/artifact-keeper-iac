@@ -68,9 +68,13 @@
 # Default values for artifact-keeper (development profile)
 
 global:
-  # Container registry prefix. Default is ghcr.io.
-  # For Docker Hub, change to: docker.io/artifactkeeper
-  imageRegistry: ghcr.io/artifact-keeper
+  # -- Override the registry for every chart-managed container (including init
+  # containers and hooks). Empty preserves per-image repositories. Use a host
+  # with optional port/path, e.g. registry.example.com:5000/mirror, without a
+  # URL scheme. Replaces source registry hosts, preserves repository paths,
+  # and adds library/ for Docker Hub official images. Does not translate
+  # repository names between registries; see "Container registries" in README.
+  imageRegistry: ""
   imagePullPolicy: Always
   storageClass: standard
   # -- Image pull secrets applied to workloads that honor them (currently the

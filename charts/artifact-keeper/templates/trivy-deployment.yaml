@@ -56,7 +56,7 @@ spec:
         # (and the pinned-cve-gate pre-flight) can fail with an empty DB. Pulling
         # from the configured mirror here makes the DB present on rollout.
         - name: trivy-db-init
-          image: "{{ .Values.trivy.image.repository }}:{{ .Values.trivy.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.trivy.image "context" .) | quote }}
           imagePullPolicy: IfNotPresent
           {{- with .Values.trivy.initContainerSecurityContext }}
           securityContext:
@@ -90,7 +90,7 @@ spec:
       {{- end }}
       containers:
         - name: trivy
-          image: "{{ .Values.trivy.image.repository }}:{{ .Values.trivy.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.trivy.image "context" .) | quote }}
           imagePullPolicy: IfNotPresent
           {{- with .Values.trivy.containerSecurityContext }}
           securityContext:

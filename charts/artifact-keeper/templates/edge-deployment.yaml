@@ -48,7 +48,7 @@ spec:
       {{- end }}
       containers:
         - name: edge
-          image: "{{ .Values.edge.image.repository }}:{{ .Values.edge.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.edge.image "defaultTag" .Chart.AppVersion "context" .) | quote }}
           imagePullPolicy: {{ .Values.edge.image.pullPolicy }}
           {{- with .Values.edge.containerSecurityContext }}
           securityContext:

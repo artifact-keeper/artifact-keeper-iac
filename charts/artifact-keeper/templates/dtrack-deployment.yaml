@@ -51,7 +51,7 @@ spec:
       {{- if .Values.postgres.enabled }}
       initContainers:
         - name: wait-for-postgres
-          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.postgres.image "context" .) | quote }}
           {{- with .Values.dependencyTrack.initContainerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -76,7 +76,7 @@ spec:
       {{- end }}
       containers:
         - name: dtrack-api
-          image: "{{ .Values.dependencyTrack.image.repository }}:{{ .Values.dependencyTrack.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.dependencyTrack.image "context" .) | quote }}
           imagePullPolicy: IfNotPresent
           {{- with .Values.dependencyTrack.containerSecurityContext }}
           securityContext:
@@ -382,7 +382,7 @@ spec:
           # runtime, so this works on clusters with no egress to a package
           # mirror. Override dependencyTrack.bootstrap.image to point at your
           # own registry in an air-gapped environment.
-          image: "{{ .Values.dependencyTrack.bootstrap.image.repository }}:{{ .Values.dependencyTrack.bootstrap.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.dependencyTrack.bootstrap.image "context" .) | quote }}
           imagePullPolicy: {{ .Values.dependencyTrack.bootstrap.image.pullPolicy | default "IfNotPresent" }}
           {{- with .Values.dependencyTrack.bootstrap.containerSecurityContext }}
           securityContext:

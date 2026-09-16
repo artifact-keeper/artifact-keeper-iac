@@ -30,6 +30,7 @@ tests/
 *.tmp
 *.bak
 *.orig
+tests/
 
 # Internal build-infra and CI-only values overlays.
 # These are not customer configuration and must not ship inside the packaged

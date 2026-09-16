@@ -58,7 +58,39 @@ jobs:
         run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test
 
       - name: Test image registry rendering
-        run: python3 -m unittest discover -s charts/artifact-keeper/tests -v
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_image_registry.py' -v
+
+  httproute-tests:
+    name: HTTPRoute Render Tests (Gateway API ${{ matrix.gateway-api }})
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    strategy:
+      matrix:
+        gateway-api: [v1.0.0, v1.4.1]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v3.16.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
+        with:
+          python-version: "3.12"
+      - name: Install render validation tools
+        run: |
+          pip install --disable-pip-version-check --only-binary :all: \
+            --require-hashes -r .github/scripts/requirements.txt
+          mkdir -p tmp
+          curl -fsSL --proto =https \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C tmp kubeconform
+          curl -fsSL --proto =https \
+            https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/${{ matrix.gateway-api }}/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml \
+            -o tmp/httproute-crd.yaml
+      - name: Assert routing and validate against official Gateway API schema
+        env:
+          KUBECONFORM: ./tmp/kubeconform
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_httproute.py' -v
 
   template-validation:
     name: "Template & Validate (${{ matrix.variant }})"

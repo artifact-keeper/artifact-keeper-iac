@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "httpRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "parentRefs", "hostnames", "labels", "annotations", "dtrack", "networkPolicy"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "parentRefs": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "group": {"const": "gateway.networking.k8s.io"},
+              "kind": {"const": "Gateway"},
+              "name": {"$ref": "#/definitions/dnsSubdomain"},
+              "namespace": {"$ref": "#/definitions/namespace"},
+              "sectionName": {"$ref": "#/definitions/dnsSubdomain"},
+              "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+            }
+          }
+        },
+        "hostnames": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "pattern": "^(\\*\\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+            "not": {"pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"}
+          }
+        },
+        "labels": {"$ref": "#/definitions/labels"},
+        "annotations": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/definitions/labelKey"},
+          "additionalProperties": {"type": "string"}
+        },
+        "dtrack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "corsAllowOrigin"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "corsAllowOrigin": {"type": "string", "minLength": 1}
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["namespace", "podSelector"],
+          "properties": {
+            "namespace": {
+              "anyOf": [{"const": ""}, {"$ref": "#/definitions/namespace"}]
+            },
+            "podSelector": {"$ref": "#/definitions/labels"}
+          }
+        }
+      },
+      "if": {"properties": {"enabled": {"const": true}}},
+      "then": {
+        "properties": {
+          "parentRefs": {"minItems": 1},
+          "hostnames": {"minItems": 1}
+        }
+      }
+    }
+  },
+  "definitions": {
+    "dnsSubdomain": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+    },
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "labelKey": {
+      "type": "string",
+      "maxLength": 317,
+      "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+    },
+    "labels": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/definitions/labelKey"},
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 63,
+        "pattern": "^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$"
+      }
+    }
+  }
+}

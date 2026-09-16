@@ -253,6 +253,90 @@ ingress:
     cert-manager.io/cluster-issuer: letsencrypt-prod
 ```
 
+## Gateway API HTTPRoute
+
+To use an existing Gateway instead of an Ingress, install the Gateway API
+Standard CRDs (v1 HTTPRoute, tested against v1.0.0 and v1.4.1) and a compatible
+controller first, then configure:
+
+```yaml
+ingress:
+  enabled: false
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: shared-gateway
+      namespace: networking
+      sectionName: https
+  hostnames:
+    - registry.example.com
+  labels: {}
+  annotations: {}
+  networkPolicy:
+    namespace: gateway-system
+    podSelector:
+      app.kubernetes.io/name: envoy
+```
+
+The chart creates only an HTTPRoute, not a Gateway, GatewayClass, listener,
+certificate, or TLS Secret. `parentRefs[].namespace` defaults to the release
+namespace; `sectionName` and `port` are optional listener selectors. The
+Gateway's listener must allow routes from the release namespace through
+`allowedRoutes`. A cross-namespace Gateway reference does not itself require a
+ReferenceGrant; all backend Service references remain in the release namespace.
+Inspect the route's `Accepted` and `ResolvedRefs` conditions after deployment.
+Helm rendering deliberately does not require live cluster discovery.
+
+TLS termination and `certificateRefs` belong to the existing Gateway listener.
+`ingress.tls`, nginx upload/timeout settings, and Ingress annotations do not
+apply to HTTPRoute. Configure upload limits, timeouts, redirects, and any
+controller-specific policies on your Gateway/controller as appropriate.
+Both exposure modes are optional, but enabling them simultaneously fails the
+render. HTTPRoute requires `backend.enabled: true`, non-empty `parentRefs`,
+and explicit `hostnames` (including wildcard hostnames if desired); it does not
+inherit `ingress.host` or `fleet.host`. With `web.enabled: false`, the `/`
+catch-all is omitted, leaving only backend and explicitly enabled DT routes.
+
+Ingress and HTTPRoute share the backend path inventory: `/api`, `/v2`, and all
+current native package prefixes, plus exact `/health` and `/ready` matches.
+`/metrics` is not routed to the backend publicly. HTTPRoute splits this inventory
+into rules of at most eight matches to also satisfy the older v1.0.0 schema
+(newer CRDs allow 64), with the optional `/dtrack` route and the frontend `/`
+catch-all in separate rules.
+Gateway API's most-specific match precedence keeps the catch-all from shadowing
+package routes.
+
+Dependency-Track exposure is a separate opt-in:
+`httpRoute.dtrack.enabled: true` requires `dependencyTrack.enabled: true` and
+routes `/dtrack` to the bundled service on port 8080. As with the existing
+Ingress, this is pass-through: no prefix rewriting or Dependency-Track context
+path/frontend configuration is supplied. Ensure your Dependency-Track setup
+supports the public path; use port-forwarding for its native root API otherwise.
+Protect public DT access with authentication you control.
+`httpRoute.dtrack.corsAllowOrigin` configures its CORS origin when exposed.
+
+### Gateway proxy NetworkPolicy access
+
+Chart NetworkPolicies are enabled by default and their existing ingress-nginx
+selectors do not admit Gateway proxy pods. When `networkPolicy.enabled` or the
+active fleet guardrail policy is enabled, HTTPRoute therefore requires an
+explicit `httpRoute.networkPolicy.namespace` and non-empty `podSelector` label
+map. These must identify the **data-plane proxy pods**, not the controller's
+management pods; their namespace may differ from the Gateway object's namespace.
+The example labels are illustrative: inspect your controller's actual proxy
+labels before using them.
+
+The chart adds policies allowing only those pods in that namespace to the
+release's backend and enabled web/DT pods on their named `http` port. It does
+not allow all namespaces, arbitrary pods, gRPC, or other supporting services.
+Existing policies and their ingress-nginx access remain unchanged; the broader
+selector redesign in [#306](https://github.com/artifact-keeper/artifact-keeper-iac/issues/306)
+is separate. With both chart policy modes disabled, these additive policies are
+not emitted and operators must supply equivalent access if other policies
+isolate the workloads. Source-side egress policies, host-networked proxies, or
+cloud-managed data planes may also need controller-specific policy configuration.
+Disabling policies is not a substitute for designing appropriate access controls.
+
 ## Security
 
 ### Cosign Image Verification
@@ -367,6 +451,24 @@ helm template ak charts/artifact-keeper/ -f charts/artifact-keeper/values-produc
 helm template ak charts/artifact-keeper/ -f charts/artifact-keeper/values-smoke.yaml \
   --set backend.image.tag=dev --set web.image.tag=dev > /dev/null
 ```
+
+### HTTPRoute Render Regression Tests
+
+The Helm CI workflow runs Python `unittest` render assertions with PyYAML and
+kubeconform v0.6.7. The HTTPRoute is validated against the **official**, pinned
+Gateway API CRD schema, not skipped as an unknown custom resource. To run locally
+with Helm, PyYAML, and kubeconform installed:
+
+```bash
+mkdir -p tmp
+curl -fsSL https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.0.0/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml \
+  -o tmp/httproute-crd.yaml
+python3 -m unittest discover -s charts/artifact-keeper/tests -v
+```
+
+Use `HELM` or `KUBECONFORM` to select alternate tool paths, and
+`GATEWAY_API_CRD` to validate against a different downloaded CRD version.
+These tests render manifests only; they do not contact or install on a cluster.
 
 ## Contributing
 

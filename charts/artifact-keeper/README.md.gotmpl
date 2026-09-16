@@ -81,6 +81,68 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 
 {{ template "chart.valuesSection" . }}
 
+## Encryption Keys in an Existing Secret
+
+If an operator-supplied Secret contains the optional migration and webhook
+encryption keys, opt into their environment references without putting plaintext
+keys or placeholder credentials in Helm values:
+
+```yaml
+secrets:
+  existingSecret: application-credentials
+  migrationEncryptionKeyEnabled: true
+  webhookSecretKeyEnabled: true
+```
+
+The backend reads `MIGRATION_ENCRYPTION_KEY` and `AK_WEBHOOK_SECRET_KEY` from that
+Secret in the release namespace. The chart does not create a Secret or copy
+credential values into the rendered manifests. These references are required:
+if an enabled key is missing, Kubernetes prevents the backend container from
+starting. Both flags default to `false`, so existing Secrets without these
+optional keys keep working. Enable either flag independently.
+
+The flags must be YAML booleans, not strings such as `"false"`. Setting a flag to
+`true` requires `secrets.existingSecret` and `externalSecrets.enabled: false`;
+otherwise rendering fails. They only opt into existing-Secret references:
+`false` does not override a nonempty `secrets.migrationEncryptionKey` or
+`secrets.webhookSecretKey`. Chart-managed Secrets still use those inline values,
+and legacy existing-Secret configurations with nonempty placeholder values still
+work. Replace placeholders with the flags above. With External Secrets Operator,
+continue setting the corresponding `externalSecrets.secrets.*` provider paths
+instead.
+
+For custom key names, a different Secret, or an explicitly optional reference,
+use the existing `backend.environmentSecrets` mechanism instead of the flags:
+
+```yaml
+backend:
+  environmentSecrets:
+    - name: MIGRATION_ENCRYPTION_KEY
+      secretKeyRef:
+        name: encryption-credentials
+        key: migration-key
+    - name: AK_WEBHOOK_SECRET_KEY
+      secretKeyRef:
+        name: encryption-credentials
+        key: webhook-key
+        optional: true
+```
+
+Leave the corresponding inline value empty and flag `false` (or the ESO path
+empty) when using `backend.environmentSecrets`. For these two environment
+variables, multiple definitions across chart secret wiring, `backend.env`, or
+`backend.environmentSecrets` fail rendering; choose one source per variable.
+An `optional: true` reference permits startup without the key but leaves the
+feature unavailable. Helm does not look up the supplied Secret, so these options
+also work with offline `helm template`, ArgoCD, and Flux.
+
+Run the offline regression tests from the repository root with Helm and the
+Python dependencies in `.github/scripts/requirements.txt` installed:
+
+```bash
+python3 .github/scripts/test-encryption-secret-refs.py
+```
+
 ## Deployment Profiles
 
 The chart ships with several values overlay files for common deployment scenarios.

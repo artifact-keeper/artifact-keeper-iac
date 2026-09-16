@@ -54,11 +54,11 @@ spec:
       initContainers:
         {{- if .Values.cosign.enabled }}
         - name: verify-image-signature
-          image: "{{ .Values.cosign.image.repository }}:{{ .Values.cosign.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.cosign.image "context" .) | quote }}
           command: ["cosign", "verify",
             "--certificate-oidc-issuer={{ .Values.cosign.certificateOidcIssuer }}",
             "--certificate-identity-regexp={{ .Values.cosign.certificateIdentityRegexp }}",
-            "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"]
+            {{ include "artifact-keeper.image" (dict "image" .Values.backend.image "defaultTag" .Chart.AppVersion "context" .) | quote }}]
           {{- with .Values.backend.initContainerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -75,7 +75,7 @@ spec:
         {{- end }}
         {{- if .Values.postgres.enabled }}
         - name: wait-for-postgres
-          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.postgres.image "context" .) | quote }}
           {{- with .Values.backend.initContainerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -100,7 +100,7 @@ spec:
         {{- end }}
         {{- if .Values.opensearch.enabled }}
         - name: wait-for-opensearch
-          image: "{{ .Values.backend.waitForOpenSearch.image.repository }}:{{ .Values.backend.waitForOpenSearch.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.backend.waitForOpenSearch.image "context" .) | quote }}
           {{- with .Values.backend.initContainerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -154,7 +154,7 @@ spec:
         {{- end }}
       containers:
         - name: backend
-          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.backend.image "defaultTag" .Chart.AppVersion "context" .) | quote }}
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           {{- with .Values.backend.containerSecurityContext }}
           securityContext:

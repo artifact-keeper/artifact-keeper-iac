@@ -62,7 +62,7 @@ spec:
       initContainers:
         {{- if .Values.opensearch.fixOwnership.enabled }}
         - name: fix-ownership
-          image: "{{ .Values.opensearch.initContainers.image.repository }}:{{ .Values.opensearch.initContainers.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.opensearch.initContainers.image "context" .) | quote }}
           {{- with .Values.opensearch.fixOwnership.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -82,7 +82,7 @@ spec:
               mountPath: /usr/share/opensearch/data
         {{- end }}
         - name: sysctl-check
-          image: "{{ .Values.opensearch.initContainers.image.repository }}:{{ .Values.opensearch.initContainers.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.opensearch.initContainers.image "context" .) | quote }}
           {{- with .Values.opensearch.initContainerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -108,7 +108,7 @@ spec:
               fi
       containers:
         - name: opensearch
-          image: "{{ .Values.opensearch.image.repository }}:{{ .Values.opensearch.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.opensearch.image "context" .) | quote }}
           imagePullPolicy: IfNotPresent
           {{- with .Values.opensearch.containerSecurityContext }}
           securityContext:

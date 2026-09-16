@@ -48,7 +48,7 @@ spec:
       {{- end }}
       containers:
         - name: web
-          image: "{{ .Values.web.image.repository }}:{{ .Values.web.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.web.image "defaultTag" .Chart.AppVersion "context" .) | quote }}
           imagePullPolicy: {{ .Values.web.image.pullPolicy }}
           {{- with .Values.web.containerSecurityContext }}
           securityContext:

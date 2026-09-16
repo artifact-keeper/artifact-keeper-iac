@@ -16,6 +16,52 @@ Expand the name of the chart.
 {{- end }}
 
 {{/*
+Render an image from its image values and the root context.
+An optional defaultTag preserves component-specific appVersion fallbacks.
+*/}}
+{{- define "artifact-keeper.image" -}}
+{{- $repository := required "image.repository must not be empty" .image.repository -}}
+{{- $registry := .context.Values.global.imageRegistry | default "" | trim -}}
+{{- if $registry -}}
+  {{- $registry = regexReplaceAll "/+" (trimAll "/" $registry) "/" -}}
+  {{- $host := first (splitList "/" $registry) -}}
+  {{- $validRegistry := regexMatch `^(\[[0-9a-fA-F:]+\]|[^/:@[:space:]]+)(:[0-9]+)?(/[^/:@[:space:]]+)*$` $registry -}}
+  {{- $qualifiedHost := or (contains "." $host) (contains ":" $host) (eq $host "localhost") -}}
+  {{- if not (and $validRegistry $qualifiedHost) -}}
+    {{- fail "global.imageRegistry must be a registry host (optionally with port and path), without a URL scheme, tag or digest" -}}
+  {{- end -}}
+  {{- $repository = regexReplaceAll "/+" (trimAll "/" (trim $repository)) "/" -}}
+  {{- if not $repository -}}
+    {{- fail "image.repository must not be empty" -}}
+  {{- end -}}
+  {{- /* Repositories already under a destination proxy path must not gain it twice. */ -}}
+  {{- if not (and (contains "/" $registry) (hasPrefix (printf "%s/" $registry) $repository)) -}}
+    {{- $parts := splitList "/" $repository -}}
+    {{- $first := first $parts -}}
+    {{- $dockerHub := true -}}
+    {{- if and (gt (len $parts) 1) (or (contains "." $first) (contains ":" $first) (eq $first "localhost")) -}}
+      {{- $dockerHub = has $first (list "docker.io" "index.docker.io" "registry-1.docker.io") -}}
+      {{- $repository = join "/" (rest $parts) -}}
+    {{- end -}}
+    {{- if and $dockerHub (not (contains "/" $repository)) -}}
+      {{- $repository = printf "library/%s" $repository -}}
+    {{- end -}}
+    {{- $repository = printf "%s/%s" $registry $repository -}}
+  {{- end -}}
+{{- end -}}
+{{- /* A complete reference takes precedence over the separate tag, including tag@digest pins. */ -}}
+{{- if or (contains "@" $repository) (contains ":" (last (splitList "/" $repository))) -}}
+  {{- $repository -}}
+{{- else -}}
+  {{- $tag := get .image "tag" -}}
+  {{- if hasKey . "defaultTag" -}}
+    {{- $tag = $tag | default .defaultTag -}}
+  {{- end -}}
+  {{- printf "%s:%v" $repository $tag -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Create a default fully qualified app name.
 */}}
 {{- define "artifact-keeper.fullname" -}}

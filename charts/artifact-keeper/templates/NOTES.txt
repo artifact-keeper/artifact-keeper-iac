@@ -14,6 +14,18 @@ security policies, and operational needs before use in production.
   URL: {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
 {{- end }}
 
+{{- if .Values.httpRoute.enabled }}
+HTTPRoute: {{ include "artifact-keeper.fullname" . }}
+  Hostnames: {{ join ", " .Values.httpRoute.hostnames }}
+  The referenced Gateway listener controls HTTP/HTTPS and TLS certificates.
+  Check the route's Accepted and ResolvedRefs status and the Gateway's
+  allowedRoutes before sending traffic.
+  {{- if .Values.httpRoute.dtrack.enabled }}
+  /dtrack is publicly routed without rewriting, as with Ingress. Protect it
+  with authentication you control.
+  {{- end }}
+{{- end }}
+
 Backend API:
   kubectl port-forward svc/{{ include "artifact-keeper.fullname" . }}-backend {{ .Values.backend.service.httpPort }}:{{ .Values.backend.service.httpPort }}
 

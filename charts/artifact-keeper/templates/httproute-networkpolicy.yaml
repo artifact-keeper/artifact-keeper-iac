@@ -1,0 +1,38 @@
+{{- if and .Values.httpRoute.enabled (eq (include "artifact-keeper.httpRoute.policyEnabled" .) "true") }}
+{{- include "artifact-keeper.httpRoute.validate" . }}
+{{- $components := list "backend" }}
+{{- if .Values.web.enabled }}
+{{- $components = append $components "web" }}
+{{- end }}
+{{- if .Values.httpRoute.dtrack.enabled }}
+{{- $components = append $components "dependency-track" }}
+{{- end }}
+{{- range $components }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" $ }}-gateway-{{ . }}
+  labels:
+    {{- include "artifact-keeper.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: httproute
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ . }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.httpRoute.networkPolicy.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $.Values.httpRoute.networkPolicy.podSelector | nindent 14 }}
+      ports:
+        - port: http
+          protocol: TCP
+{{- end }}
+{{- end }}

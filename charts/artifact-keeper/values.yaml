@@ -123,6 +123,9 @@ backend:
   # container env var name to a Secret key reference. When an entry names a
   # variable that also appears in `backend.env`, remove the plain-text key
   # (set it to null) so the secret-sourced value is the only definition.
+  # For MIGRATION_ENCRYPTION_KEY and AK_WEBHOOK_SECRET_KEY, also leave the
+  # corresponding secrets.* value empty and *Enabled flag false (or the
+  # externalSecrets.secrets.* path empty); duplicate definitions fail rendering.
   # environmentSecrets:
   #   - name: ADMIN_PASSWORD
   #     secretKeyRef:
@@ -1226,6 +1229,8 @@ secrets:
   # Secret and all workloads read from this Secret instead, so the values under
   # `secrets` and `postgres.auth.password` are not required. Useful for GitOps
   # and secret-manager workflows where the Secret is provisioned out of band.
+  # Optional encryption keys are wired separately using the *Enabled flags
+  # below, or backend.environmentSecrets for custom Secret/key names.
   existingSecret: ""
   jwtSecret: ""
   # S3-compatible object storage credentials. Injected into the backend as
@@ -1240,15 +1245,22 @@ secrets:
   # encrypt source-connection credentials in the migration_jobs table.
   # Without it, POST /api/v1/migrations/connections returns 500. Should
   # be a random 32-byte value (e.g. `openssl rand -hex 32`). Leave empty
-  # to skip the env var entirely (migration features will return 500).
+  # to skip chart-managed injection (migration features will return 500 unless
+  # the env var is supplied separately). With existingSecret, a nonempty value
+  # still enables the reference for compatibility; prefer the *Enabled flag.
   migrationEncryptionKey: ""
+  # -- Inject MIGRATION_ENCRYPTION_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty migrationEncryptionKey.
+  migrationEncryptionKeyEnabled: false
   # Webhook signing-secret encryption key (AK_WEBHOOK_SECRET_KEY) — used by
   # the backend to encrypt webhook signing secrets at rest. Must be a
   # base64-encoded 32-byte value (e.g. `openssl rand -base64 32`). A
-  # malformed value aborts backend startup; leave empty to skip the env var
-  # entirely, in which case webhook create and rotate-secret are disabled
-  # with a startup warning.
+  # malformed value aborts backend startup; leave empty to skip chart-managed
+  # injection. Unless supplied separately, webhook create and rotate-secret
+  # are disabled with a startup warning. With existingSecret, a nonempty value
+  # still enables the reference for compatibility; prefer the *Enabled flag.
   webhookSecretKey: ""
+  # -- Inject AK_WEBHOOK_SECRET_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty webhookSecretKey.
+  webhookSecretKeyEnabled: false
 
 # -- External Secrets Operator
 # When enabled, ExternalSecret CRDs replace the static Secret template.

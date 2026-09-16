@@ -219,20 +219,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "artifact-keeper.secretName" . }}
                   key: JWT_SECRET
-            {{- if or (and .Values.externalSecrets.enabled .Values.externalSecrets.secrets.migrationEncryptionKey) (and (not .Values.externalSecrets.enabled) .Values.secrets.migrationEncryptionKey) }}
-            - name: MIGRATION_ENCRYPTION_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "artifact-keeper.secretName" . }}
-                  key: MIGRATION_ENCRYPTION_KEY
-            {{- end }}
-            {{- if or (and .Values.externalSecrets.enabled .Values.externalSecrets.secrets.webhookSecretKey) (and (not .Values.externalSecrets.enabled) .Values.secrets.webhookSecretKey) }}
-            - name: AK_WEBHOOK_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "artifact-keeper.secretName" . }}
-                  key: AK_WEBHOOK_SECRET_KEY
-            {{- end }}
+            {{- include "artifact-keeper.encryptionKeyEnv" . | nindent 12 }}
             {{- if .Values.opensearch.enabled }}
             - name: OPENSEARCH_URL
               value: "{{ if .Values.opensearch.disableSecurityPlugin }}http{{ else }}https{{ end }}://{{ include "artifact-keeper.fullname" . }}-opensearch:9200"

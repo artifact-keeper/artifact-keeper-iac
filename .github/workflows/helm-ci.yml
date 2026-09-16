@@ -6,11 +6,15 @@ on:
     paths:
       - "charts/**"
       - ".github/workflows/helm-ci.yml"
+      - ".github/scripts/test-encryption-secret-refs.py"
+      - ".github/scripts/requirements.txt"
   push:
     branches: [main]
     paths:
       - "charts/**"
       - ".github/workflows/helm-ci.yml"
+      - ".github/scripts/test-encryption-secret-refs.py"
+      - ".github/scripts/requirements.txt"
 
 jobs:
   lint:
@@ -36,6 +40,16 @@ jobs:
 
       - name: Set up chart-testing
         uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
+
+      - name: Install render test dependencies
+        run: |
+          pip install --disable-pip-version-check \
+            --only-binary :all: \
+            --require-hashes \
+            -r .github/scripts/requirements.txt
+
+      - name: Test encryption Secret references
+        run: python3 .github/scripts/test-encryption-secret-refs.py
 
       - name: Run chart-testing lint
         run: ct lint --target-branch main --charts charts/artifact-keeper/

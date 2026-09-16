@@ -237,6 +237,45 @@ passed to forceChangePassword; Dependency-Track rejects an empty password with
 {{- end -}}
 
 {{/*
+Optional backend encryption keys. Flags opt into conventional keys in an
+operator-managed Secret without putting credential-shaped placeholders in values.
+Validate only these env names; other backend environment wiring is independent.
+*/}}
+{{- define "artifact-keeper.encryptionKeyEnv" -}}
+{{- $root := . -}}
+{{- range $key := list
+    (dict "value" "migrationEncryptionKey" "flag" "migrationEncryptionKeyEnabled" "env" "MIGRATION_ENCRYPTION_KEY")
+    (dict "value" "webhookSecretKey" "flag" "webhookSecretKeyEnabled" "env" "AK_WEBHOOK_SECRET_KEY") -}}
+{{- $enabled := get $root.Values.secrets $key.flag -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail (printf "secrets.%s must be a boolean" $key.flag) -}}
+{{- end -}}
+{{- if and $enabled (or (not $root.Values.secrets.existingSecret) $root.Values.externalSecrets.enabled) -}}
+{{- fail (printf "secrets.%s requires secrets.existingSecret and externalSecrets.enabled=false" $key.flag) -}}
+{{- end -}}
+{{- $managed := or $enabled
+    (and $root.Values.externalSecrets.enabled (get $root.Values.externalSecrets.secrets $key.value))
+    (and (not $root.Values.externalSecrets.enabled) (get $root.Values.secrets $key.value)) -}}
+{{- $sources := 0 -}}
+{{- if $managed -}}{{- $sources = add $sources 1 -}}{{- end -}}
+{{- if hasKey $root.Values.backend.env $key.env -}}{{- $sources = add $sources 1 -}}{{- end -}}
+{{- range $root.Values.backend.environmentSecrets -}}
+{{- if eq .name $key.env -}}{{- $sources = add $sources 1 -}}{{- end -}}
+{{- end -}}
+{{- if gt $sources 1 -}}
+{{- fail (printf "%s has multiple definitions; use only one of chart secret wiring, backend.env, or backend.environmentSecrets" $key.env) -}}
+{{- end -}}
+{{- if $managed }}
+- name: {{ $key.env }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "artifact-keeper.secretName" $root }}
+      key: {{ $key.env }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Returns "true" when the chart should inject ALLOW_HTTP_INTEGRATIONS=1 into
 the backend, "" otherwise. An explicit ALLOW_HTTP_INTEGRATIONS entry in
 backend.env wins over backend.allowHttpIntegrations entirely (the chart

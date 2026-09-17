@@ -220,6 +220,22 @@ passed to forceChangePassword; Dependency-Track rejects an empty password with
 {{- end -}}
 {{- end -}}
 
+{{/*
+Whether the Dependency-Track API key travels through the shared-config volume.
+False when dependencyTrack.existingApiKeySecret supplies it instead: the volume,
+its mount, DEPENDENCY_TRACK_API_KEY_FILE and the claim are all skipped, and the
+backend reads DEPENDENCY_TRACK_API_KEY.
+
+The claim is ReadWriteOnce and has no accessModes knob, so on block storage it
+attaches to one node and pins every backend replica there, which is what stops
+backend.replicaCount > 1 from spreading. The backend's resolve_api_key prefers
+DEPENDENCY_TRACK_API_KEY over the file (dependency_track_service.rs), so the file
+is not required when the key is supplied directly. See iac issue 313.
+*/}}
+{{- define "artifact-keeper.dtrackApiKeyFile" -}}
+{{- if and .Values.dependencyTrack.enabled (not .Values.dependencyTrack.existingApiKeySecret) -}}true{{- end -}}
+{{- end -}}
+
 {{- define "artifact-keeper.validateSecrets" -}}
 {{- if or .Values.externalSecrets.enabled .Values.secrets.existingSecret -}}
 {{- /* Secrets are supplied externally; no chart-owned Secret to validate. */ -}}

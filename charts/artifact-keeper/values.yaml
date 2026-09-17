@@ -878,6 +878,17 @@ scannerAdapter:
 # admin user and API key for backend integration.
 dependencyTrack:
   enabled: true
+  # -- Name of an existing Secret holding a Dependency-Track API key. When set,
+  # the backend reads DEPENDENCY_TRACK_API_KEY from it and the shared-config
+  # volume, its mount, DEPENDENCY_TRACK_API_KEY_FILE and the shared-config PVC
+  # are all skipped, so backend replicas are not pinned to one node by the
+  # ReadWriteOnce claim. The bootstrap Job then only reconciles the admin
+  # password. Set existingApiKeySecretKey with it, and do not also name
+  # DEPENDENCY_TRACK_API_KEY in backend.env or backend.environmentSecrets: that
+  # would be a second definition of the same env var, which Kubernetes rejects.
+  existingApiKeySecret: ""
+  # -- Key in existingApiKeySecret holding the API key.
+  existingApiKeySecretKey: "API_KEY"
   image:
     repository: dependencytrack/apiserver
     # UPGRADE LANDMINE: keep this below 4.13.0 until the bootstrap changes.
@@ -920,6 +931,12 @@ dependencyTrack:
   # constrained nodes can tune this down; an empty string falls back to
   # the 2Gi default in the deployment template.
   tmpSizeLimit: "2Gi"
+  # -- Database Dependency-Track connects to: the chart's own Postgres when
+  # postgres.enabled, the external server otherwise. It must exist and be owned
+  # by externalDatabase.username before the first install, since the chart only
+  # creates it on the in-chart Postgres. Two releases sharing one PostgreSQL
+  # server collide on the default name.
+  database: "dependency_track"
   persistence:
     size: 5Gi
     storageClass: ""

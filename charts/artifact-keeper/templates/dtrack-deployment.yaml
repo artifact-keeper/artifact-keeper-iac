@@ -210,6 +210,10 @@ data:
     # Bootstrap Dependency-Track: change the default admin password, then read
     # the Automation team's API key onto a shared volume for the backend.
     #
+    # With dependencyTrack.existingApiKeySecret set there is no key to read and
+    # no volume to write it to, so DEPENDENCY_TRACK_API_KEY_FILE is unset and
+    # this Job reconciles the admin password only.
+    #
     # Deliberately depends on curl only. An earlier version ran
     # "apk add --no-cache curl jq" here, which failed on every cluster (the pod
     # runs as non-root and apk needs root) and additionally on any cluster
@@ -222,7 +226,8 @@ data:
     DT_ADMIN_USER="admin"
     DT_DEFAULT_PASS="admin"
     DT_NEW_PASS="${DEPENDENCY_TRACK_ADMIN_PASSWORD:-}"
-    API_KEY_FILE="/shared/dtrack-api-key"
+    # Empty when the key is supplied through dependencyTrack.existingApiKeySecret.
+    API_KEY_FILE="${DEPENDENCY_TRACK_API_KEY_FILE:-}"
 
     fail() {
       echo "[dtrack-init] ERROR: $1" >&2
@@ -235,7 +240,7 @@ data:
       fail "DEPENDENCY_TRACK_ADMIN_PASSWORD is empty. The chart generates one when dependencyTrack.adminPassword is unset; an empty value here means the Secret was supplied externally without this key."
     fi
 
-    if [ -f "$API_KEY_FILE" ] && [ -s "$API_KEY_FILE" ]; then
+    if [ -n "$API_KEY_FILE" ] && [ -f "$API_KEY_FILE" ] && [ -s "$API_KEY_FILE" ]; then
       echo "[dtrack-init] API key already provisioned, nothing to do"
       exit 0
     fi
@@ -282,6 +287,11 @@ data:
     fi
 
     [ -n "$TOKEN" ] || fail "authentication failed after password change"
+
+    if [ -z "$API_KEY_FILE" ]; then
+      echo "[dtrack-init] API key supplied through dependencyTrack.existingApiKeySecret; admin password reconciled, no key to extract"
+      exit 0
+    fi
 
     TEAMS=$(curl -sS -f "$DT_URL/api/v1/team" -H "Authorization: Bearer $TOKEN") \
       || fail "could not list teams"
@@ -406,19 +416,30 @@ spec:
                 secretKeyRef:
                   name: {{ include "artifact-keeper.secretName" . }}
                   key: DEPENDENCY_TRACK_ADMIN_PASSWORD
+            {{- if eq (include "artifact-keeper.dtrackApiKeyFile" .) "true" }}
+            # Where the script writes the key it extracts. Unset when
+            # dependencyTrack.existingApiKeySecret supplies the key, which is
+            # also when the volume below is not mounted.
+            - name: DEPENDENCY_TRACK_API_KEY_FILE
+              value: /shared/dtrack-api-key
+            {{- end }}
           volumeMounts:
             - name: init-script
               mountPath: /scripts
               readOnly: true
+            {{- if eq (include "artifact-keeper.dtrackApiKeyFile" .) "true" }}
             - name: shared-config
               mountPath: /shared
+            {{- end }}
       volumes:
         - name: init-script
           configMap:
             name: {{ include "artifact-keeper.fullname" . }}-dtrack-init
             defaultMode: 0755
+        {{- if eq (include "artifact-keeper.dtrackApiKeyFile" .) "true" }}
         - name: shared-config
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-shared-config
+        {{- end }}
 {{- end }}
 {{- end }}

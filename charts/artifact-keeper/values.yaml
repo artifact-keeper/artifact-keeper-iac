@@ -969,6 +969,12 @@ dependencyTrack:
   # constrained nodes can tune this down; an empty string falls back to
   # the 2Gi default in the deployment template.
   tmpSizeLimit: "2Gi"
+  # -- Database Dependency-Track connects to: the chart's own Postgres when
+  # postgres.enabled, the external server otherwise. It must exist and be owned
+  # by externalDatabase.username before the first install, since the chart only
+  # creates it on the in-chart Postgres. Two releases sharing one PostgreSQL
+  # server collide on the default name.
+  database: "dependency_track"
   persistence:
     size: 5Gi
     storageClass: ""

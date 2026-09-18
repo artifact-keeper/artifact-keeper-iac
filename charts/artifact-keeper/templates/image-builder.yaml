@@ -1,0 +1,171 @@
+{{/*
+=============================================================================
+Image builder: rootless BuildKit daemon (backend feature #4034)
+=============================================================================
+The Artifact Keeper backend builds container images by driving this daemon
+with `buildctl` over TCP and having it push the result back into the
+registry. It is a separate Deployment, not a sidecar, so the relaxed
+security profile rootless BuildKit needs (seccomp and AppArmor unconfined on
+this one container, to create user namespaces; no privileged flag) never
+applies to the backend pod. Its gRPC port is unauthenticated: reachability is
+authorization, so the NetworkPolicy below admits only the backend.
+=============================================================================
+*/}}
+{{- if .Values.imageBuilder.enabled }}
+{{- $ib := .Values.imageBuilder }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-buildkitd
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-builder
+spec:
+  replicas: {{ $ib.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "artifact-keeper.imageBuilder.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "artifact-keeper.imageBuilder.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Pre-1.30 clusters read the AppArmor profile from this annotation;
+        # newer ones from securityContext.appArmorProfile below.
+        container.apparmor.security.beta.kubernetes.io/buildkitd: unconfined
+    spec:
+      {{- with ($ib.tolerations | default .Values.global.tolerations) }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with ($ib.affinity | default .Values.global.affinity) }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with ($ib.nodeSelector | default .Values.global.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with ($ib.topologySpreadConstraints | default .Values.global.topologySpreadConstraints) }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $ib.runAsUser }}
+        runAsGroup: {{ $ib.runAsUser }}
+        fsGroup: {{ $ib.runAsUser }}
+        seccompProfile:
+          type: Unconfined
+        appArmorProfile:
+          type: Unconfined
+      containers:
+        - name: buildkitd
+          image: "{{ $ib.image.repository }}:{{ $ib.image.tag }}"
+          imagePullPolicy: {{ $ib.image.pullPolicy }}
+          args:
+            - --addr
+            - unix:///run/user/{{ $ib.runAsUser }}/buildkit/buildkitd.sock
+            - --addr
+            - tcp://0.0.0.0:{{ $ib.service.port }}
+            - --oci-worker-no-process-sandbox
+            - --oci-worker-gc-keepstorage
+            - {{ $ib.gcKeepStorage | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+          ports:
+            - name: grpc
+              containerPort: {{ $ib.service.port }}
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command: ["buildctl", "debug", "workers"]
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            exec:
+              command: ["buildctl", "debug", "workers"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+          {{- with $ib.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: cache
+              mountPath: /home/user/.local/share/buildkit
+      volumes:
+        - name: cache
+          {{- if $ib.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "artifact-keeper.fullname" . }}-buildkitd-cache
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- if $ib.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-buildkitd-cache
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-builder
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ $ib.persistence.size }}
+  {{- if $ib.persistence.storageClass }}
+  storageClassName: {{ $ib.persistence.storageClass }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-buildkitd
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-builder
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "artifact-keeper.imageBuilder.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: grpc
+      port: {{ $ib.service.port }}
+      targetPort: grpc
+      protocol: TCP
+{{- if .Values.networkPolicy.enabled }}
+---
+# Only the backend may drive builds. Egress stays open: the daemon pulls base
+# images and packages from wherever the spec's allowlist and index point, and
+# pushes back to the backend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-buildkitd
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.imageBuilder.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ $ib.service.port }}
+          protocol: TCP
+{{- end }}
+{{- end }}

@@ -128,6 +128,14 @@ app.kubernetes.io/component: scanner-adapter
 {{- end }}
 
 {{/*
+Image builder (buildkitd) selector labels
+*/}}
+{{- define "artifact-keeper.imageBuilder.selectorLabels" -}}
+{{ include "artifact-keeper.selectorLabels" . }}
+app.kubernetes.io/component: image-builder
+{{- end }}
+
+{{/*
 DependencyTrack selector labels
 */}}
 {{- define "artifact-keeper.dtrack.selectorLabels" -}}

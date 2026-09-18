@@ -44,6 +44,16 @@ spec:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
     {{- end }}
+    {{- if .Values.imageBuilder.enabled }}
+    # buildkitd pushes the images it builds back into this registry.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.imageBuilder.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.backend.service.httpPort }}
+          protocol: TCP
+    {{- end }}
     # Allow ingress controller. The namespace is pinned via
     # networkPolicy.ingressNamespace: an unrestricted namespaceSelector would
     # admit any pod carrying this label in ANY namespace, which on a shared
@@ -113,6 +123,16 @@ spec:
               {{- include "artifact-keeper.scannerAdapter.selectorLabels" . | nindent 14 }}
       ports:
         - port: 8090
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.imageBuilder.enabled }}
+    # Image builder: the backend drives buildkitd over its gRPC port.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.imageBuilder.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.imageBuilder.service.port }}
           protocol: TCP
     {{- end }}
     # DependencyTrack

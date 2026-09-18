@@ -252,6 +252,54 @@ spec:
             - name: TRIVY_ADAPTER_URL
               value: "http://{{ include "artifact-keeper.fullname" . }}-scanner-adapter:8090"
             {{- end }}
+            {{- if .Values.imageBuilder.enabled }}
+            {{- /*
+            Image builder: where the buildkitd daemon listens and how IT
+            reaches this registry to push (in-cluster, plain HTTP). Values
+            given in backend.env win over these, so an operator can point the
+            backend at a daemon this chart did not deploy.
+            */}}
+            {{- $ib := .Values.imageBuilder }}
+            {{- $env := .Values.backend.env }}
+            {{- if not (hasKey $env "AK_BUILDKIT_ADDR") }}
+            - name: AK_BUILDKIT_ADDR
+              value: "tcp://{{ include "artifact-keeper.fullname" . }}-buildkitd:{{ $ib.service.port }}"
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_PUSH_REGISTRY") }}
+            - name: AK_IMAGE_BUILD_PUSH_REGISTRY
+              value: "{{ include "artifact-keeper.fullname" . }}-backend:{{ .Values.backend.service.httpPort }}"
+            - name: AK_IMAGE_BUILD_REGISTRY_INSECURE
+              value: "true"
+            {{- end }}
+            {{- if and $ib.policy.baseAllowlist (not (hasKey $env "AK_IMAGE_BUILD_BASE_ALLOWLIST")) }}
+            - name: AK_IMAGE_BUILD_BASE_ALLOWLIST
+              value: {{ $ib.policy.baseAllowlist | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_ADMIN_ONLY") }}
+            - name: AK_IMAGE_BUILD_ADMIN_ONLY
+              value: {{ $ib.policy.adminOnly | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_ALLOW_RUN") }}
+            - name: AK_IMAGE_BUILD_ALLOW_RUN
+              value: {{ $ib.policy.allowRun | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_ALLOW_DOCKERFILE") }}
+            - name: AK_IMAGE_BUILD_ALLOW_DOCKERFILE
+              value: {{ $ib.policy.allowDockerfile | quote }}
+            {{- end }}
+            {{- if and $ib.policy.pipIndexUrl (not (hasKey $env "AK_IMAGE_BUILD_PIP_INDEX_URL")) }}
+            - name: AK_IMAGE_BUILD_PIP_INDEX_URL
+              value: {{ $ib.policy.pipIndexUrl | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_TIMEOUT_SECS") }}
+            - name: AK_IMAGE_BUILD_TIMEOUT_SECS
+              value: {{ $ib.policy.timeoutSecs | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_MAX_CONCURRENT") }}
+            - name: AK_IMAGE_BUILD_MAX_CONCURRENT
+              value: {{ $ib.policy.maxConcurrent | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.dependencyTrack.enabled }}
             - name: DEPENDENCY_TRACK_URL
               value: "http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080"

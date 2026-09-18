@@ -957,6 +957,72 @@ dependencyTrack:
   nodeSelector: {}
   topologySpreadConstraints: []
 
+# -- Image builder: a rootless BuildKit daemon the backend drives to build
+# container images from a spec and push them back into this registry
+# (backend feature #4034, off by default). The daemon is its OWN Deployment,
+# not a sidecar: the backend ships only the `buildctl` client and reaches the
+# daemon over TCP, so the daemon's relaxed security profile (seccomp and
+# AppArmor unconfined, needed for rootless user namespaces; still no
+# privileged flag) never applies to the registry's pod. Enabling this wires
+# AK_BUILDKIT_ADDR and AK_IMAGE_BUILD_PUSH_REGISTRY into the backend and adds
+# the network-policy rules both directions of the build need.
+imageBuilder:
+  enabled: false
+  image:
+    repository: docker.io/moby/buildkit
+    tag: "v0.33.0-rootless"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  # -- The uid the rootless daemon runs as; must match the image's `user`
+  # account (1000 in moby/buildkit rootless images).
+  runAsUser: 1000
+  # -- Storage buildkitd keeps under its state directory before garbage
+  # collecting (bytes, buildkitd --oci-worker-gc-keepstorage).
+  gcKeepStorage: 20000
+  service:
+    port: 1234
+  # -- Cache volume for pulled layers and build state. Without persistence the
+  # daemon starts cold after every restart and re-pulls every base image.
+  persistence:
+    enabled: true
+    size: 40Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+  # -- Policy the backend applies to specs. Each maps to an AK_IMAGE_BUILD_*
+  # variable; an explicit entry in backend.env overrides the value here.
+  policy:
+    # -- Comma-separated base image prefixes a spec may build on; empty allows
+    # any. Point it at repositories in this registry (mirrors, curated
+    # images) so base images are scanned and quarantine-gated like everything
+    # else.
+    baseAllowlist: ""
+    # -- Only administrators may build. `false` opens building to every user
+    # with write access on the repository.
+    adminOnly: true
+    # -- Let a spec carry raw RUN lines.
+    allowRun: false
+    # -- Let a spec carry a whole Dockerfile (every FROM is still checked
+    # against baseAllowlist).
+    allowDockerfile: false
+    # -- A PyPI index every generated `pip install` is pinned to; point it at
+    # this instance's PyPI proxy so package downloads never leave the registry.
+    pipIndexUrl: ""
+    # -- Wall clock per build, seconds.
+    timeoutSecs: 1800
+    # -- Builds the backend drives at once.
+    maxConcurrent: 2
+  # -- Per-component scheduling (overrides global)
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
+
 # -- Ingress configuration
 ingress:
   enabled: true

@@ -13,7 +13,7 @@ backend:
   image:
     # Tracks the latest published backend release (see the IMAGE TAGS note in
     # values.yaml — backend and web release on independent cadences).
-    tag: "1.9.0"
+    tag: "1.10.0"
   env:
     RUST_LOG: "info"
     ENVIRONMENT: "production"
@@ -54,7 +54,7 @@ web:
     # Tracks the latest published web release, which drifts from the backend's
     # version because the two release independently (see the IMAGE TAGS note in
     # values.yaml).
-    tag: "1.8.0"
+    tag: "1.10.0"
   resources:
     requests:
       cpu: 500m

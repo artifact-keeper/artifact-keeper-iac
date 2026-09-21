@@ -100,7 +100,7 @@ for that workflow to succeed.
 
 ```yaml
 # charts/artifact-keeper/Chart.yaml
-version: 1.9.11     # chart version, bumped on every chart change
+version: 1.9.12     # chart version, bumped on every chart change
 appVersion: "1.10.0" # application version; tracks the backend release
 ```
 

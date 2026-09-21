@@ -469,7 +469,7 @@ web:
     # will not hold for the next release -- keep this pinned rather than empty.
     # Because the two components version independently, expect the appVersion
     # fallback to be unusable for web most of the time -- keep this pinned.
-    tag: "1.10.0"
+    tag: "1.10.1"
     pullPolicy: Always
   podSecurityContext:
     runAsNonRoot: true

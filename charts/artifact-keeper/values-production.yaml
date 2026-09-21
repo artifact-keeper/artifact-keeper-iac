@@ -54,7 +54,7 @@ web:
     # Tracks the latest published web release, which drifts from the backend's
     # version because the two release independently (see the IMAGE TAGS note in
     # values.yaml).
-    tag: "1.10.0"
+    tag: "1.10.1"
   resources:
     requests:
       cpu: 500m

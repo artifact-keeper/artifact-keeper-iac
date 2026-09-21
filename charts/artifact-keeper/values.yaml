@@ -792,6 +792,13 @@ trivy:
     # DB fresh from the configured mirror; set true for fully air-gapped clusters
     # where the DB is seeded out of band.
     skipUpdate: false
+  # -- Size limit for the `/tmp` emptyDir (TMPDIR). Trivy extracts image
+  # layers and scan inputs here, so large artifacts can exceed the default
+  # and get the pod evicted ("Usage of EmptyDir volume \"tmp\" exceeds the
+  # limit"). Raise it together with resources.limits.ephemeral-storage, which
+  # the kubelet enforces across the whole pod. An empty string falls back to
+  # the 256Mi default in the deployment template.
+  tmpSizeLimit: 256Mi
   persistence:
     size: 5Gi
     storageClass: ""

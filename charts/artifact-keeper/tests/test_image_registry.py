@@ -17,6 +17,7 @@ OPTIONAL = {
     "cosign.enabled": True,
     "opensearch.fixOwnership.enabled": True,
     "trivy.db.preseed.enabled": True,
+    "imageBuilder.enabled": True,
 }
 VARIANTS = {
     "default": {},
@@ -133,7 +134,7 @@ class ImageRegistryTest(unittest.TestCase):
         paths = {
             f'{image["repository"]}:{image["tag"] or APP_VERSION}': (
                 image["repository"].split("/", 1)[1]
-                if image["repository"].startswith(("ghcr.io/", "gcr.io/"))
+                if image["repository"].startswith(("ghcr.io/", "gcr.io/", "docker.io/"))
                 else (
                     image["repository"]
                     if "/" in image["repository"]

@@ -64,7 +64,7 @@ spec:
           type: Unconfined
       containers:
         - name: buildkitd
-          image: "{{ $ib.image.repository }}:{{ $ib.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" $ib.image "context" $) | quote }}
           imagePullPolicy: {{ $ib.image.pullPolicy }}
           args:
             - --addr

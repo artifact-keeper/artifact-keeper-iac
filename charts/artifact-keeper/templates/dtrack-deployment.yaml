@@ -138,6 +138,11 @@ spec:
               value: "/data"
             - name: ALPINE_ENFORCE_AUTHENTICATION
               value: "true"
+            # CORS is only relevant when the Dependency-Track UI/API is exposed
+            # publicly (ingress.dtrack.enabled, or httpRoute.dtrack.enabled when
+            # routing through a Gateway). In-cluster access (backend -> service,
+            # kubectl port-forward) is same-origin and needs no CORS, so it
+            # stays disabled otherwise.
             {{- if and .Values.httpRoute.enabled .Values.httpRoute.dtrack.enabled }}
             - name: ALPINE_CORS_ENABLED
               value: "true"

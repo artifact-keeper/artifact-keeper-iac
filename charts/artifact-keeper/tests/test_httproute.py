@@ -265,6 +265,7 @@ class HTTPRouteTests(unittest.TestCase):
     def test_invalid_configuration_fails_clearly(self):
         cases = [
             ({"ingress": {"enabled": True}}, "mutually exclusive"),
+            ({"route": {"enabled": True, "host": "registry.example.com"}}, "route.enabled (OpenShift Routes) are mutually exclusive"),
             ({"backend": {"enabled": False}}, "backend.enabled"),
             ({"dependencyTrack": {"enabled": False}, "httpRoute": {"dtrack": {"enabled": True}}}, "dependencyTrack.enabled"),
             ({"httpRoute": {"enabled": "true"}}, "httpRoute"),

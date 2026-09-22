@@ -1219,7 +1219,8 @@ route:
     # dependencyTrack.enabled is true.
     enabled: false
 
-# -- Gateway API routing through an existing Gateway. Mutually exclusive with Ingress.
+# -- Gateway API routing through an existing Gateway. Mutually exclusive with
+# Ingress (ingress.enabled) and OpenShift Routes (route.enabled).
 httpRoute:
   # -- Render a gateway.networking.k8s.io/v1 HTTPRoute. Requires Gateway API CRDs.
   enabled: false

@@ -27,6 +27,9 @@ The package-format prefixes come from artifact-keeper.backendFormatPaths
 {{- if .Values.ingress.enabled -}}
 {{- fail "httpRoute.enabled and ingress.enabled are mutually exclusive; set ingress.enabled=false" -}}
 {{- end -}}
+{{- if .Values.route.enabled -}}
+{{- fail "httpRoute.enabled and route.enabled (OpenShift Routes) are mutually exclusive; set route.enabled=false" -}}
+{{- end -}}
 {{- if not .Values.backend.enabled -}}
 {{- fail "httpRoute.enabled requires backend.enabled=true" -}}
 {{- end -}}

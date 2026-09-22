@@ -437,11 +437,22 @@ Inspect the route's `Accepted` and `ResolvedRefs` conditions after deployment.
 Helm rendering deliberately does not require live cluster discovery.
 
 TLS termination and `certificateRefs` belong to the existing Gateway listener.
-`ingress.tls`, nginx upload/timeout settings, and Ingress annotations do not
-apply to HTTPRoute. Configure upload limits, timeouts, redirects, and any
-controller-specific policies on your Gateway/controller as appropriate.
+`ingress.tls` and Ingress annotations do not apply to HTTPRoute.
+
+> **Upload size and timeouts have no HTTPRoute equivalent.** On Ingress the
+> chart derives `nginx.ingress.kubernetes.io/proxy-body-size`,
+> `proxy-read-timeout` and `proxy-send-timeout` from `ingress.maxBodySize`,
+> `ingress.proxyReadTimeoutSeconds` and `ingress.proxySendTimeoutSeconds`.
+> The HTTPRoute sets none of these, so large artifact uploads and long OCI
+> pushes are bound by your Gateway implementation's own request-size and
+> timeout defaults, which are often far lower. Configure them on the Gateway or
+> controller (for example an Envoy Gateway `ClientTrafficPolicy`/
+> `BackendTrafficPolicy`, or the equivalent policy of your implementation),
+> together with any redirects and other controller-specific policies.
+
 Both exposure modes are optional, but enabling them simultaneously fails the
-render. HTTPRoute requires `backend.enabled: true`, non-empty `parentRefs`,
+render. HTTPRoute is likewise mutually exclusive with the OpenShift Routes
+(`route.enabled`); on OpenShift, use either the Routes or a Gateway, not both. HTTPRoute requires `backend.enabled: true`, non-empty `parentRefs`,
 and explicit `hostnames` (including wildcard hostnames if desired); it does not
 inherit `ingress.host` or `fleet.host`. With `web.enabled: false`, the `/`
 catch-all is omitted, leaving only backend and explicitly enabled DT routes.

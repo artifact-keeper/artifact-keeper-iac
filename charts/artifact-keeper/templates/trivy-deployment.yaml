@@ -148,7 +148,7 @@ spec:
       volumes:
         - name: tmp
           emptyDir:
-            sizeLimit: 256Mi
+            sizeLimit: {{ .Values.trivy.tmpSizeLimit | default "256Mi" }}
         - name: trivy-cache
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-trivy-cache

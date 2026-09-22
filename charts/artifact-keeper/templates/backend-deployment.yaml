@@ -219,7 +219,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "artifact-keeper.secretName" . }}
                   key: JWT_SECRET
-            {{- include "artifact-keeper.encryptionKeyEnv" . | nindent 12 }}
+            {{- with include "artifact-keeper.encryptionKeyEnv" . }}{{ . | trim | nindent 12 }}{{- end }}
             {{- if .Values.opensearch.enabled }}
             - name: OPENSEARCH_URL
               value: "{{ if .Values.opensearch.disableSecurityPlugin }}http{{ else }}https{{ end }}://{{ include "artifact-keeper.fullname" . }}-opensearch:9200"

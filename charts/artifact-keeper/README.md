@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.9.23](https://img.shields.io/badge/Version-1.9.23-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.10.0](https://img.shields.io/badge/AppVersion-1.10.0-informational?style=flat-square)
+![Version: 1.9.24](https://img.shields.io/badge/Version-1.9.24-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.10.0](https://img.shields.io/badge/AppVersion-1.10.0-informational?style=flat-square)
 
 ## TL;DR
 
@@ -86,7 +86,7 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | backend | object | `{"affinity":{},"allowHttpIntegrations":"auto","autoscaling":{"enabled":false,"maxReplicas":10,"minReplicas":2,"targetCPUUtilization":70,"targetMemoryUtilization":80},"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"enabled":true,"env":{"ADMIN_PASSWORD":"","BACKUP_PATH":"/data/backups","ENVIRONMENT":"development","HOST":"0.0.0.0","PLUGINS_DIR":"/data/plugins","PORT":"8080","RATE_LIMIT_TRUSTED_PROXY_CIDRS":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16","RUST_LOG":"info,artifact_keeper=debug","STORAGE_PATH":"/data/storage"},"environmentSecrets":[],"extraEnvFrom":[],"image":{"pullPolicy":"Always","repository":"ghcr.io/artifact-keeper/artifact-keeper-backend","tag":"1.10.0"},"initContainerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"metricsListener":{"enabled":false,"port":9091},"nodeSelector":{},"persistence":{"accessModes":[],"enabled":true,"size":"10Gi","storageClass":""},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"podSecurityContext":{"fsGroup":0,"runAsNonRoot":true,"runAsUser":1001},"replicaCount":1,"resources":{"limits":{"cpu":"2","ephemeral-storage":"16Gi","memory":"2Gi"},"requests":{"cpu":"250m","ephemeral-storage":"256Mi","memory":"256Mi"}},"scanWorkspace":{"enabled":true,"size":"2Gi"},"service":{"grpcPort":9090,"httpPort":8080,"type":"ClusterIP"},"serviceAccount":{"annotations":{},"create":true,"name":""},"sharedConfig":{"accessModes":[],"storageClass":""},"strategy":{"type":"Recreate"},"tolerations":[],"topologySpreadConstraints":[],"waitForOpenSearch":{"image":{"repository":"alpine","tag":"3.20"}}}` | Backend API server The backend handles all API requests, format-specific wire protocols, and artifact storage. It runs as a single Rust binary (Axum). |
 | backend.allowHttpIntegrations | string | `"auto"` | Controls whether the backend may make plain-HTTP outbound integration calls (the ALLOW_HTTP_INTEGRATIONS env var). This weakens outbound TLS posture for EVERY integration the backend talks to, not just the bundled Dependency-Track, so think of it as a cluster-wide relaxation.   "auto"  (default): set ALLOW_HTTP_INTEGRATIONS=1 only when           dependencyTrack.enabled is true, because the bundled           Dependency-Track is reached over plain HTTP in-cluster and the           integration fails without it. A warning is printed in the           install notes whenever the variable is active.   "true":  always set ALLOW_HTTP_INTEGRATIONS=1.   "false": never set it. Note the bundled Dependency-Track integration           will not work unless you put TLS in front of it. An explicit ALLOW_HTTP_INTEGRATIONS entry in backend.env above overrides this setting entirely. |
 | backend.env.RATE_LIMIT_TRUSTED_PROXY_CIDRS | string | `"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"` | Rate Limiting RATE_LIMIT_TRUSTED_PROXY_CIDRS — CIDR(s), comma-separated, of the reverse proxy / ingress that sits in front of the backend. The login rate limiter keys on (username, client-IP) and only believes the X-Forwarded-For header when the request's TCP peer falls inside one of these ranges; otherwise it keys on the raw TCP peer. In Kubernetes the backend is reached through an ingress controller (ingress-nginx by default), so its TCP peer is ALWAYS the ingress/proxy pod IP. Leaving this empty makes the backend key every client on that single proxy pod IP → one shared login bucket per account → a single flooding client can targeted-lock-out any user (including owner break-glass) with ~10 requests / 15 min (iac#207, ak#2298). The default trusts the standard RFC1918 private pod-network ranges so per-client keying on the real client IP works out of the box behind an in-cluster proxy. TIGHTEN this to your ingress controller's actual pod CIDR for defense-in-depth, or set it to "" only when the backend is reached directly (no proxy) so ConnectInfo already carries the real client IP. |
-| backend.environmentSecrets | list | `[]` | Extra environment variables sourced from existing Kubernetes Secrets. Use this for values that must not appear in plain text in `backend.env` (e.g. an initial ADMIN_PASSWORD provisioned out-of-band, or OTEL_EXPORTER_OTLP_HEADERS carrying an auth token). Each entry maps a container env var name to a Secret key reference. When an entry names a variable that also appears in `backend.env`, remove the plain-text key (set it to null) so the secret-sourced value is the only definition. environmentSecrets:   - name: ADMIN_PASSWORD     secretKeyRef:       name: ak-admin-credentials       key: ADMIN_PASSWORD |
+| backend.environmentSecrets | list | `[]` | Extra environment variables sourced from existing Kubernetes Secrets. Use this for values that must not appear in plain text in `backend.env` (e.g. an initial ADMIN_PASSWORD provisioned out-of-band, or OTEL_EXPORTER_OTLP_HEADERS carrying an auth token). Each entry maps a container env var name to a Secret key reference. When an entry names a variable that also appears in `backend.env`, remove the plain-text key (set it to null) so the secret-sourced value is the only definition. For MIGRATION_ENCRYPTION_KEY and AK_WEBHOOK_SECRET_KEY, also leave the corresponding secrets.* value empty and *Enabled flag false (or the externalSecrets.secrets.* path empty); duplicate definitions fail rendering. environmentSecrets:   - name: ADMIN_PASSWORD     secretKeyRef:       name: ak-admin-credentials       key: ADMIN_PASSWORD |
 | backend.extraEnvFrom | list | `[]` | Additional envFrom sources (Secrets/ConfigMaps) for the backend container, rendered verbatim. Use for credentials that must come from existing Secrets. |
 | backend.image.tag | string | `"1.10.0"` | Backend image tag. Defaults to the backend's latest published release. The backend and web images release on independent cadences (see the IMAGE TAGS note at the top of this file), so each pins its own default here rather than sharing one number. Leave this empty ("") to fall back to the chart's appVersion instead, which is handy when you deliberately want a tagged chart release to drive the image tag. ArgoCD Image Updater pins tags to a digest automatically. For a floating tag such as "dev", set pullPolicy: Always so restarts pick up new builds. |
 | backend.metricsListener | object | `{"enabled":false,"port":9091}` | Unauthenticated Prometheus metrics listener. When enabled, the backend starts a second TCP listener on `metricsPort` serving only `GET /metrics` with no authentication. Intended for Prometheus scrapers that cannot present credentials. Disabled by default.  |
@@ -211,8 +211,10 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | scannerAdapter.env | object | `{"SCANNER_TRIVY_INSECURE":"true"}` | Extra environment for the adapter. SCANNER_TRIVY_INSECURE defaults to "true" because the adapter reaches the AK registry over the plain-HTTP in-cluster Service endpoint; set to "false" if the adapter pulls from a TLS-terminated registry it can verify. |
 | scannerAdapter.image.tag | string | `"1.2.11"` | The scanner-adapter is versioned independently of the AK backend/web/edge images (its own `1.2.x` line; there is no `scanner-adapter:<appVersion>`). Pin the exact adapter release that the pinned backend release ships with, so every node runs the same digest: the floating `1`/`1.2`/`latest` tags move on each adapter release and, combined with pullPolicy IfNotPresent, would leave nodes on whichever build they first cached. Repoint this alongside backend.image.tag. The deployment renders the tag as `tag | default .Chart.AppVersion`, so leaving this empty ("") would fall back to appVersion and pull a non-existent tag — keep it pinned. |
 | scannerAdapter.tolerations | list | `[]` | Per-component scheduling (overrides global). Do NOT arch-pin here; the image is multi-arch. |
-| secrets | object | `{"existingSecret":"","jwtSecret":"","migrationEncryptionKey":"","s3AccessKey":"","s3SecretKey":"","smtpPassword":"","webhookSecretKey":""}` | Secrets These are development defaults. For production, override via --set or use existingSecret references. Never commit real credentials here. |
-| secrets.existingSecret | string | `""` | Name of an existing Secret that already holds the core application credentials (JWT_SECRET, and DATABASE_URL/POSTGRES_PASSWORD when the chart would otherwise manage them). When set, the chart does not render its own Secret and all workloads read from this Secret instead, so the values under `secrets` and `postgres.auth.password` are not required. Useful for GitOps and secret-manager workflows where the Secret is provisioned out of band. |
+| secrets | object | `{"existingSecret":"","jwtSecret":"","migrationEncryptionKey":"","migrationEncryptionKeyEnabled":false,"s3AccessKey":"","s3SecretKey":"","smtpPassword":"","webhookSecretKey":"","webhookSecretKeyEnabled":false}` | Secrets These are development defaults. For production, override via --set or use existingSecret references. Never commit real credentials here. |
+| secrets.existingSecret | string | `""` | Name of an existing Secret that already holds the core application credentials (JWT_SECRET, and DATABASE_URL/POSTGRES_PASSWORD when the chart would otherwise manage them). When set, the chart does not render its own Secret and all workloads read from this Secret instead, so the values under `secrets` and `postgres.auth.password` are not required. Useful for GitOps and secret-manager workflows where the Secret is provisioned out of band. Optional encryption keys are wired separately using the *Enabled flags below, or backend.environmentSecrets for custom Secret/key names. |
+| secrets.migrationEncryptionKeyEnabled | bool | `false` | Inject MIGRATION_ENCRYPTION_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty migrationEncryptionKey. |
+| secrets.webhookSecretKeyEnabled | bool | `false` | Inject AK_WEBHOOK_SECRET_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty webhookSecretKey. |
 | serviceMonitor | object | `{"enabled":false,"interval":"30s","scrapeTimeout":"10s"}` | Prometheus ServiceMonitor |
 | trivy | object | `{"affinity":{},"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"db":{"javaRepository":"","preseed":{"enabled":false},"repository":"","skipUpdate":false},"enabled":true,"image":{"repository":"aquasec/trivy","tag":"0.62.1"},"initContainerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"nodeSelector":{},"persistence":{"size":"5Gi","storageClass":""},"podSecurityContext":{"fsGroup":10000,"runAsNonRoot":true,"runAsUser":10000},"resources":{"limits":{"cpu":"1","ephemeral-storage":"1Gi","memory":"2Gi"},"requests":{"cpu":"250m","ephemeral-storage":"128Mi","memory":"256Mi"}},"tmpSizeLimit":"256Mi","tolerations":[],"topologySpreadConstraints":[]}` | Trivy vulnerability scanner Runs as a persistent server that the backend calls for image/SBOM scans. Uses a PVC for its vulnerability database cache. The deployment uses Recreate strategy because the cache directory uses a file lock that prevents concurrent access from two pods. |
 | trivy.db | object | `{"javaRepository":"","preseed":{"enabled":false},"repository":"","skipUpdate":false}` | Vulnerability database settings. Trivy downloads its vulnerability DB lazily (on first scan), pulling an OCI artifact from a registry. The upstream default (ghcr.io/aquasecurity/trivy-db) is anonymous-pull and gets rate-limited; clusters that cannot reach it (or that hit the rate limit) end up with no DB, which fails the pinned-cve-gate pre-flight. To make the fetch reliable we (a) point at a configurable mirror and (b) pre-seed the DB with an init container so it is present before the server accepts scans. |
@@ -313,6 +315,68 @@ Registry credentials and mirror access must also be configured independently.
 preserve the previous rendered images. Remove any explicitly saved old
 `global.imageRegistry` value (including when using `helm upgrade --reuse-values`)
 or set it to `""` unless you intend to rewrite every image.
+
+## Encryption Keys in an Existing Secret
+
+If an operator-supplied Secret contains the optional migration and webhook
+encryption keys, opt into their environment references without putting plaintext
+keys or placeholder credentials in Helm values:
+
+```yaml
+secrets:
+  existingSecret: application-credentials
+  migrationEncryptionKeyEnabled: true
+  webhookSecretKeyEnabled: true
+```
+
+The backend reads `MIGRATION_ENCRYPTION_KEY` and `AK_WEBHOOK_SECRET_KEY` from that
+Secret in the release namespace. The chart does not create a Secret or copy
+credential values into the rendered manifests. These references are required:
+if an enabled key is missing, Kubernetes prevents the backend container from
+starting. Both flags default to `false`, so existing Secrets without these
+optional keys keep working. Enable either flag independently.
+
+The flags must be YAML booleans, not strings such as `"false"`. Setting a flag to
+`true` requires `secrets.existingSecret` and `externalSecrets.enabled: false`;
+otherwise rendering fails. They only opt into existing-Secret references:
+`false` does not override a nonempty `secrets.migrationEncryptionKey` or
+`secrets.webhookSecretKey`. Chart-managed Secrets still use those inline values,
+and legacy existing-Secret configurations with nonempty placeholder values still
+work. Replace placeholders with the flags above. With External Secrets Operator,
+continue setting the corresponding `externalSecrets.secrets.*` provider paths
+instead.
+
+For custom key names, a different Secret, or an explicitly optional reference,
+use the existing `backend.environmentSecrets` mechanism instead of the flags:
+
+```yaml
+backend:
+  environmentSecrets:
+    - name: MIGRATION_ENCRYPTION_KEY
+      secretKeyRef:
+        name: encryption-credentials
+        key: migration-key
+    - name: AK_WEBHOOK_SECRET_KEY
+      secretKeyRef:
+        name: encryption-credentials
+        key: webhook-key
+        optional: true
+```
+
+Leave the corresponding inline value empty and flag `false` (or the ESO path
+empty) when using `backend.environmentSecrets`. For these two environment
+variables, multiple definitions across chart secret wiring, `backend.env`, or
+`backend.environmentSecrets` fail rendering; choose one source per variable.
+An `optional: true` reference permits startup without the key but leaves the
+feature unavailable. Helm does not look up the supplied Secret, so these options
+also work with offline `helm template`, ArgoCD, and Flux.
+
+Run the offline regression tests from the repository root with Helm and the
+Python dependencies in `.github/scripts/requirements.txt` installed:
+
+```bash
+python3 .github/scripts/test-encryption-secret-refs.py
+```
 
 ## Deployment Profiles
 

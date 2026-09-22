@@ -51,7 +51,7 @@ spec:
         fsGroup: 70
       containers:
         - name: db-bootstrap
-          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.postgres.image "context" .) | quote }}
           imagePullPolicy: IfNotPresent
           securityContext:
             readOnlyRootFilesystem: true

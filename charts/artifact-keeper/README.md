@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.9.13](https://img.shields.io/badge/Version-1.9.13-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.10.0](https://img.shields.io/badge/AppVersion-1.10.0-informational?style=flat-square)
+![Version: 1.9.14](https://img.shields.io/badge/Version-1.9.14-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.10.0](https://img.shields.io/badge/AppVersion-1.10.0-informational?style=flat-square)
 
 ## TL;DR
 
@@ -142,7 +142,7 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | global.affinity | object | `{}` |  |
 | global.imagePullPolicy | string | `"Always"` |  |
 | global.imagePullSecrets | list | `[]` | Image pull secrets applied to workloads that honor them (currently the scanner-adapter). Leave empty for public images. |
-| global.imageRegistry | string | `"ghcr.io/artifact-keeper"` |  |
+| global.imageRegistry | string | `""` | Override the registry for every chart-managed container (including init containers and hooks). Empty preserves per-image repositories. Use a host with optional port/path, e.g. registry.example.com:5000/mirror, without a URL scheme. Replaces source registry hosts, preserves repository paths, and adds library/ for Docker Hub official images. Does not translate repository names between registries; see "Container registries" in README. |
 | global.nodeSelector | object | `{}` |  |
 | global.storageClass | string | `"standard"` |  |
 | global.tolerations | list | `[]` | Scheduling constraints applied to ALL workloads by default. Per-component values (e.g. backend.nodeSelector) override these.  NOTE: Per-component values fully replace global, they do not merge. Setting backend.tolerations means the backend gets only those tolerations, not global + backend combined. There is currently no way to opt a single component out of global scheduling without setting its own values. |
@@ -203,6 +203,93 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | web | object | `{"affinity":{},"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"enabled":true,"env":{"NEXT_PUBLIC_API_URL":"","NODE_ENV":"production"},"image":{"pullPolicy":"Always","repository":"ghcr.io/artifact-keeper/artifact-keeper-web","tag":"1.10.1"},"nodeSelector":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podSecurityContext":{"fsGroup":1000,"runAsNonRoot":true,"runAsUser":1000},"replicaCount":1,"resources":{"limits":{"cpu":"1","ephemeral-storage":"2Gi","memory":"1Gi"},"requests":{"cpu":"250m","ephemeral-storage":"256Mi","memory":"256Mi"}},"service":{"port":3000,"type":"ClusterIP"},"tolerations":[],"topologySpreadConstraints":[]}` | Next.js web frontend |
 | web.image.tag | string | `"1.10.1"` | Web image tag. Defaults to the web frontend's latest published release, which drifts from the backend's version because the two release independently (only the major must align for API compatibility). Leave empty ("") to fall back to the chart's appVersion (see backend.image.tag). Note the appVersion tracks the backend generation, so an empty web tag can resolve to a version the web image has not published; pin it here instead. Concretely: appVersion is currently 1.10.0 and the web frontend happens to have published 1.10.0 alongside it, but that alignment is coincidental and will not hold for the next release -- keep this pinned rather than empty. Because the two components version independently, expect the appVersion fallback to be unusable for web most of the time -- keep this pinned. |
 | web.tolerations | list | `[]` | Per-component scheduling (overrides global) |
+
+## Container registries
+
+`global.imageRegistry` defaults to `""`: images use their per-component
+`image.repository` and `image.tag` unchanged. Setting it overrides the registry
+for **every chart-managed container**, including optional services, init
+containers, the DependencyTrack bootstrap hook and the fleet database bootstrap
+hook. Cosign verifies the same rewritten backend image that the pod runs.
+
+The override is a registry host with an optional port and path prefix, not a URL.
+Use a fully qualified hostname, `localhost`, or a host with a port; an
+unqualified name without a port would be interpreted as a Docker Hub namespace
+and is rejected:
+
+```yaml
+global:
+  imageRegistry: registry.example.com:5000/mirror
+```
+
+Resolution rules:
+
+1. A nonempty global override wins over the host in any `image.repository`,
+   including fully qualified custom repositories. The source host is removed
+   when its first path segment contains `.` or `:`, or is `localhost`; the rest
+   of the repository path is retained. Leave the global override empty to use
+   different registries per image.
+2. Implicit Docker Hub official images (`alpine`, `postgres`, `busybox`) gain
+   `library/`. Explicit Docker Hub hosts (`docker.io`, `index.docker.io`,
+   `registry-1.docker.io`) follow the same rule. Namespaced Docker Hub images
+   keep their namespace; single-component paths on other explicit registries
+   do not gain `library/`.
+3. Surrounding whitespace and leading/trailing slashes are trimmed, and repeated
+   path slashes are collapsed when an override is set. A repository already
+   under the exact destination host/path prefix is not prefixed twice.
+4. Tags and digests are preserved. A complete `image.repository` ending in
+   `:tag`, `@sha256:...` or `:tag@sha256:...` wins over `image.tag`; otherwise
+   `image.tag` is appended (including `tag@sha256:...` pins). Empty tags on
+   backend, web, edge and scanner-adapter still fall back to `Chart.appVersion`.
+
+For `global.imageRegistry: registry.example.com:5000/mirror`:
+
+| Per-image repository | Resolved repository (tag/digest unchanged) |
+|---|---|
+| `ghcr.io/artifact-keeper/artifact-keeper-backend` | `registry.example.com:5000/mirror/artifact-keeper/artifact-keeper-backend` |
+| `alpine` or `docker.io/alpine` | `registry.example.com:5000/mirror/library/alpine` |
+| `aquasec/trivy` | `registry.example.com:5000/mirror/aquasec/trivy` |
+| `source.example.com:5001/backend` | `registry.example.com:5000/mirror/backend` |
+| `registry.example.com:5000/mirror/team/backend` | `registry.example.com:5000/mirror/team/backend` |
+
+**This rewrites references; it does not copy images or map repository names.**
+Populate the destination with the required images and tags/digests before
+deploying. A Docker Hub proxy cannot serve GHCR or GCR images merely because the
+registry was changed. For example, the GHCR backend path
+`artifact-keeper/artifact-keeper-backend` is different from its Docker Hub path
+`artifactkeeper/backend`. When using Docker Hub (or a proxy containing those
+images), set the corresponding repositories explicitly:
+
+```yaml
+global:
+  imageRegistry: registry.example.com/dockerhub
+backend:
+  image:
+    repository: artifactkeeper/backend
+web:
+  image:
+    repository: artifactkeeper/web
+scannerAdapter:
+  image:
+    repository: artifactkeeper/scanner-adapter
+```
+
+This example only remaps those three components. Any other enabled image must
+also exist at its resulting destination path; optional cosign and edge images
+are not automatically assigned Docker Hub aliases.
+
+There are no dependency subcharts: PostgreSQL and the other supporting services
+are templates in this chart and use the same image helper. Raw `extraManifests`
+are user-owned and are not automatically rewritten. Runtime downloads such as
+Trivy's vulnerability database are not container images; configure
+`trivy.db.repository` and `trivy.db.javaRepository` separately for offline use.
+Registry credentials and mirror access must also be configured independently.
+
+**Upgrading:** older chart versions advertised a default
+`ghcr.io/artifact-keeper` prefix but ignored it. The default is now empty to
+preserve the previous rendered images. Remove any explicitly saved old
+`global.imageRegistry` value (including when using `helm upgrade --reuse-values`)
+or set it to `""` unless you intend to rewrite every image.
 
 ## Deployment Profiles
 

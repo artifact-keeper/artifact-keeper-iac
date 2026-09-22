@@ -8,6 +8,9 @@ README.md.gotmpl
 # helm-docs config
 .helmdocsrc
 
+# Local rendering tests
+tests/
+
 # Version control
 .git/
 .gitignore

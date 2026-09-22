@@ -439,10 +439,11 @@ backend:
   #     (`env.STORAGE_BACKEND: s3`) and set `persistence.enabled: false`.
   #   - `scan-workspace`: `scanWorkspace.enabled: false` (scanning still
   #     works; the workspace becomes a per-pod emptyDir).
-  #   - `shared-config`: only mounted when `dependencyTrack.enabled` is true,
-  #     and there is no way around it today -- the DT bootstrap hands the
-  #     backend its API key through that PVC, so DT-enabled installs have to
-  #     stay on Recreate.
+  #   - `shared-config`: only mounted when `dependencyTrack.enabled` is true
+  #     and `dependencyTrack.existingApiKeySecret` is empty -- the DT bootstrap
+  #     then hands the backend its API key through that PVC. Supply the key
+  #     from a Secret with `dependencyTrack.existingApiKeySecret` to drop the
+  #     volume; otherwise DT-enabled installs have to stay on Recreate.
   # It also wants `replicaCount` (or `autoscaling.minReplicas`) >= 2, since a
   # single replica still goes away while its one pod restarts. Pair it with
   # `podDisruptionBudget.enabled: true` so node drains keep the same floor.
@@ -973,7 +974,9 @@ dependencyTrack:
   # postgres.enabled, the external server otherwise. It must exist and be owned
   # by externalDatabase.username before the first install, since the chart only
   # creates it on the in-chart Postgres. Two releases sharing one PostgreSQL
-  # server collide on the default name.
+  # server collide on the default name. An empty value falls back to
+  # dependency_track. On the in-chart Postgres, setting it to
+  # postgres.auth.database shares that database and skips CREATE DATABASE.
   database: "dependency_track"
   persistence:
     size: 5Gi

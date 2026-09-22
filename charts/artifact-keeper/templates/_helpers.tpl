@@ -290,6 +290,15 @@ is not required when the key is supplied directly. See iac issue 313.
 {{- if and .Values.dependencyTrack.enabled (not .Values.dependencyTrack.existingApiKeySecret) -}}true{{- end -}}
 {{- end -}}
 
+{{/*
+Database Dependency-Track connects to (dependencyTrack.database). An empty value
+falls back to dependency_track rather than rendering a JDBC URL ending in "/"
+and an init script with "CREATE DATABASE ;".
+*/}}
+{{- define "artifact-keeper.dtrackDatabase" -}}
+{{- .Values.dependencyTrack.database | default "dependency_track" -}}
+{{- end -}}
+
 {{- define "artifact-keeper.validateSecrets" -}}
 {{- if or .Values.externalSecrets.enabled .Values.secrets.existingSecret -}}
 {{- /* Secrets are supplied externally; no chart-owned Secret to validate. */ -}}

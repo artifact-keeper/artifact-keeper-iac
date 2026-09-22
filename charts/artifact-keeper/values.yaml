@@ -144,11 +144,12 @@ backend:
     pullPolicy: Always
   # -- Pod-level securityContext. Defaults are image-native: the backend
   # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
-  # with ownership 1001:0 (see artifact-keeper docker/Dockerfile.backend).
-  # The pod MUST run as UID 1001 or Grype hits EACCES on the DB. fsGroup
-  # only chowns mounted volumes -- it does NOT touch the image's root
-  # filesystem -- so changing runAsUser away from 1001 will break scans
-  # even if fsGroup matches.
+  # with ownership 1001:0 and group-readable (see artifact-keeper
+  # docker/Dockerfile.backend). The pod must run as UID 1001, or as any UID
+  # whose primary group is GID 0 (the OpenShift arbitrary-UID model, where
+  # the backend image's data dirs are group-writable). Any other UID/GID
+  # combination makes Grype hit EACCES on the DB: fsGroup only chowns mounted
+  # volumes -- it does NOT touch the image's root filesystem.
   #
   # If you are upgrading from chart <= 1.x where this defaulted to
   # 1000:1000, your storage/scan-workspace PVCs will be recursively
@@ -1112,6 +1113,43 @@ ingress:
     enabled: true
     secretName: artifact-keeper-tls
 
+# -- OpenShift Route configuration
+# Alternative to ingress for OpenShift clusters, whose HAProxy router serves
+# Route objects rather than a Kubernetes Ingress controller. Disabled by
+# default; the OpenShift values overlay (values-openshift.yaml) turns it on and
+# turns ingress off. Do not enable both route and ingress for the same host.
+route:
+  enabled: false
+  # -- External hostname shared by every Route, e.g.
+  # artifacts.apps.<cluster-domain>. Required when route.enabled (falls back to
+  # fleet.host in fleet mode). A router-generated hostname is not supported:
+  # the router would give each of the per-path Routes its own hostname and the
+  # path fan-out would fall apart.
+  host: ""
+  # -- HAProxy server timeout, rendered as the
+  # haproxy.router.openshift.io/timeout annotation on every Route. The router
+  # default is 30s, which cuts off large artifact uploads and downloads; 300s
+  # matches ingress.proxyReadTimeoutSeconds. Empty omits the annotation.
+  timeout: 300s
+  # -- Extra annotations applied to every Route. A
+  # haproxy.router.openshift.io/timeout set here overrides route.timeout.
+  annotations: {}
+  tls:
+    # -- Serve the Routes over TLS. edge termination uses the router's default
+    # certificate unless you supply your own via annotations/secret.
+    enabled: true
+    # -- TLS termination. Only `edge` is supported: the chart's Services speak
+    # plain HTTP (so reencrypt has nothing to re-encrypt to), and passthrough
+    # Routes cannot carry the per-path spec.path this chart relies on.
+    termination: edge
+    # -- What to do with plain-HTTP requests. Redirect sends them to HTTPS.
+    insecureEdgeTerminationPolicy: Redirect
+  dtrack:
+    # -- Publish a /dtrack Route to the bundled Dependency-Track service.
+    # Mirrors ingress.dtrack.enabled; only has effect when
+    # dependencyTrack.enabled is true.
+    enabled: false
+
 # -- Secrets
 # These are development defaults. For production, override via --set or
 # use existingSecret references. Never commit real credentials here.
@@ -1208,6 +1246,20 @@ networkPolicy:
   # the community ingress-nginx controller chart; set it to the namespace your
   # controller actually runs in. Set to "" only if you understand the above.
   ingressNamespace: ingress-nginx
+  # -- NetworkPolicy `from` peers admitted to the backend, web and edge ports
+  # as the ingress controller. Empty (the default) renders the ingress-nginx
+  # peer above (pods labeled `app.kubernetes.io/name: ingress-nginx`, in
+  # ingressNamespace). Set a list of NetworkPolicyPeer objects
+  # (namespaceSelector and/or podSelector) for any other controller; it
+  # replaces the ingress-nginx peer and ingressNamespace is then ignored.
+  # values-openshift.yaml sets this to the OpenShift router namespace.
+  ingressPeers: []
+  # -- Destination ports allowed for DNS egress, each opened for UDP and TCP.
+  # OpenShift needs [53, 5353]: its dns-default Service maps port 53 to pod
+  # port 5353 and NetworkPolicy matches the pod port. Also used by the fleet
+  # guardrail NetworkPolicy. Must not be empty.
+  dnsPorts:
+    - 53
 
 # -- Prometheus ServiceMonitor
 serviceMonitor:
@@ -1314,6 +1366,12 @@ fleet:
     # -- Name of an existing Secret holding superuser credentials for the shared
     # server, used only by the bootstrap Job. Expected keys: username, password.
     adminSecret: ""
+    # -- Pod securityContext for the bootstrap Job. Empty ({}) keeps the chart
+    # default of runAsUser/fsGroup 70 (the postgres image's uid) for plain
+    # Kubernetes. On OpenShift, set this to omit runAsUser/fsGroup so the
+    # restricted-v2 SCC can assign an arbitrary UID (the OpenShift overlay does
+    # this). The client tools only write to HOME=/tmp, so any UID works.
+    podSecurityContext: {}
   # -- Per-namespace guardrails. Each toggle is independent and off by default.
   # ResourceQuota and LimitRange are sized from the preset; the NetworkPolicy
   # restricts ingress to the named ingress-controller namespace and egress to

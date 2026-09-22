@@ -54,25 +54,14 @@ spec:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
     {{- end }}
+    {{- /* Peers: networkPolicy.ingressPeers when set (e.g. the OpenShift
+    router), else the ingress-nginx peer below. See the ingressPeers helper. */}}
     # Allow ingress controller. The namespace is pinned via
     # networkPolicy.ingressNamespace: an unrestricted namespaceSelector would
     # admit any pod carrying this label in ANY namespace, which on a shared
     # cluster is a cross-tenant path that bypasses the ingress entirely.
     - from:
-        {{- if .Values.networkPolicy.ingressNamespace }}
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | quote }}
-        {{- else }}
-        # Explicit empty selector = ALL namespaces. It must be `{}` and not an
-        # omitted/null value: a nil namespaceSelector means "this namespace
-        # only", which would deny the ingress controller and take the instance
-        # offline.
-        - namespaceSelector: {}
-        {{- end }}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: ingress-nginx
+        {{- include "artifact-keeper.networkPolicy.ingressPeers" . | trim | nindent 8 }}
       ports:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
@@ -89,10 +78,7 @@ spec:
   egress:
     # DNS resolution
     - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+        {{- include "artifact-keeper.networkPolicy.dnsPorts" . | trim | nindent 8 }}
     # PostgreSQL (in-cluster or external). Intentionally no destination
     # selector: the database may live outside this namespace (externalDatabase)
     # and a pod/namespace selector here would break those installs.
@@ -171,20 +157,7 @@ spec:
   ingress:
     # Namespace pinned; see the note on the backend policy above.
     - from:
-        {{- if .Values.networkPolicy.ingressNamespace }}
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | quote }}
-        {{- else }}
-        # Explicit empty selector = ALL namespaces. It must be `{}` and not an
-        # omitted/null value: a nil namespaceSelector means "this namespace
-        # only", which would deny the ingress controller and take the instance
-        # offline.
-        - namespaceSelector: {}
-        {{- end }}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: ingress-nginx
+        {{- include "artifact-keeper.networkPolicy.ingressPeers" . | trim | nindent 8 }}
       ports:
         - port: {{ .Values.web.service.port }}
           protocol: TCP
@@ -200,10 +173,7 @@ spec:
   egress:
     # DNS resolution
     - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+        {{- include "artifact-keeper.networkPolicy.dnsPorts" . | trim | nindent 8 }}
     # Backend API
     - to:
         - podSelector:
@@ -233,20 +203,7 @@ spec:
   ingress:
     # Namespace pinned; see the note on the backend policy above.
     - from:
-        {{- if .Values.networkPolicy.ingressNamespace }}
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | quote }}
-        {{- else }}
-        # Explicit empty selector = ALL namespaces. It must be `{}` and not an
-        # omitted/null value: a nil namespaceSelector means "this namespace
-        # only", which would deny the ingress controller and take the instance
-        # offline.
-        - namespaceSelector: {}
-        {{- end }}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: ingress-nginx
+        {{- include "artifact-keeper.networkPolicy.ingressPeers" . | trim | nindent 8 }}
       ports:
         - port: {{ .Values.edge.service.port }}
           protocol: TCP
@@ -261,10 +218,7 @@ spec:
   egress:
     # DNS resolution
     - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+        {{- include "artifact-keeper.networkPolicy.dnsPorts" . | trim | nindent 8 }}
     # Primary backend (PRIMARY_URL)
     - to:
         - podSelector:
@@ -334,10 +288,7 @@ spec:
   egress:
     # DNS resolution (for vuln DB updates)
     - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+        {{- include "artifact-keeper.networkPolicy.dnsPorts" . | trim | nindent 8 }}
     # HTTPS (download vulnerability databases)
     - ports:
         - port: 443
@@ -370,10 +321,7 @@ spec:
   egress:
     # DNS resolution
     - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+        {{- include "artifact-keeper.networkPolicy.dnsPorts" . | trim | nindent 8 }}
     # Backend registry endpoint (pull target images to scan)
     - to:
         - podSelector:
@@ -417,10 +365,7 @@ spec:
   egress:
     # DNS resolution
     - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+        {{- include "artifact-keeper.networkPolicy.dnsPorts" . | trim | nindent 8 }}
     # PostgreSQL
     - ports:
         - port: 5432

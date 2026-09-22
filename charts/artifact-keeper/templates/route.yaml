@@ -1,0 +1,58 @@
+{{/*
+=============================================================================
+OpenShift Route (alternative to Ingress)
+=============================================================================
+Renders only when route.enabled is set, which is the OpenShift path: the
+platform's HAProxy router serves Routes rather than a Kubernetes Ingress
+controller. Mutually exclusive with ingress.enabled in practice; enabling both
+would publish the same hostname twice.
+
+The Ingress puts every path on one host and fans them out to the backend, web,
+and (optionally) Dependency-Track services. A Route targets a single Service,
+so that fan-out becomes one Route per path prefix, all sharing route.host
+(required; a router-generated host would differ per Route). The router matches
+the longest path prefix, so the specific backend/dtrack paths win over the "/"
+web catch-all. Only edge TLS termination is supported.
+
+This file is a starting point; review it against your cluster's router,
+certificate, and hostname policies before production use.
+=============================================================================
+*/}}
+{{- if .Values.route.enabled }}
+{{- $fullName := include "artifact-keeper.fullname" . -}}
+{{- $fleetHost := "" -}}
+{{- if .Values.fleet -}}{{- $fleetHost = .Values.fleet.host | default "" -}}{{- end -}}
+{{- $host := required "route.host must be set when route.enabled is true (the external hostname shared by every Route, e.g. artifacts.apps.<cluster-domain>)" (.Values.route.host | default $fleetHost) -}}
+{{- if and .Values.route.tls.enabled (ne .Values.route.tls.termination "edge") -}}
+{{- fail (printf "route.tls.termination %q is not supported; only \"edge\" works with this chart's plain-HTTP Services and per-path Routes" .Values.route.tls.termination) -}}
+{{- end -}}
+{{- $annotations := dict -}}
+{{- if .Values.route.timeout -}}
+{{- $_ := set $annotations "haproxy.router.openshift.io/timeout" (toString .Values.route.timeout) -}}
+{{- end -}}
+{{- $annotations = merge (deepCopy (default dict .Values.route.annotations)) $annotations -}}
+{{- $common := dict "root" . "host" $host "annotations" $annotations "tls" .Values.route.tls -}}
+{{- $backendPaths := concat (list "/api" "/v2" "/health" "/ready") (splitList " " (trim (include "artifact-keeper.backendFormatPaths" .))) -}}
+{{- range $path := $backendPaths }}
+---
+{{ include "artifact-keeper.routeObject" (merge (dict
+    "name" (printf "%s-route-%s" $fullName (trimPrefix "/" $path))
+    "path" $path
+    "service" (printf "%s-backend" $fullName)
+    "targetPort" "http") $common) }}
+{{- end }}
+{{- if and .Values.dependencyTrack.enabled .Values.route.dtrack.enabled }}
+---
+{{ include "artifact-keeper.routeObject" (merge (dict
+    "name" (printf "%s-route-dtrack" $fullName)
+    "path" "/dtrack"
+    "service" (printf "%s-dtrack" $fullName)
+    "targetPort" 8080) $common) }}
+{{- end }}
+---
+{{ include "artifact-keeper.routeObject" (merge (dict
+    "name" (printf "%s-route-web" $fullName)
+    "path" "/"
+    "service" (printf "%s-web" $fullName)
+    "targetPort" "http") $common) }}
+{{- end }}

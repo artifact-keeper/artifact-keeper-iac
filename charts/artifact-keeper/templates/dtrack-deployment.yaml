@@ -233,12 +233,14 @@ metadata:
 data:
   init-dtrack.sh: |
     #!/bin/sh
-    # Bootstrap Dependency-Track: change the default admin password, then read
-    # the Automation team's API key onto a shared volume for the backend.
+    # Bootstrap Dependency-Track: change the default admin password, then
+    # generate an API key for the Automation team and write it onto a shared
+    # volume for the backend. Optionally enables NVD API mirroring.
     #
     # With dependencyTrack.existingApiKeySecret set there is no key to read and
     # no volume to write it to, so DEPENDENCY_TRACK_API_KEY_FILE is unset and
-    # this Job reconciles the admin password only.
+    # this Job reconciles the admin password (and, when
+    # dependencyTrack.bootstrap.nvdApiEnabled is true, the NVD property) only.
     #
     # Deliberately depends on curl only. An earlier version ran
     # "apk add --no-cache curl jq" here, which failed on every cluster (the pod
@@ -254,6 +256,7 @@ data:
     DT_NEW_PASS="${DEPENDENCY_TRACK_ADMIN_PASSWORD:-}"
     # Empty when the key is supplied through dependencyTrack.existingApiKeySecret.
     API_KEY_FILE="${DEPENDENCY_TRACK_API_KEY_FILE:-}"
+    NVD_API_ENABLED="${NVD_API_ENABLED:-false}"
 
     fail() {
       echo "[dtrack-init] ERROR: $1" >&2
@@ -266,9 +269,21 @@ data:
       fail "DEPENDENCY_TRACK_ADMIN_PASSWORD is empty. The chart generates one when dependencyTrack.adminPassword is unset; an empty value here means the Secret was supplied externally without this key."
     fi
 
-    if [ -n "$API_KEY_FILE" ] && [ -f "$API_KEY_FILE" ] && [ -s "$API_KEY_FILE" ]; then
-      echo "[dtrack-init] API key already provisioned, nothing to do"
-      exit 0
+    # Generate a key only when a key file is wanted and not yet written. With
+    # existingApiKeySecret there is no key file, so no key is ever generated.
+    NEED_KEY=false
+    if [ -n "$API_KEY_FILE" ]; then
+      if [ -f "$API_KEY_FILE" ] && [ -s "$API_KEY_FILE" ]; then
+        if [ "$NVD_API_ENABLED" != "true" ]; then
+          echo "[dtrack-init] API key already provisioned, nothing to do"
+          exit 0
+        fi
+        # Keep going only to apply dependencyTrack.bootstrap.nvdApiEnabled, so
+        # turning it on for an existing install takes effect on the next upgrade.
+        echo "[dtrack-init] API key already provisioned; applying NVD setting only"
+      else
+        NEED_KEY=true
+      fi
     fi
 
     echo "[dtrack-init] Waiting for Dependency-Track at $DT_URL"
@@ -315,49 +330,89 @@ data:
     [ -n "$TOKEN" ] || fail "authentication failed after password change"
 
     if [ -z "$API_KEY_FILE" ]; then
-      echo "[dtrack-init] API key supplied through dependencyTrack.existingApiKeySecret; admin password reconciled, no key to extract"
-      exit 0
+      echo "[dtrack-init] API key supplied through dependencyTrack.existingApiKeySecret; admin password reconciled, no key to generate"
     fi
 
-    TEAMS=$(curl -sS -f "$DT_URL/api/v1/team" -H "Authorization: Bearer $TOKEN") \
-      || fail "could not list teams"
+    if [ "$NEED_KEY" = "true" ]; then
+      TEAMS=$(curl -sS -f "$DT_URL/api/v1/team" -H "Authorization: Bearer $TOKEN") \
+        || fail "could not list teams"
 
-    # Extract the Automation team's first API key without jq. /api/v1/team
-    # returns a JSON array of team objects; put each object on its own line so
-    # the match cannot run across a team boundary and pick up a different
-    # team's key, keep only the Automation line, then take the first key from
-    # inside that object's apiKeys array.
-    #
-    # This assumes Dependency-Track < 4.13. From 4.13 the server hashes API
-    # keys and no longer returns them in plaintext here, so this extraction
-    # (and any other read-the-key-back approach, jq included) stops working.
-    # The version guard lives on dependencyTrack.image.tag in values.yaml.
-    AUTOMATION=$(printf '%s' "$TEAMS" | sed 's/{"uuid"/\
+      # Find the Automation team's UUID without jq. /api/v1/team returns a
+      # JSON array of team objects; put each object on its own line so the
+      # match cannot run across a team boundary, keep only the Automation
+      # line, then take the UUID that now starts it.
+      AUTOMATION=$(printf '%s' "$TEAMS" | sed 's/{"uuid"/\
     {"uuid"/g' | grep '"name":"Automation"' | head -n 1)
 
-    [ -n "$AUTOMATION" ] || fail "no Automation team found in Dependency-Track. Expected the default team created on first run."
+      [ -n "$AUTOMATION" ] || fail "no Automation team found in Dependency-Track. Expected the default team created on first run."
 
-    API_KEY=$(printf '%s' "$AUTOMATION" \
-      | sed -n 's/.*"apiKeys":\[[^]]*"key":"\([A-Za-z0-9_-]\{16,\}\)".*/\1/p' \
-      | head -n 1)
+      TEAM_UUID=$(printf '%s' "$AUTOMATION" \
+        | sed -n 's/^{"uuid":"\([0-9A-Fa-f-]\{36\}\)".*/\1/p')
+      case "$TEAM_UUID" in
+        "") fail "could not extract the Automation team UUID. The Dependency-Track response shape may have changed." ;;
+        *[!0-9A-Fa-f-]*) fail "extracted team UUID contains unexpected characters" ;;
+      esac
 
-    # Validate rather than trust the parse. A malformed extraction fails the
-    # deploy loudly instead of writing a bad key that surfaces later as
-    # confusing 401s from the backend.
-    case "$API_KEY" in
-      "") fail "could not extract an API key from the Automation team. The Dependency-Track response shape may have changed; set dependencyTrack.enabled=false and configure DEPENDENCY_TRACK_API_KEY directly if this persists." ;;
-      *[!A-Za-z0-9_-]*) fail "extracted API key contains unexpected characters, refusing to write it" ;;
-    esac
+      # Generate a new key rather than reading one back from the team
+      # listing: from 4.13 Dependency-Track hashes API keys and the listing
+      # only carries a masked form. PUT /api/v1/team/{uuid}/key is the
+      # generate call on every 4.x release (201 with the plaintext key in the
+      # body, the only time it is returned); POST only regenerates an
+      # existing key. Each successful run adds one key to the team; the early
+      # exit above keeps that to once per shared volume.
+      echo "[dtrack-init] Generating an API key for the Automation team"
+      KEY_RESP=$(curl -sS -f -X PUT "$DT_URL/api/v1/team/$TEAM_UUID/key" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json") \
+        || fail "PUT /api/v1/team/$TEAM_UUID/key failed"
 
-    # umask 077 keeps the key from being world-readable on the shared PVC.
-    # The backend pod runs as a different UID (1001, fsGroup 0) than this Job
-    # (1000/1000); it can read the 0600 file because the kubelet re-applies
-    # fsGroup ownership on volume mount (fsGroupChangePolicy defaults to
-    # Always). If you override fsGroupChangePolicy to OnRootMismatch on the
-    # backend pod, verify it can still read this file.
-    umask 077
-    printf '%s\n' "$API_KEY" > "$API_KEY_FILE"
-    echo "[dtrack-init] API key written to $API_KEY_FILE"
+      # Match "key" exactly; the response also carries "maskedKey" and, on
+      # 4.13+, "publicId".
+      API_KEY=$(printf '%s' "$KEY_RESP" \
+        | sed -n 's/.*"key":"\([A-Za-z0-9_-]\{16,\}\)".*/\1/p' \
+        | head -n 1)
+
+      # Validate rather than trust the parse. A malformed extraction fails the
+      # deploy loudly instead of writing a bad key that surfaces later as
+      # confusing 401s from the backend.
+      case "$API_KEY" in
+        "") fail "could not extract an API key from the key-generation response. The Dependency-Track response shape may have changed; set dependencyTrack.enabled=false and configure DEPENDENCY_TRACK_API_KEY directly if this persists." ;;
+        *[!A-Za-z0-9_-]*) fail "extracted API key contains unexpected characters, refusing to write it" ;;
+      esac
+
+      # umask 077 keeps the key from being world-readable on the shared PVC.
+      # The backend pod runs as a different UID (1001, fsGroup 0) than this Job
+      # (1000/1000); it can read the 0600 file because the kubelet re-applies
+      # fsGroup ownership on volume mount (fsGroupChangePolicy defaults to
+      # Always). If you override fsGroupChangePolicy to OnRootMismatch on the
+      # backend pod, verify it can still read this file.
+      #
+      # Write to a temp file and rename: the key cannot be read back from
+      # Dependency-Track, and a truncated file would pass the non-empty check
+      # above on the next run and never be replaced.
+      umask 077
+      printf '%s\n' "$API_KEY" > "$API_KEY_FILE.tmp"
+      mv "$API_KEY_FILE.tmp" "$API_KEY_FILE"
+      echo "[dtrack-init] API key written to $API_KEY_FILE"
+    fi
+
+    # Opt-in (dependencyTrack.bootstrap.nvdApiEnabled): switch NVD mirroring
+    # to the NVD REST API 2.0. Off by default because, without an NVD API key
+    # (set in the Dependency-Track UI), the API is heavily rate-limited, and
+    # because changing the vulnerability source on an existing install is a
+    # behaviour change. When off, the property is left untouched. A failure
+    # only warns: Dependency-Track answers 404 for an unknown property.
+    if [ "$NVD_API_ENABLED" = "true" ]; then
+      echo "[dtrack-init] Enabling NVD API mirroring (vuln-source/nvd.api.enabled)"
+      NVD_HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+        -X POST "$DT_URL/api/v1/configProperty" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"groupName":"vuln-source","propertyName":"nvd.api.enabled","propertyValue":"true"}' || true)
+      if [ "$NVD_HTTP" != "200" ]; then
+        echo "[dtrack-init] WARNING: setting nvd.api.enabled returned HTTP $NVD_HTTP" >&2
+      fi
+    fi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -437,6 +492,8 @@ spec:
           env:
             - name: DEPENDENCY_TRACK_URL
               value: "http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080"
+            - name: NVD_API_ENABLED
+              value: {{ .Values.dependencyTrack.bootstrap.nvdApiEnabled | toString | quote }}
             - name: DEPENDENCY_TRACK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:

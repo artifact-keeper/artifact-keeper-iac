@@ -8,9 +8,13 @@
 
 # OpenShift overlay.
 #
-# Install with:
+# Install with (route.host is required):
 #   helm install ak charts/artifact-keeper \
-#     -f charts/artifact-keeper/values-openshift.yaml
+#     -f charts/artifact-keeper/values-openshift.yaml \
+#     --set route.host=artifacts.apps.<cluster-domain>
+#
+# The bundled postgres:16-alpine does NOT start under restricted-v2 as-is; use
+# an external database or see the postgres notes at the bottom first.
 #
 # What this overlay does:
 #   1. Serves the app through OpenShift Routes instead of a Kubernetes Ingress.
@@ -20,6 +24,13 @@
 #      only runAsNonRoot is left behind.
 #   3. Drops the OpenSearch root chown init container, relying on the
 #      platform-assigned fsGroup to make the data volume group-writable.
+#   4. Points the chart NetworkPolicies at the OpenShift router and opens DNS
+#      egress on 5353 as well as 53.
+#
+# Not supported under restricted-v2: imageBuilder (rootless BuildKit). It pins
+# runAsUser and needs an Unconfined seccomp profile, which restricted-v2
+# forbids. Leave imageBuilder.enabled false, or grant its ServiceAccount a
+# custom SCC yourself.
 #
 # The application tier (backend, web, edge, trivy, scanner-adapter,
 # Dependency-Track) uses UBI / arbitrary-UID-friendly images and runs cleanly
@@ -33,10 +44,15 @@ ingress:
 
 route:
   enabled: true
-  # Empty host lets the OpenShift router generate a hostname per Route. Set this
-  # to your apps-domain hostname (e.g. artifacts.apps.<cluster>.example.com) to
-  # pin it, and add the matching Route/edge certificate via route.annotations.
+  # REQUIRED: the hostname every Route shares, usually under the cluster apps
+  # domain (e.g. artifacts.apps.<cluster>.example.com). Rendering fails while
+  # this is empty; a router-generated host would differ per Route and break the
+  # path fan-out. Edge TLS uses the router's default certificate, which covers
+  # *.apps.<cluster-domain>.
   host: ""
+  # HAProxy timeout for every Route (router default is 30s, too short for
+  # large artifact transfers). Matches the Ingress's 300s.
+  timeout: 300s
   tls:
     enabled: true
     termination: edge
@@ -44,6 +60,27 @@ route:
   # Publish Dependency-Track only if you front it with your own auth.
   dtrack:
     enabled: false
+
+# --- NetworkPolicy: admit the OpenShift router, allow OpenShift DNS ----------
+networkPolicy:
+  # The router pods live in openshift-ingress and carry no ingress-nginx label,
+  # so the default peer would deny them (every Route returns 503). Admit the
+  # router namespace by its policy-group label instead. The first label is the
+  # long-standing one on openshift-ingress; the second is the newer form the
+  # OVN-Kubernetes docs use. Either match admits the router. Check both against
+  # `oc get ns openshift-ingress --show-labels` on your cluster.
+  ingressPeers:
+    - namespaceSelector:
+        matchLabels:
+          network.openshift.io/policy-group: ingress
+    - namespaceSelector:
+        matchLabels:
+          policy-group.network.openshift.io/ingress: ""
+  # dns-default in openshift-dns listens on pod port 5353 behind service port
+  # 53; NetworkPolicy matches the pod port, so both are needed.
+  dnsPorts:
+    - 53
+    - 5353
 
 # --- Storage -----------------------------------------------------------------
 global:

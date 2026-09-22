@@ -629,7 +629,7 @@ router does longest-path-prefix matching, so specific backend paths win over the
 "/" web catch-all. Call with a dict:
   root        - the top-level "." (for labels)
   name        - metadata.name
-  host        - shared external hostname (may be empty to let the router assign)
+  host        - shared external hostname (required; see route.yaml)
   path        - spec.path prefix
   service     - target Service name
   targetPort  - service port name or number
@@ -649,9 +649,7 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- if .host }}
-  host: {{ .host }}
-  {{- end }}
+  host: {{ .host | quote }}
   path: {{ .path }}
   to:
     kind: Service
@@ -665,4 +663,51 @@ spec:
     insecureEdgeTerminationPolicy: {{ .tls.insecureEdgeTerminationPolicy }}
   {{- end }}
   wildcardPolicy: None
+{{- end -}}
+
+{{/*
+NetworkPolicy `from` peers for the ingress controller (backend, web and edge
+policies). networkPolicy.ingressPeers, when non-empty, is rendered verbatim so
+non-nginx controllers (the OpenShift router, Traefik, a Gateway) can be
+admitted. Empty keeps the historical ingress-nginx peer, namespace-pinned via
+networkPolicy.ingressNamespace.
+*/}}
+{{- define "artifact-keeper.networkPolicy.ingressPeers" -}}
+{{- if .Values.networkPolicy.ingressPeers -}}
+{{- toYaml .Values.networkPolicy.ingressPeers -}}
+{{- else -}}
+{{- if .Values.networkPolicy.ingressNamespace }}
+- namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | quote }}
+{{- else }}
+# Explicit empty selector = ALL namespaces. It must be `{}` and not an
+# omitted/null value: a nil namespaceSelector means "this namespace
+# only", which would deny the ingress controller and take the instance
+# offline.
+- namespaceSelector: {}
+{{- end }}
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+{{- end -}}
+{{- end -}}
+
+{{/*
+DNS egress ports (UDP and TCP for each entry of networkPolicy.dnsPorts). An
+empty list would leave the DNS egress rule with no ports, which allows ALL
+egress, so it is rejected. OpenShift needs 5353: dns-default maps service port 53 to pod port
+5353, and NetworkPolicy matches the post-DNAT pod port.
+*/}}
+{{- define "artifact-keeper.networkPolicy.dnsPorts" -}}
+{{- $ports := .Values.networkPolicy.dnsPorts -}}
+{{- if not $ports -}}
+{{- fail "networkPolicy.dnsPorts must list at least one port (default [53])" -}}
+{{- end -}}
+{{- range $p := $ports }}
+- port: {{ $p }}
+  protocol: UDP
+- port: {{ $p }}
+  protocol: TCP
+{{- end -}}
 {{- end -}}

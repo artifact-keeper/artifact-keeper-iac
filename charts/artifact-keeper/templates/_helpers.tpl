@@ -299,6 +299,27 @@ and an init script with "CREATE DATABASE ;".
 {{- .Values.dependencyTrack.database | default "dependency_track" -}}
 {{- end -}}
 
+{{/*
+Whether Dependency-Track reads its database password from
+externalDatabase.existingSecret instead of the chart's app Secret (secretName).
+
+Only with an external database and externalDatabase.existingSecret set, and then
+only when one of these holds:
+- externalDatabase.existingPasswordKey is set: the operator says where it is.
+- The chart renders its own Secret (no externalSecrets.enabled, no
+  secrets.existingSecret). secrets.yaml leaves POSTGRES_PASSWORD out of that
+  Secret whenever externalDatabase.existingSecret is set, so secretName has
+  nothing to offer.
+With External Secrets (which syncs POSTGRES_PASSWORD) or secrets.existingSecret,
+the app Secret keeps supplying it, as before.
+*/}}
+{{- define "artifact-keeper.dtrackDbPasswordFromExistingSecret" -}}
+{{- $ext := .Values.externalDatabase -}}
+{{- if and (not .Values.postgres.enabled) $ext.existingSecret -}}
+{{- if or $ext.existingPasswordKey (and (not .Values.externalSecrets.enabled) (not .Values.secrets.existingSecret)) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "artifact-keeper.validateSecrets" -}}
 {{- if or .Values.externalSecrets.enabled .Values.secrets.existingSecret -}}
 {{- /* Secrets are supplied externally; no chart-owned Secret to validate. */ -}}

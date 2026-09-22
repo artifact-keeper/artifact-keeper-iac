@@ -649,10 +649,13 @@ externalDatabase:
   database: "artifact_registry"
   existingSecret: ""
   existingSecretKey: "DATABASE_URL"
-  # Key in `existingSecret` holding the database password used by the
-  # dependency-track deployment (`ALPINE_DATABASE_PASSWORD`). Only consulted
-  # when `postgres.enabled=false` and `externalDatabase.existingSecret` is
-  # set. Defaults to "POSTGRES_PASSWORD" if left empty.
+  # -- Key in existingSecret holding the database password Dependency-Track
+  # uses (ALPINE_DATABASE_PASSWORD). With postgres.enabled=false and
+  # existingSecret set, Dependency-Track reads its password from existingSecret
+  # when this is set, or when the chart creates its own Secret (neither
+  # externalSecrets.enabled nor secrets.existingSecret); the key then defaults
+  # to POSTGRES_PASSWORD. Otherwise it keeps reading POSTGRES_PASSWORD from the
+  # app Secret, which External Secrets or secrets.existingSecret supply.
   existingPasswordKey: ""
 
 # -- OpenSearch (full-text search engine)

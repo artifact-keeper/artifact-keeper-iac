@@ -104,7 +104,7 @@ spec:
               value: {{ .Values.externalDatabase.username | quote }}
               {{- end }}
             - name: ALPINE_DATABASE_PASSWORD
-              {{- if and (not .Values.postgres.enabled) .Values.externalDatabase.existingSecret }}
+              {{- if eq (include "artifact-keeper.dtrackDbPasswordFromExistingSecret" .) "true" }}
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.externalDatabase.existingSecret }}

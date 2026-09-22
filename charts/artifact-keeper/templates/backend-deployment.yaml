@@ -28,8 +28,8 @@ spec:
     metadata:
       labels:
         {{- include "artifact-keeper.backend.selectorLabels" . | nindent 8 }}
-        {{- with .Values.backend.podLabels }}
-        {{- toYaml . | nindent 8 }}
+        {{- range $key, $value := .Values.backend.podLabels }}
+        {{ $key }}: {{ $value | quote }}
         {{- end }}
     spec:
       {{- with (.Values.backend.tolerations | default .Values.global.tolerations) }}

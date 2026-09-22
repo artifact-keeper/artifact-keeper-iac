@@ -405,7 +405,8 @@ backend:
     # backend.replicaCount run >1 without every replica fighting over one zone-pinned RWO volume.
     # This only frees the `storage` volume. The backend's other volumes stay ReadWriteOnce, so a
     # multi-replica backend also needs `scanWorkspace.enabled: false` and, while
-    # `dependencyTrack.enabled` is true, a ReadWriteMany class for the `shared-config` PVC.
+    # `dependencyTrack.enabled` is true, a ReadWriteMany class for the `shared-config` PVC
+    # (`sharedConfig.accessModes` / `sharedConfig.storageClass` below).
     accessModes: []
   # -- Scratch space for security scans (SCAN_WORKSPACE_PATH=/scan-workspace,
   # set whenever trivy.enabled). `enabled: true` backs it with a
@@ -421,6 +422,23 @@ backend:
   scanWorkspace:
     enabled: true
     size: 2Gi
+  # The `shared-config` PVC (1Gi, mounted at /shared), created whenever
+  # `dependencyTrack.enabled` is true. The Dependency-Track bootstrap Job
+  # writes the backend's API key there, and the backend reads it, so the
+  # backend pod and the Job must both be able to mount it.
+  sharedConfig:
+    # -- Storage class for the shared-config PVC. Empty falls back to
+    # `persistence.storageClass`, and if that is empty too the cluster's
+    # default class is used. Set it on its own to put shared-config on a
+    # different class than the backend's block storage (e.g. a CephFS or NFS
+    # class that supports ReadWriteMany).
+    storageClass: ""
+    # -- Access modes for the shared-config PVC. Defaults to ["ReadWriteOnce"]
+    # when unset/empty. Set to ["ReadWriteMany"] (with a class that supports
+    # it) so the backend and the Dependency-Track bootstrap Job can mount it
+    # from different nodes, and so a multi-replica backend or
+    # `strategy.type: RollingUpdate` works with Dependency-Track enabled.
+    accessModes: []
   # -- Deployment update strategy for the backend.
   #
   # `Recreate` (the default, and the behavior this chart hardcoded before the
@@ -441,9 +459,11 @@ backend:
   #     works; the workspace becomes a per-pod emptyDir).
   #   - `shared-config`: only mounted when `dependencyTrack.enabled` is true
   #     and `dependencyTrack.existingApiKeySecret` is empty -- the DT bootstrap
-  #     then hands the backend its API key through that PVC. Supply the key
-  #     from a Secret with `dependencyTrack.existingApiKeySecret` to drop the
-  #     volume; otherwise DT-enabled installs have to stay on Recreate.
+  #     then hands the backend its API key through that PVC. Either supply
+  #     the key from a Secret with `dependencyTrack.existingApiKeySecret` to
+  #     drop the volume, or put it on a ReadWriteMany class with
+  #     `sharedConfig.accessModes: [ReadWriteMany]` and, if the default class
+  #     cannot do RWX, `sharedConfig.storageClass`.
   # It also wants `replicaCount` (or `autoscaling.minReplicas`) >= 2, since a
   # single replica still goes away while its one pod restarts. Pair it with
   # `podDisruptionBudget.enabled: true` so node drains keep the same floor.

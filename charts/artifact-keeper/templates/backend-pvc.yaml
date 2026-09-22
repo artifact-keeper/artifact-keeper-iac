@@ -46,7 +46,7 @@ spec:
   storageClassName: {{ .Values.backend.persistence.storageClass | quote }}
   {{- end }}
 {{- end }}
-{{- if .Values.dependencyTrack.enabled }}
+{{- if eq (include "artifact-keeper.dtrackApiKeyFile" .) "true" }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

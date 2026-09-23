@@ -15,13 +15,21 @@ server:
 
 controller:
   replicas: 1
+  # The application controller keeps an in-memory cache of every resource
+  # in the clusters it manages, so its footprint grows with the cluster, not
+  # with the number of Applications. At a 512Mi limit it was OOM-killed in a
+  # loop (thousands of restarts, apps stuck OutOfSync) on a single node that
+  # also runs CI workloads: its working set reached the limit within ~11
+  # minutes of every start. 2Gi leaves room to measure the real steady state;
+  # lower it once `container_memory_working_set_bytes` for the pod has a week
+  # of history below ~1.2Gi.
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 512Mi
     limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 2Gi
 
 repoServer:
   replicas: 1

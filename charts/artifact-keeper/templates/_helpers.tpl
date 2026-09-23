@@ -710,10 +710,11 @@ only the keys present there take effect, the rest stay component-aware.
 
 {{/*
 The native package-format path prefixes that route to the backend, as a
-space-separated string. Consumed by both the Ingress (ingress.yaml) and the
-OpenShift Routes (route.yaml) via `splitList " " (trim ...)`, so the two never
-drift out of sync. Does NOT include /api, /v2, /health, or /ready — those carry
-their own pathType/handling in each template.
+space-separated string. Consumed by artifact-keeper.backendPaths (_routing.tpl,
+which feeds the Ingress and the Gateway API HTTPRoute) and by the OpenShift
+Routes (route.yaml) via `splitList " " (trim ...)`, so they never drift out of
+sync. Does NOT include /api, /v2, /health, or /ready — those carry their own
+pathType/handling (see artifact-keeper.backendPaths and route.yaml).
 */}}
 {{- define "artifact-keeper.backendFormatPaths" -}}
 /maven /npm /pypi /nuget /cargo /gems /go /helm /debian /rpm /alpine /composer /conan /conda /swift /terraform /cocoapods /hex /pub /lfs /ivy /chef /puppet /ansible /cran /huggingface /jetbrains /vscode /proto /incus /ext

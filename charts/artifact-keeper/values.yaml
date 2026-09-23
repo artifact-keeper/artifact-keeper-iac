@@ -1219,6 +1219,36 @@ route:
     # dependencyTrack.enabled is true.
     enabled: false
 
+# -- Gateway API routing through an existing Gateway. Mutually exclusive with
+# Ingress (ingress.enabled) and OpenShift Routes (route.enabled).
+httpRoute:
+  # -- Render a gateway.networking.k8s.io/v1 HTTPRoute. Requires Gateway API CRDs.
+  enabled: false
+  # -- Existing Gateway references (name, optional namespace, sectionName and port).
+  # The Gateway listener must allow HTTPRoutes from this release's namespace.
+  parentRefs: []
+  # -- Required when enabled. Public DNS hostnames, optionally wildcard-prefixed.
+  # TLS certificates and termination belong to the Gateway, not this chart.
+  hostnames: []
+  # -- Additional HTTPRoute labels. Chart-owned labels take precedence.
+  labels: {}
+  # -- HTTPRoute annotations (no nginx or cert-manager annotations are added).
+  annotations: {}
+  dtrack:
+    # -- Opt in to /dtrack pass-through, matching Ingress; requires dependencyTrack.enabled.
+    # Enable only behind authentication you control.
+    enabled: false
+    # -- Dependency-Track ALPINE_CORS_ALLOW_ORIGIN when routed through HTTPRoute.
+    corsAllowOrigin: "*"
+  # -- Narrow additive access for Gateway data-plane pods when networkPolicy.enabled
+  # or fleet.guardrails.networkPolicy is enabled. Both fields are then required.
+  # Existing Ingress policies are unchanged; this does not resolve issue #306.
+  networkPolicy:
+    # -- Namespace of the Gateway proxy pods (not necessarily the Gateway object).
+    namespace: ""
+    # -- Non-empty map of labels selecting Gateway proxy pods in that namespace.
+    podSelector: {}
+
 # -- Secrets
 # These are development defaults. For production, override via --set or
 # use existingSecret references. Never commit real credentials here.

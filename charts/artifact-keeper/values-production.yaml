@@ -91,7 +91,11 @@ postgres:
   enabled: false
 
 externalDatabase:
-  host: ""  # Set to RDS endpoint
+  # Set to the RDS endpoint. When left empty, Dependency-Track reads its JDBC
+  # host and port from the POSTGRES_HOST and POSTGRES_PORT keys of
+  # existingSecret below, so that Secret must then carry them as well as
+  # DATABASE_URL (the pod will not start without them).
+  host: ""
   port: 5432
   username: artifact_keeper
   password: ""

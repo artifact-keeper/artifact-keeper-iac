@@ -320,6 +320,18 @@ the app Secret keeps supplying it, as before.
 {{- end -}}
 {{- end -}}
 
+{{/*
+Whether Dependency-Track's JDBC host and port come from externalDatabase.existingSecret
+(keys existingHostKey / existingPortKey) instead of values. Only with an external
+database, existingSecret set and externalDatabase.host empty: a host set in values
+always wins, together with externalDatabase.port, so a Secret holding only
+DATABASE_URL keeps working.
+*/}}
+{{- define "artifact-keeper.dtrackDbHostFromExistingSecret" -}}
+{{- $ext := .Values.externalDatabase -}}
+{{- if and (not .Values.postgres.enabled) $ext.existingSecret (not $ext.host) -}}true{{- end -}}
+{{- end -}}
+
 {{- define "artifact-keeper.validateSecrets" -}}
 {{- if or .Values.externalSecrets.enabled .Values.secrets.existingSecret -}}
 {{- /* Secrets are supplied externally; no chart-owned Secret to validate. */ -}}

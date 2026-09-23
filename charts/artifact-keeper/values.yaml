@@ -657,6 +657,15 @@ externalDatabase:
   # to POSTGRES_PASSWORD. Otherwise it keeps reading POSTGRES_PASSWORD from the
   # app Secret, which External Secrets or secrets.existingSecret supply.
   existingPasswordKey: ""
+  # -- Key in existingSecret holding the database host for Dependency-Track's
+  # JDBC URL. Only read when postgres.enabled=false, existingSecret is set and
+  # externalDatabase.host is empty; a host set in values is used with
+  # externalDatabase.port instead. Defaults to POSTGRES_HOST when empty.
+  existingHostKey: ""
+  # -- Key in existingSecret holding the database port for Dependency-Track's
+  # JDBC URL, read under the same conditions as existingHostKey. Defaults to
+  # POSTGRES_PORT when empty.
+  existingPortKey: ""
 
 # -- OpenSearch (full-text search engine)
 # Powers full-text artifact search. The backend auto-reindexes from

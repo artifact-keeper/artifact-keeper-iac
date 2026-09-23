@@ -939,7 +939,8 @@ dependencyTrack:
   # volume, its mount, DEPENDENCY_TRACK_API_KEY_FILE and the shared-config PVC
   # are all skipped, so backend replicas are not pinned to one node by the
   # ReadWriteOnce claim. The bootstrap Job then only reconciles the admin
-  # password. Set existingApiKeySecretKey with it, and do not also name
+  # password (plus bootstrap.nvdApiEnabled when that is on) and never
+  # generates a key. Set existingApiKeySecretKey with it, and do not also name
   # DEPENDENCY_TRACK_API_KEY in backend.env or backend.environmentSecrets: that
   # would be a second definition of the same env var, which Kubernetes rejects.
   existingApiKeySecret: ""
@@ -1026,6 +1027,14 @@ dependencyTrack:
       capabilities:
         drop:
           - ALL
+    # -- Have the bootstrap Job switch Dependency-Track's NVD mirroring to the
+    # NVD REST API 2.0 (config property `vuln-source/nvd.api.enabled=true`).
+    # Off by default: without an NVD API key the API is heavily rate-limited,
+    # so also set the key in the Dependency-Track UI (Administration >
+    # Vulnerability Sources > NVD). Applied on the next install or upgrade,
+    # including existing installs; setting it back to false leaves the
+    # property as it is rather than turning mirroring off.
+    nvdApiEnabled: false
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}

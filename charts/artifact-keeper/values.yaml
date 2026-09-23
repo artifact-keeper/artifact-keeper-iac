@@ -1262,6 +1262,12 @@ secrets:
   # Optional encryption keys are wired separately using the *Enabled flags
   # below, or backend.environmentSecrets for custom Secret/key names.
   existingSecret: ""
+  # JWT signing secret. Generate it with `openssl rand -base64 48`: the backend
+  # refuses to start on a secret shorter than 32 characters, a known
+  # placeholder, or one it judges low-entropy. Backends before 1.11.0 can also
+  # reject a strong hex secret that happens to use fewer than 16 distinct
+  # characters (about 1 in 4 from `openssl rand -hex 32`, artifact-keeper#4211),
+  # so prefer base64.
   jwtSecret: ""
   # S3-compatible object storage credentials. Injected into the backend as
   # S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY when backend.env.STORAGE_BACKEND is

@@ -55,7 +55,7 @@ jobs:
         run: ct lint --target-branch main --charts charts/artifact-keeper/
 
       - name: Run helm lint
-        run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test
+        run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)
 
       - name: Test image registry rendering
         run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_image_registry.py' -v
@@ -102,11 +102,11 @@ jobs:
       matrix:
         include:
           - variant: default
-            values_args: "--set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
+            values_args: "--set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
           - variant: production
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
-            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
+            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
           - variant: smoke
             values_args: "-f charts/artifact-keeper/values-smoke.yaml --set backend.image.tag=dev --set web.image.tag=dev"
           - variant: mesh-main
@@ -114,7 +114,7 @@ jobs:
           - variant: mesh-peer
             values_args: "-f charts/artifact-keeper/values-mesh-peer.yaml"
           - variant: openshift
-            values_args: "-f charts/artifact-keeper/values-openshift.yaml --set route.host=artifacts.apps.ci.example.com --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
+            values_args: "-f charts/artifact-keeper/values-openshift.yaml --set route.host=artifacts.apps.ci.example.com --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -163,11 +163,11 @@ jobs:
       matrix:
         include:
           - variant: default
-            values_args: "--set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
+            values_args: "--set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
           - variant: production
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
-            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
+            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
           - variant: smoke
             values_args: "-f charts/artifact-keeper/values-smoke.yaml --set backend.image.tag=dev --set web.image.tag=dev"
     steps:

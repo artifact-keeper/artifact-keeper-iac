@@ -13,7 +13,7 @@ backend:
   image:
     # Tracks the latest published backend release (see the IMAGE TAGS note in
     # values.yaml — backend and web release on independent cadences).
-    tag: "1.10.0"
+    tag: "1.10.1"
   env:
     RUST_LOG: "info"
     ENVIRONMENT: "production"

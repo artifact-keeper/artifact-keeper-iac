@@ -19,7 +19,7 @@ on:
 jobs:
   lint:
     name: Lint
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -62,7 +62,7 @@ jobs:
 
   httproute-tests:
     name: HTTPRoute Render Tests (Gateway API ${{ matrix.gateway-api }})
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         gateway-api: [v1.0.0, v1.4.1]
@@ -94,7 +94,7 @@ jobs:
 
   template-validation:
     name: "Template & Validate (${{ matrix.variant }})"
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:
@@ -134,9 +134,8 @@ jobs:
       - name: Install kubeconform
         run: |
           KUBECONFORM_VERSION=0.6.7
-          # ARC runners run as a non-root user that cannot write to
-          # /usr/local/bin, so extract to /tmp first then sudo mv.
-          # Matches the helm-docs install pattern in helm-docs.yml.
+          # Extract to /tmp first then sudo mv, matching the helm-docs
+          # install pattern in helm-docs.yml.
           curl -sSL --proto =https "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
             | tar xz -C /tmp kubeconform
           sudo mv /tmp/kubeconform /usr/local/bin/kubeconform
@@ -155,7 +154,7 @@ jobs:
 
   verify-image-references:
     name: "Verify Image References (${{ matrix.variant }})"
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:
@@ -280,7 +279,7 @@ jobs:
   version-check:
     name: Chart Version Check
     if: github.event_name == 'pull_request'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -319,7 +318,7 @@ jobs:
     # the chart is deliberately held back a cycle.
     if: >-
       !contains(github.event.pull_request.labels.*.name, 'image-drift-ack')
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -347,14 +346,12 @@ jobs:
 
   install-test:
     name: Install Test (k3d)
-    # Runs on the ak-beefy-runners ARC scale set (8 CPU / 16 Gi limit) so the
-    # k3d cluster + full artifact-keeper chart (backend, web, postgres, trivy,
-    # opensearch, dtrack) can stand up inside chart-testing's timeout window.
-    # The regular ak-ci-runners pool (4 CPU / 8 Gi) is too tight.
-    #
-    # Requires the ak-beefy-runners ARC scale set to be deployed to the
-    # runner cluster; its configuration is maintained outside this repo.
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-beefy-runners' }}
+    # Hosted ubuntu-24.04 (4 vCPU / 16 GB on public repos) matches the memory of
+    # the ak-beefy-runners pool this job used on push (8 CPU / 16 Gi limit), and
+    # every pull_request run has already used a hosted runner: the k3d cluster
+    # plus the chart's ci/ values install in 4-6 minutes there, against 6-7 on
+    # beefy after queueing for up to two hours behind rocky's backlog.
+    runs-on: ubuntu-24.04
     needs: [lint, template-validation]
     permissions:
       contents: read
@@ -384,9 +381,9 @@ jobs:
 
       - name: Install k3d
         run: |
-          # k3d installs k3s inside Docker (uses the DinD sidecar).
+          # k3d installs k3s inside the runner's Docker daemon.
           # Pin version for reproducibility. Extract binary to $HOME/.local/bin
-          # because the runner pod cannot write to /usr/local/bin.
+          # so the step needs no sudo.
           K3D_VERSION=v5.7.5
           mkdir -p "$HOME/.local/bin"
           curl -sL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \
@@ -429,7 +426,7 @@ jobs:
           # Single-server cluster, no LoadBalancer (not needed for chart-testing
           # install checks).
           #
-          # --snapshotter=native: the beefy runner's DinD sidecar uses overlayfs
+          # --snapshotter=native: the runner's Docker daemon uses overlayfs
           # as its storage driver. k3s runs its own embedded containerd inside
           # the k3d node container, and containerd defaults to overlayfs too.
           # Nested overlayfs is unsupported by the kernel, so containerd fails

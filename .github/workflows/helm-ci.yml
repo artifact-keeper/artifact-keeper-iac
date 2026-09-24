@@ -16,6 +16,20 @@ on:
       - ".github/scripts/test-encryption-secret-refs.py"
       - ".github/scripts/requirements.txt"
 
+# Concurrency: GitHub has no run-wide job cap and max-parallel only bounds
+# one matrix, so this workflow is staged with needs to keep at most four
+# hosted runners busy at once (it used to start 16 jobs in the same second):
+#
+#   1. lint, version-check (PRs only), image-tag-drift       <= 3
+#   2. template-validation, max-parallel 4                   <= 4
+#   3. verify-image-references, max-parallel 3, and
+#      install-test (needs lint and template-validation)     <= 4
+#   4. httproute-tests, max-parallel 3, while install-test
+#      may still be running                                 <= 4
+#
+# The later stages use `if: ${{ !cancelled() }}` so a red or skipped earlier
+# job only orders them and never skips them; every check still reports.
+# When adding a job, give it a place in this chain.
 jobs:
   lint:
     name: Lint
@@ -63,7 +77,12 @@ jobs:
   httproute-tests:
     name: HTTPRoute Render Tests (Gateway API ${{ matrix.gateway-api }})
     runs-on: ubuntu-24.04
+    # Stage 4 of the concurrency chain at the top of this file; install-test
+    # may still be running, hence three.
+    needs: verify-image-references
+    if: ${{ !cancelled() }}
     strategy:
+      max-parallel: 3
       matrix:
         gateway-api: [v1.0.0, v1.4.1]
     permissions:
@@ -95,10 +114,14 @@ jobs:
   template-validation:
     name: "Template & Validate (${{ matrix.variant }})"
     runs-on: ubuntu-24.04
+    # Stage 2 of the concurrency chain at the top of this file.
+    needs: [lint, version-check, image-tag-drift]
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - variant: default
@@ -155,10 +178,15 @@ jobs:
   verify-image-references:
     name: "Verify Image References (${{ matrix.variant }})"
     runs-on: ubuntu-24.04
+    # Stage 3 of the concurrency chain at the top of this file. Three, not
+    # four, because install-test starts in the same stage.
+    needs: template-validation
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         include:
           - variant: default

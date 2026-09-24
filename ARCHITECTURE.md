@@ -219,14 +219,18 @@ flowchart TD
 
 ## CI and runners
 
-CI selects its runner by event. `pull_request` jobs run on GitHub-hosted
-runners (`ubuntu-latest`) so untrusted PR code gets an ephemeral, isolated
-environment; `push` jobs run on self-hosted Actions Runner Controller (ARC)
-scale sets (`ak-ci-runners`, `ak-beefy-runners`) for speed and capacity. The
-`helm-ci` install test uses the larger `ak-beefy-runners` pool so the k3d
-cluster plus the full chart fit inside chart-testing's timeout window. The
-runner scale-set configuration and runner images are maintained outside this
-repository; the workflows here only select pools by label.
+Every workflow job runs on GitHub-hosted `ubuntu-24.04` runners, for
+`pull_request` and `push` alike, including the `helm-ci` k3d install test and
+the `helm-release` chart publish. None of them needs the self-hosted Actions
+Runner Controller (ARC) pools, so a chart can be tested and released while
+those pools are down or backlogged. Each job installs its own tools (helm,
+chart-testing, kubectl, k3d, kubeconform, helm-docs, terraform) at a pinned
+version, and relies on nothing baked into a runner image.
+
+`helm-ci` is staged with `needs` and `max-parallel` so that one run holds at
+most four hosted runners at a time; the stages are listed at the top of the
+workflow. The ARC runner scale sets and images are maintained outside this
+repository.
 
 ## Key invariants
 

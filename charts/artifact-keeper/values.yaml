@@ -412,7 +412,7 @@ backend:
     # (`sharedConfig.accessModes` / `sharedConfig.storageClass` below).
     accessModes: []
   # -- Scratch space for security scans (SCAN_WORKSPACE_PATH=/scan-workspace,
-  # set whenever trivy.enabled). `enabled: true` backs it with a
+  # set whenever trivy.enabled or trivy.externalUrl). `enabled: true` backs it with a
   # ReadWriteOnce PVC, which pins every backend replica to one node. Set it
   # to false to give each pod its own emptyDir of `size` instead -- required
   # for a multi-replica backend, and for `strategy.type: RollingUpdate`
@@ -811,9 +811,62 @@ opensearch:
 # Runs as a persistent server that the backend calls for image/SBOM scans.
 # Uses a PVC for its vulnerability database cache. The deployment uses
 # Recreate strategy because the cache directory uses a file lock that
-# prevents concurrent access from two pods.
+# prevents concurrent access from two pods. Set trivy.externalUrl to use a
+# Trivy server that runs outside this release instead of the bundled one.
 trivy:
+  # -- Run the bundled Trivy server and point the backend's TRIVY_URL at it.
+  # Ignored for the server itself when trivy.externalUrl is set (see below).
   enabled: true
+  # -- URL of an external Trivy server (`trivy server`) for the backend's
+  # TRIVY_URL, for example
+  # `http://trivy.scanners.svc.cluster.local:8090`. Empty (the default) keeps
+  # the bundled server when trivy.enabled is true.
+  #
+  # Precedence: a non-empty externalUrl wins over trivy.enabled. The backend's
+  # TRIVY_URL renders to this URL and the bundled Trivy Deployment, Service,
+  # cache PVC and DB pre-seed init container are NOT rendered, whether
+  # trivy.enabled is true or false. `trivy.enabled: false` together with an
+  # externalUrl is the clearest way to write it, and is equivalent. With
+  # externalUrl empty and trivy.enabled false, no TRIVY_URL is set at all.
+  #
+  # Use this to share one Trivy server between several releases: the server's
+  # vulnerability DB and layer cache are downloaded and stored once instead of
+  # once per release. The remaining trivy.* settings (image, db, persistence,
+  # resources, scheduling) apply only to the bundled server; configure the
+  # external server where it is deployed, with a matching Trivy version. The
+  # backend still needs its scan workspace (backend.scanWorkspace), and the
+  # fleet ResourceQuota stops counting a Trivy pod in this namespace.
+  #
+  # The scanner-adapter (scannerAdapter.*) is separate and stays per release:
+  # it pulls the images it scans from THIS release's registry endpoint and runs
+  # Trivy in-process, so it is not affected by this setting.
+  #
+  # With networkPolicy.enabled the backend's egress policy only reaches the
+  # bundled Trivy pods, plus any destination on 443; for a server on another
+  # port in another namespace, fill in trivy.externalNetworkPolicy. In fleet
+  # mode set fleet.guardrails.scannerNamespace instead (or as well).
+  externalUrl: ""
+  # -- Backend egress to the external Trivy server, used only when
+  # trivy.externalUrl is set and networkPolicy.enabled is true. The rule is
+  # rendered when namespaceSelector or podSelector is non-empty (both are
+  # standard Kubernetes LabelSelectors and combine as one peer, i.e. pods
+  # matching podSelector inside namespaces matching namespaceSelector); leave
+  # both empty to add no rule, for example when the server is reached on 443,
+  # which the backend policy already allows. Example:
+  #   namespaceSelector:
+  #     matchLabels:
+  #       kubernetes.io/metadata.name: scanners
+  #   podSelector:
+  #     matchLabels:
+  #       app.kubernetes.io/name: trivy
+  #   port: 8090
+  externalNetworkPolicy:
+    # -- Namespaces the external Trivy server runs in (LabelSelector).
+    namespaceSelector: {}
+    # -- Pods of the external Trivy server (LabelSelector).
+    podSelector: {}
+    # -- TCP port the external Trivy server listens on.
+    port: 8090
   image:
     repository: aquasec/trivy
     tag: "0.62.1"
@@ -897,7 +950,9 @@ trivy:
 # multi-arch (amd64 + arm64), so there is no arch-pinned nodeSelector; leave it
 # enabled on arm64 clusters too. Default enabled: true (recommended for amd64
 # and supported on arm64). This is separate from the `trivy` server above,
-# which stays on TRIVY_URL for the fs/incus scan path.
+# which stays on TRIVY_URL for the fs/incus scan path. trivy.externalUrl does
+# not change it: the adapter pulls from this release's own registry endpoint,
+# so it is deployed per release even when the Trivy server is shared.
 scannerAdapter:
   enabled: true
   image:
@@ -1504,7 +1559,8 @@ fleet:
     databaseNamespace: ""
     # -- Namespace of the shared search service (NetworkPolicy egress).
     searchNamespace: ""
-    # -- Namespace of the shared scanner service (NetworkPolicy egress).
+    # -- Namespace of the shared scanner service (NetworkPolicy egress on
+    # 8090), for example the namespace of the server in trivy.externalUrl.
     scannerNamespace: ""
     # -- Explicit ResourceQuota overrides. By default the quota is sized from the
     # preset and grows to account for each enabled optional component (trivy,

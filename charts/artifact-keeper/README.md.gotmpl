@@ -304,7 +304,7 @@ The chart deploys the following components:
 | **Edge** | Edge replication service for distributed deployments | Disabled |
 | **PostgreSQL** | In-cluster database (disable for external/managed DB) | Enabled |
 | **OpenSearch** | Full-text search engine for artifact discovery | Enabled |
-| **Trivy** | Vulnerability scanner for container images and SBOMs (fs/incus path via `TRIVY_URL`) | Enabled |
+| **Trivy** | Vulnerability scanner for container images and SBOMs (fs/incus path via `TRIVY_URL`); bundled server, or an external one via `trivy.externalUrl` | Enabled |
 | **Scanner-adapter** | In-house Harbor scanner-adapter for container-image Trivy scans (`TRIVY_ADAPTER_URL`); stateless, multi-arch, no PVC | Enabled |
 | **DependencyTrack** | SBOM analysis platform for license and vulnerability correlation | Enabled |
 
@@ -334,6 +334,36 @@ To pin any total by hand, set the matching key under
 replaces the computed value outright while the remaining totals stay
 component-aware.
 
+### Using an external Trivy server
+
+By default each release runs its own Trivy server, which downloads and stores
+its own copy of the vulnerability database. To share one Trivy server between
+several releases (for example several instances in one cluster), deploy
+`trivy server` once and point each release at it:
+
+```yaml
+trivy:
+  enabled: false
+  externalUrl: http://trivy.scanners.svc.cluster.local:8090
+  # Only needed with networkPolicy.enabled and a server on a port other than 443:
+  externalNetworkPolicy:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: scanners
+    port: 8090
+```
+
+A non-empty `trivy.externalUrl` takes precedence over `trivy.enabled`: the
+backend's `TRIVY_URL` is set to it, and the chart's own Trivy Deployment,
+Service, cache PVC and DB pre-seed init container are not rendered even if
+`trivy.enabled` is left `true`. With `trivy.externalUrl` empty nothing changes.
+The scanner-adapter is not affected and stays per release, because it pulls
+the images it scans from that release's own registry endpoint. In fleet mode,
+open the egress with `fleet.guardrails.scannerNamespace` (the server's
+namespace) rather than `trivy.externalNetworkPolicy`. Run the shared server on
+the same Trivy version as `trivy.image.tag`, and allow ingress to it from the
+releases' namespaces only.
+
 ### Component Diagram
 
 ```
@@ -344,7 +374,7 @@ Ingress
 
 Backend --> PostgreSQL (port 5432)
 Backend --> OpenSearch (port 9200)
-Backend --> Trivy (port 8090)
+Backend --> Trivy (port 8090; bundled, or trivy.externalUrl)
 Backend --> Scanner-adapter (port 8090)
 Scanner-adapter --> Backend registry (pull target images)
 Backend --> DependencyTrack (port 8080)

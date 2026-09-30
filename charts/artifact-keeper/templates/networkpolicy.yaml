@@ -101,6 +101,23 @@ spec:
       ports:
         - port: 8090
           protocol: TCP
+    {{- if .Values.trivy.externalUrl }}
+    {{- with .Values.trivy.externalNetworkPolicy }}
+    {{- if or .namespaceSelector .podSelector }}
+    # External Trivy server (trivy.externalUrl). Rendered only when
+    # trivy.externalNetworkPolicy names the server's pods or namespace; an
+    # external server reached on 443 is already covered by the HTTPS rule below.
+    {{- $peer := dict }}
+    {{- with .namespaceSelector }}{{- $_ := set $peer "namespaceSelector" . }}{{- end }}
+    {{- with .podSelector }}{{- $_ := set $peer "podSelector" . }}{{- end }}
+    - to:
+        - {{ toYaml $peer | indent 10 | trim }}
+      ports:
+        - port: {{ .port | default 8090 }}
+          protocol: TCP
+    {{- end }}
+    {{- end }}
+    {{- end }}
     {{- if .Values.scannerAdapter.enabled }}
     # Scanner-adapter (container-image Trivy scans)
     - to:

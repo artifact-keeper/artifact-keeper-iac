@@ -238,9 +238,10 @@ spec:
               value: {{ .Values.opensearch.allowInvalidCerts | quote }}
             {{- end }}
             {{- end }}
-            {{- if .Values.trivy.enabled }}
+            {{- with include "artifact-keeper.trivy.url" . }}
+            {{- /* Bundled Trivy server, or trivy.externalUrl when set (it wins). */}}
             - name: TRIVY_URL
-              value: "http://{{ include "artifact-keeper.fullname" . }}-trivy:8090"
+              value: {{ . | quote }}
             - name: SCAN_WORKSPACE_PATH
               value: "/scan-workspace"
             {{- end }}
@@ -418,7 +419,7 @@ spec:
             - name: storage
               mountPath: /data/plugins
               subPath: plugins
-            {{- if or .Values.backend.scanWorkspace.enabled .Values.trivy.enabled }}
+            {{- if or .Values.backend.scanWorkspace.enabled (include "artifact-keeper.trivy.url" .) }}
             - name: scan-workspace
               mountPath: /scan-workspace
             {{- end }}
@@ -439,13 +440,14 @@ spec:
           emptyDir:
             sizeLimit: 10Gi
           {{- end }}
-        {{- if or .Values.backend.scanWorkspace.enabled .Values.trivy.enabled }}
+        {{- if or .Values.backend.scanWorkspace.enabled (include "artifact-keeper.trivy.url" .) }}
         - name: scan-workspace
           {{- if .Values.backend.scanWorkspace.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-scan-workspace
           {{- else }}
-          {{- /* Trivy is enabled, so SCAN_WORKSPACE_PATH=/scan-workspace is in
+          {{- /* A Trivy server is configured (bundled or trivy.externalUrl), so
+                 SCAN_WORKSPACE_PATH=/scan-workspace is in
                  the env above, but no PVC was requested. The container root
                  filesystem is read-only, so without a volume here every scan
                  fails on EROFS. Give each pod its own scratch dir instead --

@@ -166,6 +166,32 @@ app.kubernetes.io/component: trivy
 {{- end }}
 
 {{/*
+Trivy server wiring. trivy.externalUrl takes precedence over trivy.enabled:
+when it is set, the backend's TRIVY_URL points at it and the bundled Trivy
+server (Deployment, PVC, Service) is not rendered, whatever trivy.enabled says.
+
+  artifact-keeper.trivy.bundled  "true" when this release runs its own Trivy
+                                 server, otherwise empty.
+  artifact-keeper.trivy.url      The URL the backend uses for TRIVY_URL, or
+                                 empty when no Trivy server is configured.
+*/}}
+{{- define "artifact-keeper.trivy.bundled" -}}
+{{- if and .Values.trivy.enabled (not .Values.trivy.externalUrl) -}}true{{- end -}}
+{{- end }}
+
+{{- define "artifact-keeper.trivy.url" -}}
+{{- $external := .Values.trivy.externalUrl | default "" -}}
+{{- if $external -}}
+{{- if not (regexMatch "^https?://[^/]+" $external) -}}
+{{- fail (printf "trivy.externalUrl=%q must be an http:// or https:// URL, for example http://trivy.scanners.svc.cluster.local:8090" $external) -}}
+{{- end -}}
+{{- trimSuffix "/" $external -}}
+{{- else if .Values.trivy.enabled -}}
+{{- printf "http://%s-trivy:8090" (include "artifact-keeper.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Scanner-adapter selector labels
 */}}
 {{- define "artifact-keeper.scannerAdapter.selectorLabels" -}}
@@ -662,7 +688,9 @@ only the keys present there take effect, the rest stay component-aware.
 {{- $requestsMemory := $spec.requestsMemory -}}
 {{- $pods := add $spec.pods 2 -}}
 {{- $pvcs := $spec.pvcs -}}
-{{- if .Values.trivy.enabled -}}
+{{- /* Only the bundled server counts: with trivy.externalUrl set the Trivy
+     pods run elsewhere and consume none of this namespace's quota. */ -}}
+{{- if eq (include "artifact-keeper.trivy.bundled" .) "true" -}}
 {{- $requestsCpu = add $requestsCpu 250 -}}
 {{- $limitsCpu = add $limitsCpu 1000 -}}
 {{- $limitsMemory = add $limitsMemory 2048 -}}

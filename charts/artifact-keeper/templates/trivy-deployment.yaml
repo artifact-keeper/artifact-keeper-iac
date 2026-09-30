@@ -7,7 +7,9 @@ reviewed and modified to match your specific infrastructure requirements,
 security policies, and operational needs before use in production.
 =============================================================================
 */}}
-{{- if .Values.trivy.enabled }}
+{{- /* Not rendered when trivy.externalUrl points the backend at a Trivy
+       server outside this release (see the trivy.externalUrl value). */}}
+{{- if eq (include "artifact-keeper.trivy.bundled" .) "true" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

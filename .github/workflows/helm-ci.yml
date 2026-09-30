@@ -74,6 +74,9 @@ jobs:
       - name: Test image registry rendering
         run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_image_registry.py' -v
 
+      - name: Test external Trivy server rendering
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_external_trivy.py' -v
+
   httproute-tests:
     name: HTTPRoute Render Tests (Gateway API ${{ matrix.gateway-api }})
     runs-on: ubuntu-24.04

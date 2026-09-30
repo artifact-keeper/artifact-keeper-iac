@@ -14,6 +14,15 @@ security policies, and operational needs before use in production.
   URL: {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
 {{- end }}
 
+{{- if and .Values.scaleToZero .Values.scaleToZero.enabled }}
+
+Scale to zero (KEDA HTTP add-on): {{ join ", " .Values.scaleToZero.components }}
+  scale to {{ .Values.scaleToZero.minReplicas }} after {{ .Values.scaleToZero.scaledownPeriod }}s idle; the Ingress routes them
+  through {{ include "artifact-keeper.fullname" . }}-keda-interceptor -> {{ .Values.scaleToZero.interceptorService }}.
+  Requires KEDA and the KEDA HTTP add-on (HTTPScaledObject CRD) in the
+  cluster. The first request after an idle period waits for a cold start.
+{{- end }}
+
 {{- if .Values.httpRoute.enabled }}
 HTTPRoute: {{ include "artifact-keeper.fullname" . }}
   Hostnames: {{ join ", " .Values.httpRoute.hostnames }}

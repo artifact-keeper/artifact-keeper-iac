@@ -57,6 +57,20 @@ spec:
           # API, health, OCI and native package paths; /metrics stays private.
           {{- $backendSvc := printf "%s-backend" (include "artifact-keeper.fullname" .) }}
           {{- $backendPort := .Values.backend.service.httpPort }}
+          {{- $webSvc := printf "%s-web" (include "artifact-keeper.fullname" .) }}
+          {{- $webPort := .Values.web.service.port }}
+          {{- /* scaleToZero: send the component's paths to the KEDA HTTP
+          interceptor (through the in-namespace ExternalName alias) so a
+          request wakes it. See templates/scale-to-zero.yaml. */}}
+          {{- $interceptorSvc := printf "%s-keda-interceptor" (include "artifact-keeper.fullname" .) }}
+          {{- if eq (include "artifact-keeper.scaleToZero.manages" (dict "component" "backend" "context" .)) "true" }}
+          {{- $backendSvc = $interceptorSvc }}
+          {{- $backendPort = .Values.scaleToZero.interceptorPort }}
+          {{- end }}
+          {{- if eq (include "artifact-keeper.scaleToZero.manages" (dict "component" "web" "context" .)) "true" }}
+          {{- $webSvc = $interceptorSvc }}
+          {{- $webPort = .Values.scaleToZero.interceptorPort }}
+          {{- end }}
           {{- range include "artifact-keeper.backendPaths" . | fromYamlArray }}
           - path: {{ .path }}
             pathType: {{ .pathType }}
@@ -83,7 +97,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "artifact-keeper.fullname" . }}-web
+                name: {{ $webSvc }}
                 port:
-                  number: {{ .Values.web.service.port }}
+                  number: {{ $webPort }}
 {{- end }}

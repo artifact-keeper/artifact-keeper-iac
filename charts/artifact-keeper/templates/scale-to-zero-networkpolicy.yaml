@@ -1,0 +1,49 @@
+{{/*
+=============================================================================
+Scale to zero: interceptor NetworkPolicy access
+=============================================================================
+With scaleToZero on, traffic reaches the backend and web pods from the KEDA
+HTTP add-on's interceptor pods rather than from the ingress controller. The
+chart's policies (networkPolicy.enabled, or the fleet guardrail policy) admit
+only the ingress controller, so this adds one policy per scaled component
+admitting exactly the interceptor pods (scaleToZero.networkPolicy.podSelector
+in the interceptor's namespace) on the component's http port. Additive:
+NetworkPolicies are a union, so the existing policies are unchanged.
+=============================================================================
+*/}}
+{{- if and .Values.scaleToZero .Values.scaleToZero.enabled (or .Values.networkPolicy.enabled (and (eq (include "artifact-keeper.fleet.enabled" .) "true") .Values.fleet.guardrails.networkPolicy)) }}
+{{- $ns := include "artifact-keeper.scaleToZero.interceptorNamespace" . }}
+{{- if not .Values.scaleToZero.networkPolicy.podSelector }}
+{{- fail "scaleToZero with chart NetworkPolicies requires a non-empty scaleToZero.networkPolicy.podSelector (labels of the KEDA HTTP add-on interceptor pods)" }}
+{{- end }}
+{{- range $component := list "backend" "web" }}
+{{- if eq (include "artifact-keeper.scaleToZero.manages" (dict "component" $component "context" $)) "true" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" $ }}-keda-interceptor-{{ $component }}
+  labels:
+    {{- include "artifact-keeper.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: keda-interceptor
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $component }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $.Values.scaleToZero.networkPolicy.podSelector | nindent 14 }}
+      ports:
+        - port: http
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

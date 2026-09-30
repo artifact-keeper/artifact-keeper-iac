@@ -16,7 +16,9 @@ metadata:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
-  {{- if not .Values.backend.autoscaling.enabled }}
+  {{- /* An HPA (backend.autoscaling) or KEDA (scaleToZero) owns the replica
+  count when either is on; a rendered replicas field would fight it. */}}
+  {{- if not (or .Values.backend.autoscaling.enabled (eq (include "artifact-keeper.scaleToZero.manages" (dict "component" "backend" "context" .)) "true")) }}
   replicas: {{ include "artifact-keeper.backend.replicaCount" . }}
   {{- end }}
   strategy:

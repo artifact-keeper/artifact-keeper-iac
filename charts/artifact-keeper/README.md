@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.9.27](https://img.shields.io/badge/Version-1.9.27-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.10.1](https://img.shields.io/badge/AppVersion-1.10.1-informational?style=flat-square)
+![Version: 1.9.29](https://img.shields.io/badge/Version-1.9.29-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.10.1](https://img.shields.io/badge/AppVersion-1.10.1-informational?style=flat-square)
 
 ## TL;DR
 
@@ -217,6 +217,20 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | route.tls.enabled | bool | `true` | Serve the Routes over TLS. edge termination uses the router's default certificate unless you supply your own via annotations/secret. |
 | route.tls.insecureEdgeTerminationPolicy | string | `"Redirect"` | What to do with plain-HTTP requests. Redirect sends them to HTTPS. |
 | route.tls.termination | string | `"edge"` | TLS termination. Only `edge` is supported: the chart's Services speak plain HTTP (so reencrypt has nothing to re-encrypt to), and passthrough Routes cannot carry the per-path spec.path this chart relies on. |
+| scaleToZero | object | `{"coldStartTimeout":"","components":["backend","web"],"enabled":false,"hosts":[],"interceptorPort":8080,"interceptorService":"keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local","maxReplicas":null,"minReplicas":0,"networkPolicy":{"namespace":"","podSelector":{"app.kubernetes.io/component":"interceptor","app.kubernetes.io/name":"http-add-on"}},"scaledownPeriod":900,"targetPendingRequests":100}` | Optional scale-to-zero via the KEDA HTTP add-on. Off by default. When enabled, each component in `components` gets an HTTPScaledObject (http.keda.sh/v1alpha1) and its Ingress paths are sent to the add-on's interceptor, which holds a request while the component scales up from zero and then forwards it. Because an Ingress can only name a Service in its own namespace, the chart renders an ExternalName Service `<fullname>-keda-interceptor` aliasing `interceptorService` and points the Ingress at it. Requires KEDA and the KEDA HTTP add-on already installed (the chart installs neither) and ingress.enabled. Mutually exclusive with fleet.hibernate. A selected backend must be stateless: backend.persistence.enabled and backend.autoscaling.enabled must be false. The first request after an idle period waits for a cold start. |
+| scaleToZero.coldStartTimeout | string | `""` | How long the interceptor holds a request while a component scales up from zero (HTTPScaledObject spec.timeouts.conditionWait, a duration such as "120s"). Empty leaves the add-on's default. Keep it below ingress.proxyReadTimeoutSeconds. |
+| scaleToZero.components | list | `["backend","web"]` | Components scaled by traffic: any of backend, web. |
+| scaleToZero.enabled | bool | `false` | Render the HTTPScaledObjects, the interceptor ExternalName Service and the interceptor NetworkPolicies, and route the selected components' Ingress paths through the interceptor. |
+| scaleToZero.hosts | list | the Ingress host (fleet.host in fleet mode) | Hosts the interceptor routes to this release, matched against the request Host header. |
+| scaleToZero.interceptorPort | int | `8080` | Port of the interceptor proxy Service. |
+| scaleToZero.interceptorService | string | `"keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local"` | FQDN of the KEDA HTTP add-on interceptor proxy Service. The default is the Service the add-on's chart creates (named after the chart, not the release) when installed in namespace `keda`. |
+| scaleToZero.maxReplicas | int | the component's replica count (the preset's in fleet mode) | Maximum replicas under load. |
+| scaleToZero.minReplicas | int | `0` | Replicas while idle. 0 scales the component to zero. |
+| scaleToZero.networkPolicy | object | `{"namespace":"","podSelector":{"app.kubernetes.io/component":"interceptor","app.kubernetes.io/name":"http-add-on"}}` | Access for the interceptor pods when networkPolicy.enabled or the fleet guardrail NetworkPolicy is on: one additive policy per scaled component admits these pods on the component's http port. |
+| scaleToZero.networkPolicy.namespace | string | `""` | Namespace of the interceptor pods. Empty derives it from interceptorService (<service>.<namespace>.svc...). |
+| scaleToZero.networkPolicy.podSelector | object | `{"app.kubernetes.io/component":"interceptor","app.kubernetes.io/name":"http-add-on"}` | Labels selecting the interceptor pods (the add-on chart's defaults). |
+| scaleToZero.scaledownPeriod | int | `900` | Seconds without traffic before a component scales down to minReplicas. |
+| scaleToZero.targetPendingRequests | int | `100` | Concurrent in-flight requests per replica that KEDA scales toward (rendered as spec.scalingMetric.concurrency.targetValue; the add-on deprecated the old spec.targetPendingRequests field for it). |
 | scannerAdapter | object | `{"affinity":{},"cacheSizeLimit":"2Gi","containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"enabled":true,"env":{"SCANNER_TRIVY_INSECURE":"true"},"image":{"pullPolicy":"IfNotPresent","repository":"ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter","tag":"1.2.11"},"nodeSelector":{},"podSecurityContext":{"fsGroup":10000,"runAsNonRoot":true,"runAsUser":10000},"resources":{"limits":{"cpu":"1","ephemeral-storage":"2Gi","memory":"1Gi"},"requests":{"cpu":"100m","ephemeral-storage":"128Mi","memory":"128Mi"}},"tmpSizeLimit":"1Gi","tolerations":[],"topologySpreadConstraints":[]}` | In-house Trivy scanner-adapter Stateless Harbor-protocol scanner-adapter (image artifact-keeper-scanner-adapter) that the backend calls over HTTP via TRIVY_ADAPTER_URL for container-image Trivy scans. It pulls the target image from the AK registry per request and runs Trivy in-process, so it needs no Redis and no persistent storage — a single replica is fine. The image is multi-arch (amd64 + arm64), so there is no arch-pinned nodeSelector; leave it enabled on arm64 clusters too. Default enabled: true (recommended for amd64 and supported on arm64). This is separate from the `trivy` server above, which stays on TRIVY_URL for the fs/incus scan path. |
 | scannerAdapter.cacheSizeLimit | string | `"2Gi"` | Writable scratch for image-layer extraction and the Trivy DB cache. emptyDir (no PVC) because the adapter is stateless. |
 | scannerAdapter.env | object | `{"SCANNER_TRIVY_INSECURE":"true"}` | Extra environment for the adapter. SCANNER_TRIVY_INSECURE defaults to "true" because the adapter reaches the AK registry over the plain-HTTP in-cluster Service endpoint; set to "false" if the adapter pulls from a TLS-terminated registry it can verify. |
@@ -655,6 +669,102 @@ not emitted and operators must supply equivalent access if other policies
 isolate the workloads. Source-side egress policies, host-networked proxies, or
 cloud-managed data planes may also need controller-specific policy configuration.
 Disabling policies is not a substitute for designing appropriate access controls.
+
+## Scale to zero (KEDA HTTP add-on)
+
+Optional and off by default. With `scaleToZero.enabled: true` the backend and
+web Deployments scale to zero replicas after `scaledownPeriod` seconds without
+traffic, and the next request wakes them. It uses the
+[KEDA HTTP add-on](https://github.com/kedacore/http-add-on): the chart renders
+an `HTTPScaledObject` (`http.keda.sh/v1alpha1`) per component and routes the
+component's Ingress paths through the add-on's interceptor, which holds each
+request while the component scales up and then forwards it.
+
+**Prerequisites.** KEDA and the KEDA HTTP add-on must already be installed; the
+chart installs neither, and the render assumes the `HTTPScaledObject` CRD
+exists. Tested against add-on chart 0.16.0 (KEDA 2.21). For example:
+
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+helm install keda kedacore/keda --namespace keda --create-namespace
+helm install http-add-on kedacore/keda-add-ons-http --namespace keda
+```
+
+```yaml
+backend:
+  persistence:
+    enabled: false      # required: artifacts in object storage
+  env:
+    STORAGE_BACKEND: s3
+scaleToZero:
+  enabled: true
+  scaledownPeriod: 900  # 15 idle minutes
+  # maxReplicas defaults to the component's replica count (preset in fleet mode)
+  # hosts defaults to the Ingress host (fleet.host in fleet mode)
+  # coldStartTimeout: 120s
+```
+
+**Request path.** An Ingress can only name a Service in its own namespace, and
+the interceptor runs in the add-on's namespace. The chart therefore renders an
+`ExternalName` Service, `<fullname>-keda-interceptor`, that aliases
+`scaleToZero.interceptorService`, and points the selected components' Ingress
+paths at it:
+
+```
+Ingress -> <fullname>-keda-interceptor (ExternalName, release namespace)
+        -> keda-add-ons-http-interceptor-proxy.keda (interceptor)
+        -> <fullname>-backend / <fullname>-web (once scaled up)
+```
+
+The interceptor picks the target from the Host header and path, so each
+`HTTPScaledObject` carries `hosts` (the Ingress host by default) and the backend
+object carries the same path inventory the Ingress routes to the backend. The
+web object claims `/`; the add-on's longest-prefix match keeps it from shadowing
+the backend paths. The Ingress itself, its annotations, TLS and body-size and
+timeout settings are unchanged; ingress controllers that honor `ExternalName`
+backends (ingress-nginx does) need no extra configuration.
+
+**Replicas and health.** When a component is scaled by KEDA the chart omits its
+Deployment `replicas` field, as it does under `backend.autoscaling`, so a
+GitOps controller does not fight KEDA over the count. Liveness and readiness
+probes are unchanged and run whenever a pod exists. A Deployment at zero
+replicas reports zero desired, zero available and is not progressing, which
+Argo CD's built-in Deployment health check treats as Healthy, and
+`HTTPScaledObject` has no Argo CD health check of its own, so an idle
+instance's Application stays Synced/Healthy.
+
+**NetworkPolicy.** Traffic now reaches the pods from the interceptor rather than
+the ingress controller. When `networkPolicy.enabled` or the fleet guardrail
+policy is on, the chart adds one policy per scaled component admitting only the
+pods matching `scaleToZero.networkPolicy.podSelector` (the add-on chart's
+interceptor labels by default) in the interceptor's namespace (derived from
+`interceptorService`, or `scaleToZero.networkPolicy.namespace`) on the
+component's `http` port. Existing policies are unchanged.
+
+**Guardrails.** The render fails when:
+
+- `fleet.hibernate` is also true (hibernate pins zero replicas; scale-to-zero
+  wakes on traffic);
+- `backend` is selected with `backend.persistence.enabled: true` (a ReadWriteOnce
+  storage volume makes the backend stateful) or `backend.autoscaling.enabled:
+  true` (KEDA owns the HPA);
+- `ingress.enabled` is false (HTTPRoute and OpenShift Routes are not wired yet),
+  or `components` names something other than `backend` or `web`.
+
+**Caveats.**
+
+- The first request after an idle period waits for the pod to start and pass
+  readiness. Registry clients with short timeouts may fail that first request;
+  set `coldStartTimeout` below `ingress.proxyReadTimeoutSeconds`.
+- Anything that polls the instance through its public host (uptime probes,
+  monitoring) counts as traffic and keeps it awake.
+- In-cluster callers that reach the backend Service directly (the web
+  frontend's server-side calls) do not wake it; a request through the Ingress
+  does.
+- The interceptor is in the request path for every scaled instance; size and
+  spread its replicas accordingly.
+- Components not listed (Trivy, the scanner adapter, OpenSearch,
+  Dependency-Track) keep running.
 
 ## Security
 

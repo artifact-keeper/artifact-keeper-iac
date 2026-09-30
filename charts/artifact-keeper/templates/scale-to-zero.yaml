@@ -1,0 +1,85 @@
+{{/*
+=============================================================================
+Scale to zero (KEDA HTTP add-on)
+=============================================================================
+Renders only when scaleToZero.enabled. Requires KEDA and the KEDA HTTP add-on
+in the cluster (the http.keda.sh/v1alpha1 HTTPScaledObject CRD and the
+add-on's interceptor proxy Service); this chart installs neither.
+
+Request path when enabled:
+
+  Ingress (release namespace)
+    -> Service <fullname>-keda-interceptor (ExternalName, release namespace)
+    -> interceptor proxy Service (scaleToZero.interceptorService, e.g. in keda)
+    -> the component's Service, once KEDA has scaled it to at least one pod
+
+An Ingress backend can only name a Service in the Ingress's own namespace, so
+the ExternalName Service is the in-namespace alias for the interceptor. The
+interceptor picks the target by the request's Host header and path prefix,
+which is why each HTTPScaledObject carries the ingress hosts and, for the
+backend, the same path inventory the Ingress routes to it. The web object
+claims "/" and the add-on's longest-prefix match keeps it from shadowing the
+backend paths.
+=============================================================================
+*/}}
+{{- if and .Values.scaleToZero .Values.scaleToZero.enabled }}
+{{- include "artifact-keeper.scaleToZero.validate" . }}
+{{- $s := .Values.scaleToZero }}
+{{- $fullname := include "artifact-keeper.fullname" . }}
+{{- $hosts := include "artifact-keeper.scaleToZero.hosts" . | fromYamlArray }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-keda-interceptor
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keda-interceptor
+spec:
+  type: ExternalName
+  externalName: {{ $s.interceptorService }}
+  ports:
+    - name: http
+      port: {{ $s.interceptorPort }}
+      targetPort: {{ $s.interceptorPort }}
+      protocol: TCP
+{{- range $component := list "backend" "web" }}
+{{- if eq (include "artifact-keeper.scaleToZero.manages" (dict "component" $component "context" $)) "true" }}
+---
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: {{ $fullname }}-{{ $component }}
+  labels:
+    {{- include "artifact-keeper.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  hosts:
+    {{- toYaml $hosts | nindent 4 }}
+  pathPrefixes:
+    {{- if eq $component "backend" }}
+    {{- range include "artifact-keeper.backendPaths" $ | fromYamlArray }}
+    - {{ .path }}
+    {{- end }}
+    {{- else }}
+    - /
+    {{- end }}
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $fullname }}-{{ $component }}
+    service: {{ $fullname }}-{{ $component }}
+    port: {{ ternary $.Values.backend.service.httpPort $.Values.web.service.port (eq $component "backend") }}
+  replicas:
+    min: {{ int $s.minReplicas }}
+    max: {{ include "artifact-keeper.scaleToZero.maxReplicas" (dict "component" $component "context" $) }}
+  scaledownPeriod: {{ int $s.scaledownPeriod }}
+  scalingMetric:
+    concurrency:
+      targetValue: {{ int $s.targetPendingRequests }}
+  {{- with $s.coldStartTimeout }}
+  timeouts:
+    conditionWait: {{ . | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

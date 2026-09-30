@@ -809,3 +809,126 @@ egress, so it is rejected. OpenShift needs 5353: dns-default maps service port 5
   protocol: TCP
 {{- end -}}
 {{- end -}}
+
+{{/*
+=============================================================================
+Scale to zero (KEDA HTTP add-on)
+=============================================================================
+Optional, off by default. When scaleToZero.enabled, each selected component
+(backend, web) gets an HTTPScaledObject and its Ingress paths are sent to the
+add-on's interceptor instead of the component's Service. The interceptor holds
+a request while the component scales up from zero, then forwards it to the
+component's Service. An Ingress backend must be a Service in the Ingress's own
+namespace, so the chart renders an ExternalName Service
+(<fullname>-keda-interceptor) that aliases the interceptor's FQDN and points
+the Ingress at that. The chart installs neither KEDA nor the add-on; the
+http.keda.sh/v1alpha1 HTTPScaledObject CRD must already exist.
+*/}}
+
+{{/*
+Returns "true" when scale-to-zero manages <component> (backend|web). Call with
+(dict "component" "backend" "context" $). Validation runs here too, so any
+template that consults this helper fails the render on a bad configuration.
+*/}}
+{{- define "artifact-keeper.scaleToZero.manages" -}}
+{{- $ctx := .context -}}
+{{- $s := $ctx.Values.scaleToZero | default dict -}}
+{{- if $s.enabled -}}
+{{- include "artifact-keeper.scaleToZero.validate" $ctx -}}
+{{- if has .component ($s.components | default list) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Guardrails for scaleToZero. Emits nothing; fails the render on a conflict.
+*/}}
+{{- define "artifact-keeper.scaleToZero.validate" -}}
+{{- $s := .Values.scaleToZero -}}
+{{- if and .Values.fleet .Values.fleet.hibernate -}}
+{{- fail "scaleToZero.enabled and fleet.hibernate are mutually exclusive: hibernate pins backend and web at zero replicas while scale-to-zero wakes them on traffic. Disable scaleToZero while an instance is hibernated." -}}
+{{- end -}}
+{{- if not .Values.ingress.enabled -}}
+{{- fail "scaleToZero.enabled requires ingress.enabled=true: requests reach the KEDA HTTP interceptor through the chart's Ingress (HTTPRoute and OpenShift Routes are not supported yet)" -}}
+{{- end -}}
+{{- if not $s.components -}}
+{{- fail "scaleToZero.components must list at least one of: backend, web" -}}
+{{- end -}}
+{{- range $s.components -}}
+{{- if not (has . (list "backend" "web")) -}}
+{{- fail (printf "scaleToZero.components entry %q is not valid; use backend and/or web" .) -}}
+{{- end -}}
+{{- end -}}
+{{- if has "backend" $s.components -}}
+{{- if not .Values.backend.enabled -}}
+{{- fail "scaleToZero.components includes backend but backend.enabled is false" -}}
+{{- end -}}
+{{- if .Values.backend.persistence.enabled -}}
+{{- fail "scaleToZero.components includes backend, but backend.persistence.enabled is true. Scale-to-zero is for stateless backends whose artifacts live in object storage: a ReadWriteOnce storage PVC pins every wake-up to the node and zone holding the volume and blocks a second replica from starting. Set backend.persistence.enabled=false with an object storage backend (backend.env.STORAGE_BACKEND), or remove backend from scaleToZero.components." -}}
+{{- end -}}
+{{- if .Values.backend.autoscaling.enabled -}}
+{{- fail "scaleToZero.components includes backend, but backend.autoscaling.enabled is true. KEDA owns the backend's HorizontalPodAutoscaler when scale-to-zero is on; disable backend.autoscaling and size with scaleToZero.maxReplicas instead." -}}
+{{- end -}}
+{{- end -}}
+{{- if and (has "web" $s.components) (not .Values.web.enabled) -}}
+{{- fail "scaleToZero.components includes web but web.enabled is false" -}}
+{{- end -}}
+{{- if not $s.interceptorService -}}
+{{- fail "scaleToZero.interceptorService must name the KEDA HTTP add-on interceptor proxy Service by FQDN (<service>.<namespace>.svc.cluster.local)" -}}
+{{- end -}}
+{{- if lt (int $s.minReplicas) 0 -}}
+{{- fail "scaleToZero.minReplicas must be 0 or greater" -}}
+{{- end -}}
+{{- if not (include "artifact-keeper.scaleToZero.hosts" . | fromYamlArray) -}}
+{{- fail "scaleToZero.hosts is empty and no ingress host is set to derive it from" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Hosts the interceptor routes on (YAML list). scaleToZero.hosts when set,
+otherwise the Ingress host (fleet.host in fleet mode).
+*/}}
+{{- define "artifact-keeper.scaleToZero.hosts" -}}
+{{- if .Values.scaleToZero.hosts -}}
+{{- toYaml .Values.scaleToZero.hosts -}}
+{{- else -}}
+{{- with include "artifact-keeper.ingressHost" . -}}
+{{- list . | toYaml -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Maximum replicas for <component> under scale-to-zero: scaleToZero.maxReplicas
+when set, otherwise the component's replica count (the preset's in fleet mode).
+Never below 1, and never below minReplicas.
+*/}}
+{{- define "artifact-keeper.scaleToZero.maxReplicas" -}}
+{{- $ctx := .context -}}
+{{- $max := 0 -}}
+{{- if not (kindIs "invalid" $ctx.Values.scaleToZero.maxReplicas) -}}
+{{- $max = int $ctx.Values.scaleToZero.maxReplicas -}}
+{{- else if eq .component "backend" -}}
+{{- $max = int (include "artifact-keeper.backend.replicaCount" $ctx) -}}
+{{- else -}}
+{{- $max = int (include "artifact-keeper.web.replicaCount" $ctx) -}}
+{{- end -}}
+{{- max 1 $max (int $ctx.Values.scaleToZero.minReplicas) -}}
+{{- end -}}
+
+{{/*
+Namespace of the interceptor pods, for NetworkPolicy peers:
+scaleToZero.networkPolicy.namespace, else the namespace label of
+scaleToZero.interceptorService (<service>.<namespace>.svc...).
+*/}}
+{{- define "artifact-keeper.scaleToZero.interceptorNamespace" -}}
+{{- $s := .Values.scaleToZero -}}
+{{- if $s.networkPolicy.namespace -}}
+{{- $s.networkPolicy.namespace -}}
+{{- else -}}
+{{- $parts := splitList "." $s.interceptorService -}}
+{{- if lt (len $parts) 2 -}}
+{{- fail "scaleToZero.networkPolicy.namespace is empty and cannot be derived from scaleToZero.interceptorService; use the FQDN form <service>.<namespace>.svc.cluster.local or set the namespace" -}}
+{{- end -}}
+{{- index $parts 1 -}}
+{{- end -}}
+{{- end -}}

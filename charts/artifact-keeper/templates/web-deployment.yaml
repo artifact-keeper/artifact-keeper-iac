@@ -16,7 +16,10 @@ metadata:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: web
 spec:
+  {{- /* KEDA owns the replica count under scaleToZero; see backend-deployment. */}}
+  {{- if ne (include "artifact-keeper.scaleToZero.manages" (dict "component" "web" "context" .)) "true" }}
   replicas: {{ include "artifact-keeper.web.replicaCount" . }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "artifact-keeper.web.selectorLabels" . | nindent 6 }}

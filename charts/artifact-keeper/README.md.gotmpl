@@ -497,6 +497,102 @@ isolate the workloads. Source-side egress policies, host-networked proxies, or
 cloud-managed data planes may also need controller-specific policy configuration.
 Disabling policies is not a substitute for designing appropriate access controls.
 
+## Scale to zero (KEDA HTTP add-on)
+
+Optional and off by default. With `scaleToZero.enabled: true` the backend and
+web Deployments scale to zero replicas after `scaledownPeriod` seconds without
+traffic, and the next request wakes them. It uses the
+[KEDA HTTP add-on](https://github.com/kedacore/http-add-on): the chart renders
+an `HTTPScaledObject` (`http.keda.sh/v1alpha1`) per component and routes the
+component's Ingress paths through the add-on's interceptor, which holds each
+request while the component scales up and then forwards it.
+
+**Prerequisites.** KEDA and the KEDA HTTP add-on must already be installed; the
+chart installs neither, and the render assumes the `HTTPScaledObject` CRD
+exists. Tested against add-on chart 0.16.0 (KEDA 2.21). For example:
+
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+helm install keda kedacore/keda --namespace keda --create-namespace
+helm install http-add-on kedacore/keda-add-ons-http --namespace keda
+```
+
+```yaml
+backend:
+  persistence:
+    enabled: false      # required: artifacts in object storage
+  env:
+    STORAGE_BACKEND: s3
+scaleToZero:
+  enabled: true
+  scaledownPeriod: 900  # 15 idle minutes
+  # maxReplicas defaults to the component's replica count (preset in fleet mode)
+  # hosts defaults to the Ingress host (fleet.host in fleet mode)
+  # coldStartTimeout: 120s
+```
+
+**Request path.** An Ingress can only name a Service in its own namespace, and
+the interceptor runs in the add-on's namespace. The chart therefore renders an
+`ExternalName` Service, `<fullname>-keda-interceptor`, that aliases
+`scaleToZero.interceptorService`, and points the selected components' Ingress
+paths at it:
+
+```
+Ingress -> <fullname>-keda-interceptor (ExternalName, release namespace)
+        -> keda-add-ons-http-interceptor-proxy.keda (interceptor)
+        -> <fullname>-backend / <fullname>-web (once scaled up)
+```
+
+The interceptor picks the target from the Host header and path, so each
+`HTTPScaledObject` carries `hosts` (the Ingress host by default) and the backend
+object carries the same path inventory the Ingress routes to the backend. The
+web object claims `/`; the add-on's longest-prefix match keeps it from shadowing
+the backend paths. The Ingress itself, its annotations, TLS and body-size and
+timeout settings are unchanged; ingress controllers that honor `ExternalName`
+backends (ingress-nginx does) need no extra configuration.
+
+**Replicas and health.** When a component is scaled by KEDA the chart omits its
+Deployment `replicas` field, as it does under `backend.autoscaling`, so a
+GitOps controller does not fight KEDA over the count. Liveness and readiness
+probes are unchanged and run whenever a pod exists. A Deployment at zero
+replicas reports zero desired, zero available and is not progressing, which
+Argo CD's built-in Deployment health check treats as Healthy, and
+`HTTPScaledObject` has no Argo CD health check of its own, so an idle
+instance's Application stays Synced/Healthy.
+
+**NetworkPolicy.** Traffic now reaches the pods from the interceptor rather than
+the ingress controller. When `networkPolicy.enabled` or the fleet guardrail
+policy is on, the chart adds one policy per scaled component admitting only the
+pods matching `scaleToZero.networkPolicy.podSelector` (the add-on chart's
+interceptor labels by default) in the interceptor's namespace (derived from
+`interceptorService`, or `scaleToZero.networkPolicy.namespace`) on the
+component's `http` port. Existing policies are unchanged.
+
+**Guardrails.** The render fails when:
+
+- `fleet.hibernate` is also true (hibernate pins zero replicas; scale-to-zero
+  wakes on traffic);
+- `backend` is selected with `backend.persistence.enabled: true` (a ReadWriteOnce
+  storage volume makes the backend stateful) or `backend.autoscaling.enabled:
+  true` (KEDA owns the HPA);
+- `ingress.enabled` is false (HTTPRoute and OpenShift Routes are not wired yet),
+  or `components` names something other than `backend` or `web`.
+
+**Caveats.**
+
+- The first request after an idle period waits for the pod to start and pass
+  readiness. Registry clients with short timeouts may fail that first request;
+  set `coldStartTimeout` below `ingress.proxyReadTimeoutSeconds`.
+- Anything that polls the instance through its public host (uptime probes,
+  monitoring) counts as traffic and keeps it awake.
+- In-cluster callers that reach the backend Service directly (the web
+  frontend's server-side calls) do not wake it; a request through the Ingress
+  does.
+- The interceptor is in the request path for every scaled instance; size and
+  spread its replicas accordingly.
+- Components not listed (Trivy, the scanner adapter, OpenSearch,
+  Dependency-Track) keep running.
+
 ## Security
 
 ### Cosign Image Verification

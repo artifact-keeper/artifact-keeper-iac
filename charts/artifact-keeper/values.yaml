@@ -1514,3 +1514,62 @@ fleet:
     # example limitsMemory: 32Gi or pods: 40. Keys: requestsCpu, requestsMemory,
     # limitsCpu, limitsMemory, pods, pvcs.
     quotaOverrides: {}
+
+# -- Optional scale-to-zero via the KEDA HTTP add-on. Off by default. When
+# enabled, each component in `components` gets an HTTPScaledObject
+# (http.keda.sh/v1alpha1) and its Ingress paths are sent to the add-on's
+# interceptor, which holds a request while the component scales up from zero
+# and then forwards it. Because an Ingress can only name a Service in its own
+# namespace, the chart renders an ExternalName Service
+# `<fullname>-keda-interceptor` aliasing `interceptorService` and points the
+# Ingress at it. Requires KEDA and the KEDA HTTP add-on already installed (the
+# chart installs neither) and ingress.enabled. Mutually exclusive with
+# fleet.hibernate. A selected backend must be stateless:
+# backend.persistence.enabled and backend.autoscaling.enabled must be false.
+# The first request after an idle period waits for a cold start.
+scaleToZero:
+  # -- Render the HTTPScaledObjects, the interceptor ExternalName Service and
+  # the interceptor NetworkPolicies, and route the selected components'
+  # Ingress paths through the interceptor.
+  enabled: false
+  # -- FQDN of the KEDA HTTP add-on interceptor proxy Service. The default is
+  # the Service the add-on's chart creates (named after the chart, not the
+  # release) when installed in namespace `keda`.
+  interceptorService: keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local
+  # -- Port of the interceptor proxy Service.
+  interceptorPort: 8080
+  # -- Seconds without traffic before a component scales down to minReplicas.
+  scaledownPeriod: 900
+  # -- Replicas while idle. 0 scales the component to zero.
+  minReplicas: 0
+  # -- (int) Maximum replicas under load.
+  # @default -- the component's replica count (the preset's in fleet mode)
+  maxReplicas: null
+  # -- Concurrent in-flight requests per replica that KEDA scales toward
+  # (rendered as spec.scalingMetric.concurrency.targetValue; the add-on
+  # deprecated the old spec.targetPendingRequests field for it).
+  targetPendingRequests: 100
+  # -- Components scaled by traffic: any of backend, web.
+  components:
+    - backend
+    - web
+  # -- Hosts the interceptor routes to this release, matched against the
+  # request Host header.
+  # @default -- the Ingress host (fleet.host in fleet mode)
+  hosts: []
+  # -- How long the interceptor holds a request while a component scales up
+  # from zero (HTTPScaledObject spec.timeouts.conditionWait, a duration such
+  # as "120s"). Empty leaves the add-on's default. Keep it below
+  # ingress.proxyReadTimeoutSeconds.
+  coldStartTimeout: ""
+  # -- Access for the interceptor pods when networkPolicy.enabled or the fleet
+  # guardrail NetworkPolicy is on: one additive policy per scaled component
+  # admits these pods on the component's http port.
+  networkPolicy:
+    # -- Namespace of the interceptor pods. Empty derives it from
+    # interceptorService (<service>.<namespace>.svc...).
+    namespace: ""
+    # -- Labels selecting the interceptor pods (the add-on chart's defaults).
+    podSelector:
+      app.kubernetes.io/component: interceptor
+      app.kubernetes.io/name: http-add-on

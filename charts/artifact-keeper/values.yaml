@@ -187,10 +187,15 @@ backend:
   # When enabled, the backend starts a second TCP listener on `metricsPort`
   # serving only `GET /metrics` with no authentication. Intended for
   # Prometheus scrapers that cannot present credentials. Disabled by default.
+  # `bindIP` renders METRICS_BIND_IP (1.11.0+): the listen IP for this
+  # listener. Empty leaves the backend default, 0.0.0.0 (every interface).
+  # Keep it reachable by Prometheus; 127.0.0.1 only suits a scraper sidecar
+  # in the same pod. An explicit METRICS_BIND_IP in backend.env wins.
   #
   metricsListener:
     enabled: false
     port: 9091
+    bindIP: ""
   env:
     RUST_LOG: "info,artifact_keeper=debug"
     HOST: "0.0.0.0"
@@ -207,6 +212,8 @@ backend:
     # CORS_ORIGINS: ""
     # DEMO_MODE: "false"
     # ALLOW_LOCAL_ADMIN_LOGIN: "false"
+    # GRPC_BIND_IP: "0.0.0.0"               # (1.11.0) gRPC listen IP; bare IP, invalid fails startup. Keep 0.0.0.0 while the backend Service exposes the grpc port.
+    # METRICS_BIND_IP: "0.0.0.0"            # (1.11.0) metrics-only listener IP (only with METRICS_PORT); prefer backend.metricsListener.bindIP.
 
     # -- Storage
     # STORAGE_BACKEND: "filesystem"
@@ -217,6 +224,7 @@ backend:
     # S3_PREFIX: ""
     # S3_REDIRECT_DOWNLOADS: "false"
     # S3_PRESIGN_EXPIRY_SECS: "3600"
+    # S3_PUBLIC_ENDPOINT: ""                # (1.11.0) scheme://host[:port] clients use for presigned S3 URLs when S3_ENDPOINT is in-cluster only; unset = S3_ENDPOINT (iac#370).
     # S3_CA_CERT_PATH: ""
     # S3_INSECURE_TLS: "false"
     # GCS_BUCKET: ""
@@ -230,10 +238,20 @@ backend:
     # AZURE_STORAGE_ACCESS_KEY: ""
     # AZURE_REDIRECT_DOWNLOADS: "false"
     # AZURE_SAS_EXPIRY: "3600"
+    # AZURE_STORAGE_PUBLIC_ENDPOINT: ""     # (1.11.0) base URL (path allowed) clients use for Azure SAS redirects; unset = AZURE_STORAGE_ENDPOINT (iac#370).
+    # DOWNLOAD_VERIFY_CHECKSUMS: "true"     # (1.11.0) re-check SHA-256 while streaming generic downloads; a mismatch aborts the response.
+    # STORAGE_SCRUB_INTERVAL_SECS: "0"      # (1.11.0) scheduled storage scrub (report-only); 0 disables the schedule.
+    # STORAGE_SCRUB_MAX_OBJECTS: "500"      # (1.11.0) objects re-hashed per scrub pass.
+    # STORAGE_SCRUB_MAX_BYTES: "2147483648" # (1.11.0) bytes re-hashed per scrub pass.
 
     # -- Presigned Downloads
     # PRESIGNED_DOWNLOADS_ENABLED: "false"
     # PRESIGNED_DOWNLOAD_EXPIRY_SECS: "300"
+    # With PRESIGNED_DOWNLOADS_ENABLED and a per-backend *_REDIRECT_DOWNLOADS
+    # on, OCI blob GETs answer 307 to the object store (1.11.0). Set
+    # S3_PUBLIC_ENDPOINT / AZURE_STORAGE_PUBLIC_ENDPOINT above when clients
+    # cannot reach S3_ENDPOINT / AZURE_STORAGE_ENDPOINT, or every redirected
+    # pull fails. See "Upgrading to 1.11.0" in the chart README.
 
     # -- CloudFront CDN (S3 storage backends)
     # CLOUDFRONT_DISTRIBUTION_URL: ""
@@ -274,6 +292,10 @@ backend:
     # LDAP_USE_STARTTLS: "false"
     # LDAP_CA_CERT_PATH: ""
     # LDAP_INSECURE_TLS: "false"
+    # LDAP_SYNC_INTERVAL: "3600"            # (1.11.0) directory reconcile period in seconds (min 60); 0 disables. Runs on one replica.
+    # LDAP_SYNC_DEACTIVATE: "false"         # (1.11.0) opt in to deactivating users the directory no longer has (else only logged).
+    # LDAP_SYNC_MAX_DEACTIVATE_PERCENT: "10" # (1.11.0) per-provider cap on deactivations in one pass, percent.
+    # LDAP_SYNC_MAX_DEACTIVATE: "25"        # (1.11.0) per-provider cap on deactivations in one pass, count.
 
     # -- Password & Account Security
     # ACCOUNT_LOCKOUT_THRESHOLD: "5"
@@ -304,6 +326,9 @@ backend:
     # TIGHTEN this to your ingress controller's actual pod CIDR for
     # defense-in-depth, or set it to "" only when the backend is reached
     # directly (no proxy) so ConnectInfo already carries the real client IP.
+    # Since 1.11.0 the same list also decides which peers may set an inbound
+    # W3C `traceparent` as the trace parent (ak#4195); with it empty, every
+    # client may, and parentbased_* samplers then let a client force export.
     RATE_LIMIT_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     # RATE_LIMIT_AUTH_PER_MIN: "120"
     # RATE_LIMIT_API_PER_MIN: "5000"
@@ -327,12 +352,39 @@ backend:
     #                                      # entirely (kill switch). Logs a
     #                                      # startup warning when disabled.
     # PROXY_QUEUE_TIMEOUT_SECS: "10"       # Per-request queue wait budget (default: 10).
+    # NPM_VIRTUAL_NEGATIVE_CACHE_TTL_MS: "5000"       # (1.11.0) npm virtual-member miss cache TTL; 0 disables.
+    # NPM_VIRTUAL_NEGATIVE_CACHE_MAX_ENTRIES: "4096"  # (1.11.0) npm virtual-member miss cache size.
+    # AK_VSCODE_GALLERY_METADATA_BUDGET_BYTES: ""     # (1.11.0) VS Code gallery share of the 1 GiB proxy metadata budget; unset = 3/8 (384 MiB).
+    # MIGRATION_SOURCE_CONNECT_TIMEOUT_SECS: "10"     # (1.11.0) Artifactory/Nexus migration source connect timeout.
+    # MIGRATION_SOURCE_READ_TIMEOUT_SECS: "30"        # (1.11.0) migration source read-idle timeout.
+    # MIGRATION_SOURCE_BUFFERED_TIMEOUT_SECS: "300"   # (1.11.0) migration source buffered-request ceiling; 0 disables.
+    # Scan-on-proxy (1.11.0 enforces it for Maven, Gradle, sbt, NuGet,
+    # Chocolatey, PowerShell and Cargo) and `oci_trusted_bearer_realms` (a
+    # credentialed Docker Hub Remote needs ["https://auth.docker.io"]) are
+    # per-repository settings set through the API, not environment variables.
 
     # -- Security Scanning
     # OPENSCAP_PROFILE: "xccdf_org.ssgproject.content_profile_standard"
     # GITHUB_TOKEN: ""
     # QUARANTINE_ENABLED: "false"
     # QUARANTINE_DURATION_MINUTES: "60"
+    # OSV_RECORD_FETCH_BUDGET_SECS: "5"     # (1.11.0) wall-clock budget for hydrating one OSV batch's full advisory records.
+    # CONDA_ATTESTATION_REQUIRE_VERIFIED: "true" # (1.11.0) refuse conda CEP-27 attestations that fail verification; "false" opts out.
+    # AK_CONDA_PYPI_ALIAS_MAP: ""           # (1.11.0) path to a conda->PyPI alias map document (mount it); unset = built-in map only.
+
+    # -- Signing
+    # SIGNING_KEY_ROTATION_OVERLAP_SECS: "1209600" # (1.11.0) window after a key rotation in which old and new keys both sign Debian/RPM metadata (14 days).
+    # SIGNING_AUTO_MIGRATE_LEGACY_KEYS: "false"    # (1.11.0) opt in to replacing signing keys that cannot sign their bound metadata at startup.
+
+    # -- Guest Access
+    # AK_GUEST_ACCESS_ENABLED: "true"       # Set explicitly, this PINS the value over the 1.11.0 runtime toggle (PATCH /api/v1/admin/settings/system); leave unset to manage it from the UI.
+
+    # -- SSRF / private-network allowances (outbound URL validation)
+    # Metadata, loopback and link-local addresses stay blocked under all of these.
+    # AK_SSRF_ALLOW_PRIVATE_CIDRS: ""       # Narrow, preferred: CIDRs shared by upstream, webhook and SSO surfaces.
+    # UPSTREAM_ALLOW_PRIVATE_IPS: "false"   # Upstream/remote/migration URLs only; the CIDR list above wins over it.
+    # WEBHOOK_ALLOW_PRIVATE_IPS: "false"    # Webhook targets. Since 1.11.0 ADDITIVE with the CIDR list: allowed if EITHER matches (ak#4428).
+    # SSO_ALLOW_PRIVATE_IPS: "false"        # SSO/IdP URLs. Since 1.11.0 ADDITIVE with the CIDR list: allowed if EITHER matches (ak#4474).
 
     # -- Network Security
     # ALLOW_HTTP_INTEGRATIONS: "false"
@@ -348,16 +400,33 @@ backend:
     # -- OpenTelemetry
     # OTEL_EXPORTER_OTLP_ENDPOINT: ""
     # OTEL_SERVICE_NAME: "artifact-keeper"
+    # OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"   # "grpc" or "http/protobuf".
+    # OTEL_TRACES_SAMPLER: "parentbased_always_on" # (1.11.0) OTel spec sampler name; unknown names fall back to this default.
+    # OTEL_TRACES_SAMPLER_ARG: "1.0"        # (1.11.0) ratio for the *traceidratio samplers.
+    # Inbound traceparent is trusted only from RATE_LIMIT_TRUSTED_PROXY_CIDRS
+    # peers (see Rate Limiting). 1.11.0 also adds upstream CLIENT spans and DB
+    # query spans, and turns ak_http_request_duration_seconds into a bucketed
+    # histogram (its quantile series are gone); there are no new knobs for those.
 
     # -- Observability
     # METRICS_PORT: ""
 
     # -- Upload Limits
     # MAX_UPLOAD_SIZE: "10737418240"
+    # MAX_INGEST_DECOMPRESSED_BYTES: "134217728"            # Decompressed-size cap when reading uploaded package archives (128 MiB).
+    # PACMAN_FILE_LIST_MAX_DECOMPRESSED_BYTES: "4294967296" # (1.11.0) pacman .files list cap (4 GiB).
+    # MAX_LOCKFILE_BYTES: "33554432"                        # (1.11.0) environment lockfile size cap (32 MiB).
+    # AK_BUNDLE_MAX_MANIFEST_BYTES: "268435456"             # (1.11.0) bundle manifest cap (256 MiB); bundles API is a preview.
+    # AK_BUNDLE_MAX_ITEMS: "2000000"                        # (1.11.0) bundle item record cap.
+    # AK_BUNDLE_MAX_ENTRIES: "4000000"                      # (1.11.0) bundle tar entry cap.
+    # AK_BUNDLE_MAX_TOTAL_BYTES: "4398046511104"            # (1.11.0) bundle stream cap (4 TiB).
 
     # -- Scheduled Tasks
     # GC_SCHEDULE: "0 0 * * * *"
     # LIFECYCLE_CHECK_INTERVAL_SECS: "60"
+    # GC_TRASH_RETENTION_DAYS: "0"          # (1.11.0) days a soft-deleted artifact stays restorable in the admin trash before GC; 0 = next GC pass (max 3650).
+    # BLOB_GC_MIN_AGE_SECS: "86400"         # (1.11.0) minimum age before an unreferenced OCI blob may be reclaimed; clamped to [60, 604800].
+    # RPM_VERSION_RETENTION_KEEP: "0"       # (1.11.0) keep the N newest published versions per curated RPM repo (hourly, one replica); 0 keeps all.
 
     # -- SMTP Email Delivery (disabled when SMTP_HOST is unset)
     # SMTP_HOST: ""

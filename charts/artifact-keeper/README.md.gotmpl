@@ -579,6 +579,61 @@ The [mesh bootstrap guide](../../docs/mesh-bootstrap.md) walks through a two-pee
 
 ## Upgrading
 
+### Upgrading to 1.11.0
+
+These notes apply when `backend.image.tag` (or `appVersion`) moves to backend 1.11.0.
+
+**Stop every backend replica before migration 233 runs.** Migration 233 scopes lifecycle policies by explicit repository assignments, and an older backend reads the new scopes as "every repository": a 1.10.x replica or lifecycle scheduler still running next to a 1.11.0 one can delete artifacts across the whole instance. Do not do a rolling or mixed-version upgrade, and do not downgrade to 1.10.x afterwards without reconciling policy scopes by hand.
+
+- The default `backend.strategy.type: Recreate` stops all old pods before starting new ones, which is what this migration needs. If you set `RollingUpdate`, or run with `backend.autoscaling.enabled`, scale the backend to zero first (`kubectl scale deploy/<release>-backend --replicas=0`, with the HPA removed or paused), then run `helm upgrade`.
+- In fleet or mesh setups, each instance has its own database, so the rule applies per instance: all replicas of one instance must stop together.
+- API change: creating a lifecycle policy without `repository_id` now creates a dormant policy. Clients that relied on the old global default must send `applies_to_all: true`.
+
+**New backend environment values.** All of them are optional and default to the backend's own default when unset. They go in `backend.env`, where `values.yaml` lists each one, commented out, with its default:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `S3_PUBLIC_ENDPOINT` | unset (`S3_ENDPOINT`) | Origin (`scheme://host[:port]`, no path) that presigned S3 URLs and the OCI blob `307` point at. |
+| `AZURE_STORAGE_PUBLIC_ENDPOINT` | unset (`AZURE_STORAGE_ENDPOINT`) | Base URL for Azure SAS redirects. A path is allowed. |
+| `DOWNLOAD_VERIFY_CHECKSUMS` | `true` | Verifies SHA-256 while streaming generic downloads. |
+| `STORAGE_SCRUB_INTERVAL_SECS`, `STORAGE_SCRUB_MAX_OBJECTS`, `STORAGE_SCRUB_MAX_BYTES` | `0`, `500`, `2147483648` | Scheduled storage scrub (report-only). `0` turns the schedule off. |
+| `GRPC_BIND_IP` | `0.0.0.0` | gRPC listen IP. Keep `0.0.0.0` while the backend Service exposes the grpc port. |
+| `METRICS_BIND_IP` | `0.0.0.0` | Metrics-only listener IP. Also available as `backend.metricsListener.bindIP`. |
+| `RPM_VERSION_RETENTION_KEEP` | `0` | Keeps the N newest published versions of each curated RPM repository. `0` keeps all. |
+| `GC_TRASH_RETENTION_DAYS` | `0` | Days a soft-deleted artifact stays restorable in the admin trash. |
+| `BLOB_GC_MIN_AGE_SECS` | `86400` | Minimum age before an unreferenced OCI blob can be reclaimed. Clamped to [60, 604800]. |
+| `LDAP_SYNC_INTERVAL` | `3600` | Directory reconcile period. When LDAP is configured, it runs by default. `0` turns it off. |
+| `LDAP_SYNC_DEACTIVATE` | `false` | Opt-in deactivation of users the directory no longer has. |
+| `LDAP_SYNC_MAX_DEACTIVATE_PERCENT`, `LDAP_SYNC_MAX_DEACTIVATE` | `10`, `25` | Per-provider caps on deactivations in one pass. |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | `parentbased_always_on`, `1.0` | Trace sampler, using OpenTelemetry spec names. |
+| `NPM_VIRTUAL_NEGATIVE_CACHE_TTL_MS`, `NPM_VIRTUAL_NEGATIVE_CACHE_MAX_ENTRIES` | `5000`, `4096` | npm virtual-member miss cache. |
+| `AK_VSCODE_GALLERY_METADATA_BUDGET_BYTES` | 3/8 of 1 GiB | VS Code gallery share of the proxy metadata budget. |
+| `MIGRATION_SOURCE_CONNECT_TIMEOUT_SECS`, `MIGRATION_SOURCE_READ_TIMEOUT_SECS`, `MIGRATION_SOURCE_BUFFERED_TIMEOUT_SECS` | `10`, `30`, `300` | Artifactory/Nexus migration source timeouts. |
+| `OSV_RECORD_FETCH_BUDGET_SECS` | `5` | Budget for hydrating one OSV batch's advisory records. |
+| `CONDA_ATTESTATION_REQUIRE_VERIFIED` | `true` | Refuses conda attestations that fail verification. |
+| `AK_CONDA_PYPI_ALIAS_MAP` | unset | Path to a conda-to-PyPI alias map document. |
+| `SIGNING_KEY_ROTATION_OVERLAP_SECS` | `1209600` | Window in which old and new signing keys both sign metadata after a rotation. |
+| `SIGNING_AUTO_MIGRATE_LEGACY_KEYS` | `false` | Opt-in replacement, at startup, of keys that cannot sign their bound metadata. |
+| `PACMAN_FILE_LIST_MAX_DECOMPRESSED_BYTES`, `MAX_LOCKFILE_BYTES` | 4 GiB, 32 MiB | Ingest size caps. |
+| `AK_BUNDLE_MAX_MANIFEST_BYTES`, `AK_BUNDLE_MAX_ITEMS`, `AK_BUNDLE_MAX_ENTRIES`, `AK_BUNDLE_MAX_TOTAL_BYTES` | 256 MiB, 2000000, 4000000, 4 TiB | Bundle reader limits. The bundles API is a preview in 1.11.0. |
+
+`values.yaml` also now lists these older variables, which the chart never listed before: `MAX_INGEST_DECOMPRESSED_BYTES` (128 MiB), `OTEL_EXPORTER_OTLP_PROTOCOL` (`grpc`), `AK_GUEST_ACCESS_ENABLED`, `AK_SSRF_ALLOW_PRIVATE_CIDRS`, `UPSTREAM_ALLOW_PRIVATE_IPS`, `WEBHOOK_ALLOW_PRIVATE_IPS` and `SSO_ALLOW_PRIVATE_IPS`.
+
+**Behaviour changes that affect existing values:**
+
+- `WEBHOOK_ALLOW_PRIVATE_IPS` and `SSO_ALLOW_PRIVATE_IPS` are now **additive** with `AK_SSRF_ALLOW_PRIVATE_CIDRS`: a webhook target or IdP is allowed when either the toggle is `true` or the address is in the CIDR list. For upstream URLs, the CIDR list still wins over `UPSTREAM_ALLOW_PRIVATE_IPS`. Metadata, loopback and link-local addresses stay blocked.
+- `RATE_LIMIT_TRUSTED_PROXY_CIDRS`, which the chart sets to the RFC1918 ranges by default, now also decides which peers may set an inbound W3C `traceparent`. Narrow it to your ingress controller's pod CIDR so that other in-cluster clients cannot force trace sampling.
+- When `AK_GUEST_ACCESS_ENABLED` is set explicitly, it pins guest access and overrides the new runtime toggle. Leave it unset to manage guest access from the web UI or the API.
+- `ak_http_request_duration_seconds` is now a bucketed histogram, so its `quantile` series are gone. The dashboard and alert rules in `monitoring/` already use `histogram_quantile()` over `_bucket`. Update any of your own panels that select `{quantile=...}`.
+
+**Presigned downloads behind an in-cluster object store** ([#370](https://github.com/artifact-keeper/artifact-keeper-iac/issues/370)). With `PRESIGNED_DOWNLOADS_ENABLED` and `S3_REDIRECT_DOWNLOADS` on, OCI blob pulls now answer `307` to the object store. If `S3_ENDPOINT` is an in-cluster address (for example `http://minio:9000`), set `S3_PUBLIC_ENDPOINT` to the host clients use, or every redirected pull fails. The install notes warn when this combination is detected. For the public S3 host:
+
+- Do not use `nginx.ingress.kubernetes.io/rewrite-target` or a path prefix.
+- Forward the original `Host` header (the ingress-nginx default). SigV4 signs the host and the path, so rewriting either one produces `403`s.
+- Azure is the opposite: Azure Storage reads the account from `Host`, so a proxy in front of `*.blob.core.windows.net` must rewrite `Host` to the account host, or use the account's custom domain.
+
+**Settings that are not environment variables.** Scan-on-proxy, which 1.11.0 now enforces for Maven, Gradle, sbt, NuGet, Chocolatey, PowerShell and Cargo Remotes that already had it enabled, and `oci_trusted_bearer_realms` are per-repository settings set through the API. The chart cannot set them. A credentialed Docker Hub Remote must add `"oci_trusted_bearer_realms": ["https://auth.docker.io"]`, or its pulls fall back to anonymous tokens. See the backend's `docs/oci-trusted-bearer-realms.md` and `docs/security/scan-on-proxy.md`.
+
 ### Image Tags
 
 The default `dev` tag is a floating tag that always points to the latest build from main. When using ArgoCD, the Image Updater pins these to specific digests so rollouts are deterministic. For manual deployments, consider using a specific version tag (e.g. `1.1.0`).

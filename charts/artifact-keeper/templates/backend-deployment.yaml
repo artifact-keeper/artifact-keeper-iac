@@ -325,6 +325,14 @@ spec:
             {{- if .Values.backend.metricsListener.enabled }}
             - name: METRICS_PORT
               value: {{ .Values.backend.metricsListener.port | quote }}
+            {{- /*
+            METRICS_BIND_IP (backend 1.11.0+). An explicit entry in backend.env
+            wins, as with the image-builder variables above.
+            */}}
+            {{- if and .Values.backend.metricsListener.bindIP (not (hasKey .Values.backend.env "METRICS_BIND_IP")) }}
+            - name: METRICS_BIND_IP
+              value: {{ .Values.backend.metricsListener.bindIP | quote }}
+            {{- end }}
             {{- end }}
             {{- if eq (include "artifact-keeper.fleet.enabled" .) "true" }}
             # Object storage for this instance. Artifacts share one bucket with

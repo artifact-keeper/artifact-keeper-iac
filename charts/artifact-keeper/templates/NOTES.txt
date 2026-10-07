@@ -66,6 +66,27 @@ WARNING: ALLOW_HTTP_INTEGRATIONS=1 is set on the backend
   integration requires it unless you put TLS in front of Dependency-Track.
 {{- end }}
 
+{{- $benv := .Values.backend.env | default dict }}
+{{- $presign := has (lower (toString (get $benv "PRESIGNED_DOWNLOADS_ENABLED"))) (list "true" "1") }}
+{{- $s3Redirect := has (lower (toString (get $benv "S3_REDIRECT_DOWNLOADS"))) (list "true" "1") }}
+{{- $azRedirect := has (lower (toString (get $benv "AZURE_REDIRECT_DOWNLOADS"))) (list "true" "1") }}
+{{- if and $presign $s3Redirect (get $benv "S3_ENDPOINT") (not (get $benv "S3_PUBLIC_ENDPOINT")) }}
+
+WARNING: presigned S3 downloads are on but backend.env.S3_PUBLIC_ENDPOINT
+  is unset. Redirects (including the OCI blob 307) point clients at
+  S3_ENDPOINT={{ get $benv "S3_ENDPOINT" }}; if clients cannot reach that
+  address, every redirected download fails. Set S3_PUBLIC_ENDPOINT to the
+  scheme://host[:port] clients use, forwarded to the object store with the
+  Host header and path unchanged (SigV4 signs both).
+{{- end }}
+{{- if and $presign $azRedirect (get $benv "AZURE_STORAGE_ENDPOINT") (not (get $benv "AZURE_STORAGE_PUBLIC_ENDPOINT")) }}
+
+WARNING: presigned Azure downloads are on but
+  backend.env.AZURE_STORAGE_PUBLIC_ENDPOINT is unset. SAS redirects point
+  clients at AZURE_STORAGE_ENDPOINT={{ get $benv "AZURE_STORAGE_ENDPOINT" }};
+  set AZURE_STORAGE_PUBLIC_ENDPOINT if clients cannot reach it.
+{{- end }}
+
 {{- if .Values.serviceMonitor.enabled }}
 
 Monitoring:

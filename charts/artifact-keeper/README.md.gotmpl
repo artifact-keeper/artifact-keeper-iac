@@ -293,6 +293,8 @@ Two overlay files support multi-instance mesh testing via ArgoCD:
 
 Both use `fullnameOverride` for stable service names and disable non-essential components (Trivy, DependencyTrack, ingress).
 
+Each mesh member is its own Helm release with its own database and storage. Raising `backend.replicaCount` does not create mesh peers; see [replicaCount vs peer replication](#replicacount-vs-peer-replication) and the [mesh bootstrap guide](../../docs/mesh-bootstrap.md).
+
 ## Architecture
 
 The chart deploys the following components:
@@ -534,6 +536,46 @@ For production deployments:
 - Disable in-cluster PostgreSQL (`postgres.enabled: false`) and point `externalDatabase` at a managed, multi-AZ database like Amazon RDS.
 - Set `opensearch.replicaCount: 3` to switch OpenSearch from single-node Deployment mode to a StatefulSet with cluster bootstrapping. The chart sets `cluster.initial_cluster_manager_nodes` automatically.
 - DependencyTrack runs as a single replica due to PVC lock constraints. Plan maintenance windows for upgrades.
+
+These settings scale one Artifact Keeper instance. They do not replicate artifacts to a second site; for that, see the next section.
+
+## replicaCount vs peer replication
+
+`backend.replicaCount` and peer (mesh) replication solve different problems and are configured in different places.
+
+| | `backend.replicaCount > 1` | Peer replication (mesh) |
+|---|---|---|
+| What it is | More backend pods for **one** Artifact Keeper instance | Several **independent** Artifact Keeper instances that copy artifacts to each other |
+| Helm shape | One release | One release per peer |
+| Database | One shared PostgreSQL | One PostgreSQL per peer |
+| Artifact storage | One shared store | One store per peer |
+| Peer identity | One identity, shared by every pod | One identity per peer |
+| How it is set up | `replicaCount` (or `backend.autoscaling`) | Backend API calls after install: register peers, then subscribe repositories or create sync policies |
+| What it gives you | Availability and throughput for one instance | Copies of artifacts at other sites, each peer able to serve on its own |
+
+### HA replicas (one instance)
+
+`backend.replicaCount` only sets `spec.replicas` on the backend Deployment (via the `artifact-keeper.backend.replicaCount` helper; in fleet mode the preset decides and hibernation forces 0). Every pod gets the same `DATABASE_URL`, the same `JWT_SECRET`, the same `backend.env`, and the same `<release>-storage` volume. The chart does not render a per-pod database, volume, or peer identity, and adds no headless Service for discovery.
+
+The backend keeps its peer identity in the database (the `peer_instance_identity` table), so all pods of one release are the same peer as far as any other instance is concerned. The background sync worker is safe to run in several pods: tasks are claimed in the database, so two replicas do not deliver the same task twice.
+
+To run more than one backend pod, the pods must actually be able to share state:
+
+- **PostgreSQL**: a single database that every pod reaches. For production, set `postgres.enabled: false` and point `externalDatabase` (or `externalDatabase.existingSecret`) at a managed database.
+- **Artifact storage**: either object storage (`backend.env.STORAGE_BACKEND: s3` with `S3_BUCKET` and friends, plus `backend.persistence.enabled: false`), or a ReadWriteMany volume (`backend.persistence.accessModes: [ReadWriteMany]` on an RWX-capable `storageClass`). The default is a ReadWriteOnce PVC, which either pins every pod to one node or leaves extra pods stuck on a Multi-Attach error. See [Storage](#storage) for the scan-workspace and shared-config volumes, which have the same constraint. The chart does not block `replicaCount > 1` with an RWO volume, so check this yourself.
+- **Peer API key**: if this instance also takes part in a mesh, set `PEER_API_KEY` explicitly (preferably through `backend.environmentSecrets`). When it is unset the backend generates a random key at startup and logs a warning, so each pod would come up with a different one.
+
+### Mesh peers (several instances)
+
+A peer is a complete Artifact Keeper deployment: backend, PostgreSQL, and artifact storage of its own. On Kubernetes that means one Helm release per peer, usually in its own namespace or cluster. Each peer can run its own HA replicas as described above.
+
+The chart does not bootstrap a mesh. Peers are linked after install through the backend API (`/api/v1/peers`, `/api/v1/peers/{id}/repositories`, `/api/v1/sync-policies`), using credentials minted on each peer. The chart's part is limited to:
+
+- the peer identity env vars, `backend.env.PEER_INSTANCE_NAME`, `backend.env.PEER_PUBLIC_ENDPOINT`, and `PEER_API_KEY`;
+- an endpoint that the other peers can reach (an Ingress, HTTPRoute, or Route, or a Service when all peers share a cluster);
+- `backend.env.AK_SSRF_ALLOW_PRIVATE_CIDRS` when peers reach each other on private addresses, because peer registration rejects private and internal endpoints by default.
+
+The [mesh bootstrap guide](../../docs/mesh-bootstrap.md) walks through a two-peer setup end to end. For the replication model itself (push, pull, and mirror modes, sync policies, chunked transfer), see the backend's [Peer Replication docs](https://artifactkeeper.com/docs/advanced/edge-nodes/) and the peer handlers in the [backend repository](https://github.com/artifact-keeper/artifact-keeper/tree/main/backend/src/api/handlers).
 
 ## Upgrading
 

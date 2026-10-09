@@ -411,6 +411,22 @@ backend:
     # `dependencyTrack.enabled` is true, a ReadWriteMany class for the `shared-config` PVC
     # (`sharedConfig.accessModes` / `sharedConfig.storageClass` below).
     accessModes: []
+    # -- Configuration for the per-pod emptyDir used when persistence is
+    # disabled and ephemeral.enabled is false. The size limit also counts
+    # against resources.limits.ephemeral-storage, so keep that container limit
+    # above this value with enough headroom for logs and the writable layer.
+    emptyDir:
+      sizeLimit: 10Gi
+    # -- Per-pod generic ephemeral volume used when persistence is disabled.
+    # This creates one PVC from volumeClaimTemplate for each backend pod and
+    # deletes it with the pod. It is suitable for upload scratch space in
+    # multi-replica deployments that keep artifacts in object storage.
+    ephemeral:
+      enabled: false
+      size: 10Gi
+      storageClass: ""
+      accessModes:
+        - ReadWriteOnce
   # -- Scratch space for security scans (SCAN_WORKSPACE_PATH=/scan-workspace,
   # set whenever trivy.enabled). `enabled: true` backs it with a
   # ReadWriteOnce PVC, which pins every backend replica to one node. Set it

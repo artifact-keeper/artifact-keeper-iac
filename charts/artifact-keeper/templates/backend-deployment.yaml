@@ -433,11 +433,26 @@ spec:
             sizeLimit: 256Mi
         - name: storage
           {{- if .Values.backend.persistence.enabled }}
+          {{- if .Values.backend.persistence.ephemeral.enabled }}
+          {{- fail "backend.persistence.enabled and backend.persistence.ephemeral.enabled cannot both be true" }}
+          {{- end }}
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-storage
+          {{- else if .Values.backend.persistence.ephemeral.enabled }}
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  {{- toYaml .Values.backend.persistence.ephemeral.accessModes | nindent 18 }}
+                resources:
+                  requests:
+                    storage: {{ .Values.backend.persistence.ephemeral.size }}
+                {{- with .Values.backend.persistence.ephemeral.storageClass }}
+                storageClassName: {{ . | quote }}
+                {{- end }}
           {{- else }}
           emptyDir:
-            sizeLimit: 10Gi
+            sizeLimit: {{ .Values.backend.persistence.emptyDir.sizeLimit }}
           {{- end }}
         {{- if or .Values.backend.scanWorkspace.enabled .Values.trivy.enabled }}
         - name: scan-workspace

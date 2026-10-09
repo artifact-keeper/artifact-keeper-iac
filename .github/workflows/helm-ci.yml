@@ -71,8 +71,8 @@ jobs:
       - name: Run helm lint
         run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)
 
-      - name: Test image registry rendering
-        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_image_registry.py' -v
+      - name: Run chart render tests
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_render_*.py' -v
 
   httproute-tests:
     name: HTTPRoute Render Tests (Gateway API ${{ matrix.gateway-api }})

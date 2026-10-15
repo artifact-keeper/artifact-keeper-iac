@@ -111,9 +111,10 @@ opensearch:
   clusterName: artifact-keeper-prod
   # -- 2 GiB JVM heap. Container memory limit must be roughly 2x this.
   javaOpts: "-Xms2g -Xmx2g"
-  # -- For production, disable the demo security plugin and provision
-  # TLS certs (see charts/artifact-keeper/README.md). Until real certs
-  # are in place, leaving disableSecurityPlugin=true is still safer than
+  # -- The chart does not provision the TLS certificates the OpenSearch
+  # Security plugin needs yet (iac#379), so this stays true. The
+  # opensearch NetworkPolicy (networkPolicy.enabled below) limits :9200 to
+  # the backend pods. Leaving disableSecurityPlugin=true is still safer than
   # shipping demo certs/keys.
   disableSecurityPlugin: true
   allowInvalidCerts: false

@@ -509,12 +509,34 @@ When `cosign.enabled` is set to `true`, an init container verifies the backend i
 
 When `networkPolicy.enabled` is set to `true`, the chart creates NetworkPolicy resources that restrict traffic between components. Only the required communication paths are allowed (for example, backend to PostgreSQL, backend to OpenSearch on port 9200, and OpenSearch-to-OpenSearch transport on port 9300).
 
+**OpenSearch.** The bundled OpenSearch runs with its Security plugin disabled (`opensearch.disableSecurityPlugin: true`), so it has no authentication: whatever reaches port 9200 can read, change and delete the search index. Its NetworkPolicy therefore also renders when `networkPolicy.enabled` is `false`, through `opensearch.networkPolicy.enabled` (default `true`). It admits port 9200 only from the backend pods, plus any peers in `opensearch.networkPolicy.extraFrom`, and port 9300 only from OpenSearch pods. `NOTES.txt` warns while the plugin is off, and warns more loudly if both switches are off. A supported security-on profile, with TLS certificates and a generated admin password, is tracked in [#379](https://github.com/artifact-keeper/artifact-keeper-iac/issues/379). Setting `disableSecurityPlugin: false` with the chart's settings alone makes OpenSearch exit with "No SSL configuration found".
+
+**Prometheus.** The backend, web and edge policies admit scrapes from the namespace in `networkPolicy.monitoringNamespace` (default `monitoring`), or from the peers in `networkPolicy.monitoringPeers` when that is set. With `backend.metricsListener.enabled`, the ServiceMonitor scrapes the metrics listener port, and the backend policy admits that port as well as the HTTP port. kube-prometheus-stack often runs in another namespace, and it selects ServiceMonitors by its `release` label, which you can add with `serviceMonitor.labels`.
+
 ### Secrets Management
 
 For development, secrets are stored directly in the chart's Secret template. For production, two options exist:
 
 1. **External overrides**: Pass secrets via `--set` flags or external values files that are not committed to version control.
 2. **External Secrets Operator**: Set `externalSecrets.enabled: true` to pull secrets from AWS Secrets Manager (or another provider) using ExternalSecret CRDs.
+
+**Backend credentials go in `backend.environmentSecrets`, never in `backend.env`.** `backend.env` is copied into the backend Deployment as plain `value:` entries. Anyone who can `get` the Deployment or its pods, or read the Helm release Secret, can read it. The render fails when `backend.env` sets a non-empty credential: `ADMIN_PASSWORD`, `INITIAL_ADMIN_PASSWORD`, `JWT_SECRET`, `S3_SECRET_ACCESS_KEY` (or `S3_SECRET_KEY`), a `DATABASE_URL` with a password, `DEPENDENCY_TRACK_API_KEY`, `OPENSEARCH_PASSWORD`, `OIDC_CLIENT_SECRET`, `LDAP_BIND_PASSWORD`, `SMTP_PASSWORD`, `PEER_API_KEY`, `EDGE_API_KEY`, `GITHUB_TOKEN`, an Azure, GCS or CloudFront key, or an encryption key. Put a Secret reference in `backend.environmentSecrets` instead. An entry there wins over the same key in `backend.env`.
+
+```bash
+kubectl create secret generic ak-admin-credentials \
+  --from-literal=ADMIN_PASSWORD="$(openssl rand -base64 24)"
+```
+
+```yaml
+backend:
+  environmentSecrets:
+    - name: ADMIN_PASSWORD
+      secretKeyRef:
+        name: ak-admin-credentials
+        key: ADMIN_PASSWORD
+```
+
+`backend.allowCredentialsInEnv: true` turns the failure into a `NOTES.txt` warning. It is meant for throwaway test installs; the smoke, CI and mesh-test profiles set it.
 
 ### Security Contexts
 
@@ -597,6 +619,12 @@ The [mesh bootstrap guide](../../docs/mesh-bootstrap.md) walks through a two-pee
 | `GLOBAL_REQUEST_TIMEOUT_SECS` in `backend.env` | `120` | Wall-clock limit for a non-transfer request once its head has arrived. Listed now; not new. |
 
 Because the backend now closes idle keep-alive connections after `HTTP_HEADER_READ_TIMEOUT_SECS`, a proxy that pools upstream connections should time them out sooner, or it can reuse a connection the backend has just closed and return a `502`. ingress-nginx keeps idle upstream connections for 60 seconds by default (`upstream-keepalive-timeout` in the controller ConfigMap). Lower that below 10, or raise `HTTP_HEADER_READ_TIMEOUT_SECS` above it. On Envoy Gateway, set the upstream idle timeout in a `BackendTrafficPolicy`.
+
+### Upgrading to 1.11.1: credentials and OpenSearch access
+
+- **The render fails if `backend.env` holds a credential** ([#375](https://github.com/artifact-keeper/artifact-keeper-iac/issues/375)). The error names the keys. Move each one to `backend.environmentSecrets` (see Secrets Management) **and rotate it**: the old value is still readable from earlier ReplicaSets and Helm release revisions. For an `ADMIN_PASSWORD` that has already been used to create the admin account, change the password in the application too, because the backend applies `ADMIN_PASSWORD` only on first start. For a test install only, `backend.allowCredentialsInEnv: true` keeps the old behaviour and adds a warning.
+- **OpenSearch gets a NetworkPolicy even with `networkPolicy.enabled: false`** ([#376](https://github.com/artifact-keeper/artifact-keeper-iac/issues/376)). Only the backend reaches port 9200. If something else reads the index, such as OpenSearch Dashboards or a backup job, add it to `opensearch.networkPolicy.extraFrom`, or set `opensearch.networkPolicy.enabled: false`.
+- **Prometheus scrapes of the metrics listener are admitted** ([#307](https://github.com/artifact-keeper/artifact-keeper-iac/issues/307)). If Prometheus runs outside the `monitoring` namespace, set `networkPolicy.monitoringNamespace` (or `networkPolicy.monitoringPeers`).
 
 ### Upgrading to 1.11.0
 

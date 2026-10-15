@@ -203,8 +203,18 @@ class EncryptionSecretRefsTest(unittest.TestCase):
         self.assert_ref(env, "AK_WEBHOOK_SECRET_KEY", "webhook-credentials", "custom-key")
 
     def test_backend_env_alone_still_works(self):
+        # backend.env is plaintext in the pod spec, so a key there needs the
+        # explicit backend.allowCredentialsInEnv acknowledgement (#375).
         values = {name: "test-only-" + key for key, name in KEYS.items()}
-        env = self.backend_env(self.manifests({"backend": {"env": values}}))
+        for name in values:
+            with self.subTest(name=name):
+                self.assert_error(
+                    {"backend": {"env": {name: values[name]}}},
+                    "backend.env sets " + name,
+                )
+        env = self.backend_env(self.manifests(
+            {"backend": {"env": values, "allowCredentialsInEnv": True}}
+        ))
         for name, value in values.items():
             self.assertEqual(env[name], {"name": name, "value": value})
 
@@ -255,6 +265,7 @@ class EncryptionSecretRefsTest(unittest.TestCase):
                     }
                 if manual == "env":
                     values["backend"]["env"] = {name: "test-only-env"}
+                    values["backend"]["allowCredentialsInEnv"] = True
                 else:
                     values["backend"]["environmentSecrets"] = [{
                         "name": name,

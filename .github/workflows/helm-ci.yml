@@ -77,6 +77,9 @@ jobs:
       - name: Test backend client-IP rendering
         run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_client_ip.py' -v
 
+      - name: Test credential, OpenSearch and metrics policy rendering
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_security_posture.py' -v
+
   httproute-tests:
     name: HTTPRoute Render Tests (Gateway API ${{ matrix.gateway-api }})
     runs-on: ubuntu-24.04

@@ -8,6 +8,7 @@ security policies, and operational needs before use in production.
 =============================================================================
 */}}
 {{- if .Values.backend.enabled }}
+{{- include "artifact-keeper.validateBackendEnvCredentials" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -198,9 +199,18 @@ spec:
                   name: {{ .Values.dependencyTrack.existingApiKeySecret }}
                   key: {{ .Values.dependencyTrack.existingApiKeySecretKey }}
             {{- end }}
+            {{- /* A name defined in backend.environmentSecrets wins over the
+                   same key in backend.env, so moving a credential there does
+                   not need the backend.env entry removed (#375). */}}
+            {{- $secretEnv := list }}
+            {{- range .Values.backend.environmentSecrets }}
+            {{- $secretEnv = append $secretEnv .name }}
+            {{- end }}
             {{- range $key, $value := .Values.backend.env }}
+            {{- if not (has $key $secretEnv) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
+            {{- end }}
             {{- end }}
             - name: DATABASE_URL
               {{- if and (not .Values.postgres.enabled) .Values.externalDatabase.existingSecret }}

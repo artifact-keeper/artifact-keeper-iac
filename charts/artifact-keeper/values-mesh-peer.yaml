@@ -3,6 +3,9 @@
 # fullnameOverride, PEER_* env vars, and jwtSecret are set via ArgoCD parameters
 
 backend:
+  # Throwaway test credentials in backend.env; acknowledged so the render's
+  # credential check (#375) passes. Never copy this into a real install.
+  allowCredentialsInEnv: true
   enabled: true
   replicaCount: 1
   image:

@@ -349,6 +349,59 @@ DATABASE_URL keeps working.
 {{- end -}}
 
 {{/*
+Credential-like keys set to a non-empty value in backend.env, as a
+comma-separated string ("" when there are none). backend.env is rendered
+verbatim into the pod spec, so a value there is readable by anyone who can get
+the Deployment or its pods, or read the Helm release Secret (#375).
+Credentials belong in backend.environmentSecrets (secretKeyRef). DATABASE_URL
+counts only when it carries a password. Empty values are placeholders and pass.
+*/}}
+{{- define "artifact-keeper.backendEnvCredentials" -}}
+{{- $env := .Values.backend.env | default dict -}}
+{{- $secretEnv := list -}}
+{{- range .Values.backend.environmentSecrets -}}
+{{- $secretEnv = append $secretEnv .name -}}
+{{- end -}}
+{{- $env = deepCopy $env -}}
+{{- range $secretEnv -}}
+{{- $_ := unset $env . -}}
+{{- end -}}
+{{- $found := list -}}
+{{- range $key := list
+    "ADMIN_PASSWORD" "INITIAL_ADMIN_PASSWORD" "JWT_SECRET"
+    "S3_SECRET_KEY" "S3_SECRET_ACCESS_KEY" "S3_PRESIGN_SECRET_ACCESS_KEY"
+    "AZURE_STORAGE_ACCESS_KEY" "AZURE_CLIENT_SECRET" "GCS_PRIVATE_KEY" "CLOUDFRONT_PRIVATE_KEY"
+    "DEPENDENCY_TRACK_API_KEY" "DTRACK_HTTP_PROXY_PASSWORD" "OPENSEARCH_PASSWORD"
+    "OIDC_CLIENT_SECRET" "LDAP_BIND_PASSWORD" "SMTP_PASSWORD" "GITHUB_TOKEN"
+    "PEER_API_KEY" "EDGE_API_KEY"
+    "SSO_ENCRYPTION_KEY" "MIGRATION_ENCRYPTION_KEY" "AK_WEBHOOK_SECRET_KEY" -}}
+{{- if toString (get $env $key) -}}
+{{- $found = append $found $key -}}
+{{- end -}}
+{{- end -}}
+{{- if regexMatch "^[A-Za-z][A-Za-z0-9+.-]*://[^/?#@]*:[^/?#@]+@" (toString (get $env "DATABASE_URL")) -}}
+{{- $found = append $found "DATABASE_URL" -}}
+{{- end -}}
+{{- join ", " $found -}}
+{{- end -}}
+
+{{/*
+Fail the render when backend.env carries credentials, unless
+backend.allowCredentialsInEnv acknowledges it (NOTES.txt then warns).
+*/}}
+{{- define "artifact-keeper.validateBackendEnvCredentials" -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's defaults, which lack this key. */ -}}
+{{- $allow := dig "allowCredentialsInEnv" false .Values.backend -}}
+{{- if not (kindIs "bool" $allow) -}}
+{{- fail "backend.allowCredentialsInEnv must be a boolean" -}}
+{{- end -}}
+{{- $found := include "artifact-keeper.backendEnvCredentials" . -}}
+{{- if and $found (not $allow) -}}
+{{- fail (printf "backend.env sets %s. backend.env is rendered in plaintext into the pod spec, where anyone who can read the Deployment, its pods or the Helm release can recover it. Move each one to backend.environmentSecrets (a secretKeyRef to a Secret you manage; see values.yaml) and rotate the exposed value, or set backend.allowCredentialsInEnv=true to accept the exposure (throwaway test installs only)." $found) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Optional backend encryption keys. Flags opt into conventional keys in an
 operator-managed Secret without putting credential-shaped placeholders in values.
 Validate only these env names; other backend environment wiring is independent.
@@ -793,6 +846,29 @@ networkPolicy.ingressNamespace.
   podSelector:
     matchLabels:
       app.kubernetes.io/name: ingress-nginx
+{{- end -}}
+{{- end -}}
+
+{{/*
+NetworkPolicy `from` peers admitted to the Prometheus scrape ports of the
+backend, web and edge policies. networkPolicy.monitoringPeers, when non-empty,
+is rendered verbatim (for example a podSelector for the Prometheus pods).
+Empty keeps the namespace peer: every pod in networkPolicy.monitoringNamespace,
+matched on the kubernetes.io/metadata.name label Kubernetes stamps on every
+namespace (a bare `name` label matches nothing).
+*/}}
+{{- define "artifact-keeper.networkPolicy.monitoringPeers" -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's defaults, which lack these keys. */ -}}
+{{- $namespace := dig "monitoringNamespace" "monitoring" .Values.networkPolicy -}}
+{{- if .Values.networkPolicy.monitoringPeers -}}
+{{- toYaml .Values.networkPolicy.monitoringPeers -}}
+{{- else -}}
+{{- if not $namespace -}}
+{{- fail "networkPolicy.monitoringNamespace must name the namespace Prometheus runs in (default monitoring), or set networkPolicy.monitoringPeers" -}}
+{{- end }}
+- namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $namespace | quote }}
 {{- end -}}
 {{- end -}}
 

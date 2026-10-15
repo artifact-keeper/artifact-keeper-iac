@@ -65,16 +65,19 @@ spec:
       ports:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
-    # Allow Prometheus scraping. The selector matches the
-    # kubernetes.io/metadata.name label Kubernetes stamps on every namespace
-    # automatically; a bare `name` label matches nothing.
+    # Allow Prometheus scraping, from networkPolicy.monitoringPeers or else
+    # the networkPolicy.monitoringNamespace namespace. With the dedicated
+    # metrics listener enabled the ServiceMonitor scrapes its port, so that
+    # port is admitted too (#307).
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
+        {{- include "artifact-keeper.networkPolicy.monitoringPeers" . | trim | nindent 8 }}
       ports:
         - port: {{ .Values.backend.service.httpPort }}
           protocol: TCP
+        {{- if .Values.backend.metricsListener.enabled }}
+        - port: {{ .Values.backend.metricsListener.port }}
+          protocol: TCP
+        {{- end }}
   egress:
     # DNS resolution
     - ports:
@@ -161,12 +164,9 @@ spec:
       ports:
         - port: {{ .Values.web.service.port }}
           protocol: TCP
-    # Allow Prometheus scraping. Uses the auto-stamped
-    # kubernetes.io/metadata.name namespace label; see the backend policy.
+    # Allow Prometheus scraping; see the backend policy.
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
+        {{- include "artifact-keeper.networkPolicy.monitoringPeers" . | trim | nindent 8 }}
       ports:
         - port: {{ .Values.web.service.port }}
           protocol: TCP
@@ -207,11 +207,9 @@ spec:
       ports:
         - port: {{ .Values.edge.service.port }}
           protocol: TCP
-    # Allow Prometheus scraping
+    # Allow Prometheus scraping; see the backend policy.
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
+        {{- include "artifact-keeper.networkPolicy.monitoringPeers" . | trim | nindent 8 }}
       ports:
         - port: {{ .Values.edge.service.port }}
           protocol: TCP
@@ -232,36 +230,6 @@ spec:
         - port: 443
           protocol: TCP
 {{- end }}
----
-# OpenSearch: accept traffic from backend on 9200 and from peer OpenSearch
-# pods on 9300 (transport for multi-node clustering).
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: {{ include "artifact-keeper.fullname" . }}-opensearch
-  labels:
-    {{- include "artifact-keeper.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 6 }}
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
-      ports:
-        - port: 9200
-          protocol: TCP
-    - from:
-        - podSelector:
-            matchLabels:
-              {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 14 }}
-      ports:
-        - port: 9300
-          protocol: TCP
 ---
 # Trivy: accept traffic from backend only
 apiVersion: networking.k8s.io/v1
@@ -398,5 +366,49 @@ spec:
               {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 14 }}
       ports:
         - port: 5432
+          protocol: TCP
+{{- end }}
+{{- /*
+OpenSearch renders on its own switch as well as networkPolicy.enabled (#376).
+The bundled OpenSearch has no authentication unless its Security plugin is
+configured, so :9200 must not be reachable from arbitrary pods even when the
+rest of the chart's policies are turned off. Only the backend (and
+opensearch.networkPolicy.extraFrom) reaches the HTTP port, and only OpenSearch
+pods reach the transport port.
+*/}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's defaults, which lack these keys. */}}
+{{- if and .Values.opensearch.enabled (or .Values.networkPolicy.enabled (dig "networkPolicy" "enabled" true .Values.opensearch)) }}
+---
+# OpenSearch: accept traffic from backend on 9200 and from peer OpenSearch
+# pods on 9300 (transport for multi-node clustering).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-opensearch
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+        {{- with (dig "networkPolicy" "extraFrom" list .Values.opensearch) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - port: 9200
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.opensearch.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 9300
           protocol: TCP
 {{- end }}

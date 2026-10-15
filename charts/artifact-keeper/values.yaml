@@ -117,21 +117,41 @@ backend:
   # rendered verbatim. Use for credentials that must come from existing Secrets.
   extraEnvFrom: []
   # -- Extra environment variables sourced from existing Kubernetes Secrets.
-  # Use this for values that must not appear in plain text in `backend.env`
-  # (e.g. an initial ADMIN_PASSWORD provisioned out-of-band, or
-  # OTEL_EXPORTER_OTLP_HEADERS carrying an auth token). Each entry maps a
-  # container env var name to a Secret key reference. When an entry names a
-  # variable that also appears in `backend.env`, remove the plain-text key
-  # (set it to null) so the secret-sourced value is the only definition.
+  # This is the supported path for every credential the backend reads that the
+  # chart does not wire itself: ADMIN_PASSWORD, OIDC_CLIENT_SECRET,
+  # LDAP_BIND_PASSWORD, PEER_API_KEY, DEPENDENCY_TRACK_API_KEY, cloud storage
+  # keys, OTEL_EXPORTER_OTLP_HEADERS with an auth token, and so on.
+  # `backend.env` is rendered in plain text into the pod spec, so the render
+  # fails when it carries a credential (see backend.allowCredentialsInEnv).
+  # Each entry maps a container env var name to a Secret key reference. An
+  # entry wins over the same key in `backend.env` (the default
+  # `ADMIN_PASSWORD: ""` placeholder there needs no change).
   # For MIGRATION_ENCRYPTION_KEY and AK_WEBHOOK_SECRET_KEY, also leave the
   # corresponding secrets.* value empty and *Enabled flag false (or the
   # externalSecrets.secrets.* path empty); duplicate definitions fail rendering.
+  # Example (create the Secret first, for instance with
+  # `kubectl create secret generic ak-admin-credentials
+  #  --from-literal=ADMIN_PASSWORD="$(openssl rand -base64 24)"`):
   # environmentSecrets:
   #   - name: ADMIN_PASSWORD
   #     secretKeyRef:
   #       name: ak-admin-credentials
   #       key: ADMIN_PASSWORD
+  #   - name: OIDC_CLIENT_SECRET
+  #     secretKeyRef:
+  #       name: ak-sso
+  #       key: client-secret
   environmentSecrets: []
+  # -- Accept credentials in `backend.env`. By default the render fails when
+  # `backend.env` sets a non-empty ADMIN_PASSWORD, INITIAL_ADMIN_PASSWORD,
+  # JWT_SECRET, S3_SECRET_ACCESS_KEY (or S3_SECRET_KEY), DATABASE_URL with a
+  # password, DEPENDENCY_TRACK_API_KEY, OPENSEARCH_PASSWORD, OIDC_CLIENT_SECRET,
+  # LDAP_BIND_PASSWORD, SMTP_PASSWORD, PEER_API_KEY, EDGE_API_KEY, GITHUB_TOKEN,
+  # Azure/GCS/CloudFront keys or an encryption key, because the value would be
+  # readable in plain text by anyone who can get the Deployment, its pods or
+  # the Helm release. true renders them anyway, with a NOTES.txt warning. Only
+  # for throwaway test installs (the smoke, CI and mesh-test profiles set it).
+  allowCredentialsInEnv: false
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-backend  # Docker Hub: artifactkeeper/backend
@@ -233,6 +253,8 @@ backend:
     BACKUP_PATH: "/data/backups"
     PLUGINS_DIR: "/data/plugins"
     ENVIRONMENT: "development"
+    # Placeholder only. Set the admin password through
+    # backend.environmentSecrets; a non-empty value here fails the render.
     ADMIN_PASSWORD: ""
 
     # -- Server
@@ -852,9 +874,16 @@ opensearch:
   # -- JVM heap sizing. Keep Xms == Xmx. The container memory limit
   # should be roughly 2x the heap to leave room for off-heap and page cache.
   javaOpts: "-Xms512m -Xmx512m"
-  # -- When true, the Security plugin is disabled and the backend talks
-  # plain HTTP. Set to false for staging/production (see README for
-  # cert-manager setup).
+  # -- When true (the default), the Security plugin is disabled: OpenSearch
+  # has no authentication and the backend talks plain HTTP. Anything that can
+  # reach :9200 can read, write and delete the search index, so the chart
+  # restricts that port to the backend pods with a NetworkPolicy (see
+  # opensearch.networkPolicy) and NOTES.txt warns. false turns the plugin on,
+  # but the chart does not provision the TLS certificates the plugin requires
+  # yet, so OpenSearch only starts if you supply your own security
+  # configuration (with the chart's settings alone it exits with "No SSL
+  # configuration found"). A supported security-on profile is tracked in
+  # iac#379.
   disableSecurityPlugin: true
   # -- Backend-side TLS verification toggle. Leave true for self-signed
   # certs in development; set to false once real certs are in place.
@@ -869,6 +898,16 @@ opensearch:
     # validation error. Never commit a real credential here; use --set, an
     # existingSecret, or externalSecrets instead.
     password: ""
+  networkPolicy:
+    # -- Restrict OpenSearch ingress even when networkPolicy.enabled is false:
+    # :9200 from the backend pods only, :9300 from OpenSearch pods only. The
+    # policy also renders whenever networkPolicy.enabled is true. It needs a
+    # CNI that enforces NetworkPolicy. Set false only if something else must
+    # reach OpenSearch and extraFrom cannot express it.
+    enabled: true
+    # -- Extra NetworkPolicyPeer objects admitted to :9200 (for example an
+    # OpenSearch Dashboards pod or a backup job), rendered verbatim.
+    extraFrom: []
   persistence:
     # -- When false and replicaCount == 1, data lives in an emptyDir
     # sized according to `size`. Set to true (and configure storageClass)
@@ -1459,12 +1498,28 @@ networkPolicy:
   # guardrail NetworkPolicy. Must not be empty.
   dnsPorts:
     - 53
+  # -- Namespace Prometheus runs in. The backend, web and edge policies admit
+  # scrapes from every pod in it, matched on the kubernetes.io/metadata.name
+  # label. kube-prometheus-stack installs often use a different namespace
+  # (for example `observability`); set it to yours.
+  monitoringNamespace: monitoring
+  # -- NetworkPolicy `from` peers admitted to the scrape ports instead of the
+  # monitoringNamespace peer, rendered verbatim. Use it to admit only the
+  # Prometheus pods, for example a namespaceSelector plus
+  # `podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}`.
+  # The backend policy admits the HTTP port and, when
+  # backend.metricsListener.enabled, the metrics listener port.
+  monitoringPeers: []
 
 # -- Prometheus ServiceMonitor
 serviceMonitor:
   enabled: false
   interval: 30s
   scrapeTimeout: 10s
+  # -- Extra labels on the ServiceMonitor, for a Prometheus whose
+  # serviceMonitorSelector requires them (kube-prometheus-stack selects
+  # `release: <its release name>` by default).
+  labels: {}
 
 # GKE-specific resources. Only relevant on Google Kubernetes Engine.
 gke:

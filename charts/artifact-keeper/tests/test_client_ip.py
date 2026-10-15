@@ -88,6 +88,15 @@ class ClientIpTests(unittest.TestCase):
         self.assertIn("trusted proxies are set (RATE_LIMIT_TRUSTED_PROXY_CIDRS=10.1.42.0/24)", notes)
         self.assertIn("xffTrustedForAuthz", notes)
 
+    def test_missing_values_under_reuse_values(self):
+        # `helm upgrade --reuse-values` keeps the previous chart's defaults, so
+        # backend.clientIp is absent on an upgrade from 1.9.28.
+        values = {"backend": {"clientIp": None}}
+        env = backend_env(render(values))
+        self.assertEqual(env["XFF_TRUSTED_FOR_AUTHZ"], "false")
+        self.assertNotIn("RATE_LIMIT_TRUSTED_PROXY_CIDRS", env)
+        self.assertNotIn("trusted proxies are set", render(values, notes=True))
+
     def test_non_boolean_fails(self):
         with self.assertRaisesRegex(AssertionError, "xffTrustedForAuthz must be a boolean"):
             render({"backend": {"clientIp": {"xffTrustedForAuthz": "yes"}}})

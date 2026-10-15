@@ -715,9 +715,14 @@ which feeds the Ingress and the Gateway API HTTPRoute) and by the OpenShift
 Routes (route.yaml) via `splitList " " (trim ...)`, so they never drift out of
 sync. Does NOT include /api, /v2, /health, or /ready — those carry their own
 pathType/handling (see artifact-keeper.backendPaths and route.yaml).
+
+Keep this in step with the `format_routes` nests in the backend's
+backend/src/api/routes.rs. /lxc is the incus alias, /general the generic
+format, and /t the rattler/pixi conda-token prefix (/t/<token>/conda/...).
+tests/test_httproute.py holds an independent copy of this inventory.
 */}}
 {{- define "artifact-keeper.backendFormatPaths" -}}
-/maven /npm /pypi /nuget /cargo /gems /go /helm /debian /rpm /alpine /composer /conan /conda /swift /terraform /cocoapods /hex /pub /lfs /ivy /chef /puppet /ansible /cran /huggingface /jetbrains /vscode /proto /incus /ext
+/general /maven /npm /pypi /nuget /cargo /gems /go /helm /debian /rpm /alpine /pacman /composer /conan /conda /t /swift /terraform /cocoapods /hex /pub /lfs /ivy /chef /puppet /ansible /cran /bazel /huggingface /jetbrains /vscode /proto /incus /lxc /ext
 {{- end -}}
 
 {{/*

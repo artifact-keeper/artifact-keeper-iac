@@ -28,6 +28,21 @@ ENABLED = {
 }
 
 
+# Every top-level prefix the backend mounts in `format_routes`
+# (backend/src/api/routes.rs). Kept independent of the chart's
+# artifact-keeper.backendFormatPaths helper on purpose: #374 was a prefix the
+# backend serves but the helper omitted, which a parity check alone cannot see.
+# /api/cargo and /api/helm are covered by /api, /conda/t by /conda.
+PACKAGE_PREFIXES = {
+    "/general", "/maven", "/npm", "/pypi", "/nuget", "/cargo", "/gems",
+    "/go", "/helm", "/debian", "/rpm", "/alpine", "/pacman", "/composer",
+    "/conan", "/conda", "/t", "/swift", "/terraform", "/cocoapods", "/hex",
+    "/pub", "/lfs", "/ivy", "/chef", "/puppet", "/ansible", "/cran",
+    "/bazel", "/huggingface", "/jetbrains", "/vscode", "/proto", "/incus",
+    "/lxc", "/ext",
+}
+
+
 def merged(base, overrides):
     result = copy.deepcopy(base)
     for key, value in overrides.items():
@@ -120,16 +135,9 @@ class HTTPRouteTests(unittest.TestCase):
         ]
         self.assertEqual(actual, expected)
         # An independent inventory prevents a shared-helper omission passing parity.
-        packages = {
-            "/maven", "/npm", "/pypi", "/nuget", "/cargo", "/gems", "/go",
-            "/helm", "/debian", "/rpm", "/alpine", "/composer", "/conan",
-            "/conda", "/swift", "/terraform", "/cocoapods", "/hex", "/pub",
-            "/lfs", "/ivy", "/chef", "/puppet", "/ansible", "/cran",
-            "/huggingface", "/jetbrains", "/vscode", "/proto", "/incus", "/ext",
-        }
         self.assertEqual(
             {path for path, _, _ in actual},
-            packages | {"/api", "/v2", "/health", "/ready", "/"},
+            PACKAGE_PREFIXES | {"/api", "/v2", "/health", "/ready", "/"},
         )
         self.assertEqual(len(actual), len({path for path, _, _ in actual}))
         for path, match_type, backend in actual:
@@ -137,7 +145,29 @@ class HTTPRouteTests(unittest.TestCase):
             self.assertTrue(backend["name"].endswith("-web" if path == "/" else "-backend"))
         self.assertNotIn("tls", route["spec"])
         self.assertNotIn("annotations", route["metadata"])
-        self.assertEqual([len(rule["matches"]) for rule in route["spec"]["rules"]], [8, 8, 8, 8, 3, 1])
+        self.assertEqual([len(rule["matches"]) for rule in route["spec"]["rules"]], [8, 8, 8, 8, 8, 1])
+
+    def test_ingress_and_openshift_routes_carry_every_package_prefix(self):
+        backend = PACKAGE_PREFIXES | {"/api", "/v2", "/health", "/ready"}
+        ingress = only(resources(render()), "Ingress")
+        ingress_paths = {
+            path["path"]: path["backend"]["service"]["name"]
+            for path in ingress["spec"]["rules"][0]["http"]["paths"]
+        }
+        self.assertEqual(set(ingress_paths), backend | {"/"})
+        for path in backend:
+            self.assertTrue(ingress_paths[path].endswith("-backend"), path)
+        routes = [
+            doc for doc in resources(render({
+                "ingress": {"enabled": False},
+                "route": {"enabled": True, "host": "registry.example.com"},
+            }))
+            if doc["kind"] == "Route"
+        ]
+        route_paths_ = {doc["spec"]["path"]: doc["spec"]["to"]["name"] for doc in routes}
+        self.assertEqual(set(route_paths_), backend | {"/"})
+        for path in backend:
+            self.assertTrue(route_paths_[path].endswith("-backend"), path)
 
     def test_custom_fields_and_backend_references(self):
         refs = [
@@ -235,7 +265,7 @@ class HTTPRouteTests(unittest.TestCase):
         values["networkPolicy"] = {"enabled": False}
         docs = resources(render(values))
         self.assertFalse(gateway_policies(docs))
-        self.assertEqual(len(route_paths(only(docs, "HTTPRoute"))), 36)
+        self.assertEqual(len(route_paths(only(docs, "HTTPRoute"))), 41)
         values["fleet"] = {
             "enabled": True,
             "guardrails": {"networkPolicy": True},

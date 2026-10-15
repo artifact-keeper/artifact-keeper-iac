@@ -334,6 +334,22 @@ spec:
               value: {{ .Values.backend.metricsListener.bindIP | quote }}
             {{- end }}
             {{- end }}
+            {{- /*
+            Client-IP resolution behind a proxy (backend.clientIp). Explicit
+            backend.env entries win, as with METRICS_BIND_IP above.
+            */}}
+            {{- $clientIp := .Values.backend.clientIp | default dict }}
+            {{- if and $clientIp.trustedProxyCidrs (not (hasKey .Values.backend.env "RATE_LIMIT_TRUSTED_PROXY_CIDRS")) }}
+            - name: RATE_LIMIT_TRUSTED_PROXY_CIDRS
+              value: {{ $clientIp.trustedProxyCidrs | quote }}
+            {{- end }}
+            {{- if not (hasKey .Values.backend.env "XFF_TRUSTED_FOR_AUTHZ") }}
+            {{- if not (kindIs "bool" (dig "xffTrustedForAuthz" false $clientIp)) }}
+            {{- fail "backend.clientIp.xffTrustedForAuthz must be a boolean" }}
+            {{- end }}
+            - name: XFF_TRUSTED_FOR_AUTHZ
+              value: {{ dig "xffTrustedForAuthz" false $clientIp | quote }}
+            {{- end }}
             {{- if eq (include "artifact-keeper.fleet.enabled" .) "true" }}
             # Object storage for this instance. Artifacts share one bucket with
             # a per-instance key prefix; the non-secret settings (STORAGE_BACKEND,

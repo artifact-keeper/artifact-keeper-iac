@@ -87,6 +87,19 @@ WARNING: presigned Azure downloads are on but
   set AZURE_STORAGE_PUBLIC_ENDPOINT if clients cannot reach it.
 {{- end }}
 
+{{- $clientIp := .Values.backend.clientIp | default dict }}
+{{- $proxyCidrs := ternary (toString (get $benv "RATE_LIMIT_TRUSTED_PROXY_CIDRS")) (toString (default "" $clientIp.trustedProxyCidrs)) (hasKey $benv "RATE_LIMIT_TRUSTED_PROXY_CIDRS") }}
+{{- $xffAuthz := ternary (lower (toString (get $benv "XFF_TRUSTED_FOR_AUTHZ"))) (toString (dig "xffTrustedForAuthz" false $clientIp)) (hasKey $benv "XFF_TRUSTED_FOR_AUTHZ") }}
+{{- if and .Values.backend.enabled $proxyCidrs (not (has $xffAuthz (list "true" "1"))) }}
+
+NOTE: trusted proxies are set (RATE_LIMIT_TRUSTED_PROXY_CIDRS={{ $proxyCidrs }})
+  and XFF_TRUSTED_FOR_AUTHZ is false. Rate limits use the X-Forwarded-For
+  client IP, but requests through these proxies have an unknown client IP for
+  allowed_cidrs permission conditions (IP-conditioned grants are denied) and
+  audit rows. Set backend.clientIp.xffTrustedForAuthz=true only if every proxy
+  in that range appends the address it received the request from.
+{{- end }}
+
 {{- if .Values.serviceMonitor.enabled }}
 
 Monitoring:

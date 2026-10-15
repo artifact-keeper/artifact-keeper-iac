@@ -579,6 +579,25 @@ The [mesh bootstrap guide](../../docs/mesh-bootstrap.md) walks through a two-pee
 
 ## Upgrading
 
+### Upgrading to 1.11.1
+
+**`RATE_LIMIT_TRUSTED_PROXY_CIDRS` is no longer set by default.** Chart 1.9.28 and earlier put `RATE_LIMIT_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"` in `backend.env`. Those ranges cover every pod in a typical cluster, so any pod could send a forged `X-Forwarded-For` and be treated as another client. Backend 1.11.1 already stops using such addresses for authorization ([artifact-keeper#4681](https://github.com/artifact-keeper/artifact-keeper/pull/4681)), but the default still trusted too much for rate limiting and `traceparent`. The trusted list now comes from `backend.clientIp.trustedProxyCidrs`, which is empty by default. An explicit `RATE_LIMIT_TRUSTED_PROXY_CIDRS` in `backend.env` still wins.
+
+- With the list empty, the backend keys rate limits on the TCP peer. Behind an ingress controller or Gateway, all clients that come through one proxy pod share one API rate-limit bucket. Login limiting is not weakened: logins are limited per user and IP, with a per-user lockout and a global backstop, so an empty list does not let one client lock out other users. The old `values.yaml` comment that said otherwise is out of date.
+- To keep per-client keying, set `backend.clientIp.trustedProxyCidrs` to the CIDR that only your proxy pods use. Kubernetes has no per-Deployment pod CIDR, so get one from your CNI: for example, a Calico IP pool or Cilium pool assigned to the ingress namespace, or the `podCIDR` of nodes dedicated to the proxy. A `hostNetwork` controller connects from node IPs, so list those. Do not reuse a range that other workloads draw from.
+- `backend.clientIp.xffTrustedForAuthz` renders `XFF_TRUSTED_FOR_AUTHZ` (default `false`). While it is false, requests that arrive through a trusted proxy have an unknown client IP for `allowed_cidrs` permission conditions, so IP-conditioned grants are denied for them, and audit rows record no IP. Set it to `true` only when every proxy in the trusted list appends the address it received the request from to `X-Forwarded-For`, all the way to the edge. The install notes print a reminder when trusted proxies are set and it is false.
+
+**New backend environment values (backend 1.11.1).**
+
+| Value | Default | Purpose |
+|-------|---------|---------|
+| `backend.clientIp.trustedProxyCidrs` (`RATE_LIMIT_TRUSTED_PROXY_CIDRS`) | `""` | Proxies whose `X-Forwarded-For` and `traceparent` the backend believes. |
+| `backend.clientIp.xffTrustedForAuthz` (`XFF_TRUSTED_FOR_AUTHZ`) | `false` | Whether the `X-Forwarded-For` client IP may be used for `allowed_cidrs` and audit attribution. |
+| `HTTP_HEADER_READ_TIMEOUT_SECS` in `backend.env` | `10` | Seconds an HTTP/1 client has to send the request line and headers. The same timer closes idle keep-alive connections. `0` turns it off. |
+| `GLOBAL_REQUEST_TIMEOUT_SECS` in `backend.env` | `120` | Wall-clock limit for a non-transfer request once its head has arrived. Listed now; not new. |
+
+Because the backend now closes idle keep-alive connections after `HTTP_HEADER_READ_TIMEOUT_SECS`, a proxy that pools upstream connections should time them out sooner, or it can reuse a connection the backend has just closed and return a `502`. ingress-nginx keeps idle upstream connections for 60 seconds by default (`upstream-keepalive-timeout` in the controller ConfigMap). Lower that below 10, or raise `HTTP_HEADER_READ_TIMEOUT_SECS` above it. On Envoy Gateway, set the upstream idle timeout in a `BackendTrafficPolicy`.
+
 ### Upgrading to 1.11.0
 
 These notes apply when `backend.image.tag` (or `appVersion`) moves to backend 1.11.0.
@@ -622,7 +641,7 @@ These notes apply when `backend.image.tag` (or `appVersion`) moves to backend 1.
 **Behaviour changes that affect existing values:**
 
 - `WEBHOOK_ALLOW_PRIVATE_IPS` and `SSO_ALLOW_PRIVATE_IPS` are now **additive** with `AK_SSRF_ALLOW_PRIVATE_CIDRS`: a webhook target or IdP is allowed when either the toggle is `true` or the address is in the CIDR list. For upstream URLs, the CIDR list still wins over `UPSTREAM_ALLOW_PRIVATE_IPS`. Metadata, loopback and link-local addresses stay blocked.
-- `RATE_LIMIT_TRUSTED_PROXY_CIDRS`, which the chart sets to the RFC1918 ranges by default, now also decides which peers may set an inbound W3C `traceparent`. Narrow it to your ingress controller's pod CIDR so that other in-cluster clients cannot force trace sampling.
+- `RATE_LIMIT_TRUSTED_PROXY_CIDRS` now also decides which peers may set an inbound W3C `traceparent`. From chart 1.11.1 it is empty by default and set through `backend.clientIp.trustedProxyCidrs` (see Upgrading to 1.11.1); with it empty, every client may set the trace parent.
 - When `AK_GUEST_ACCESS_ENABLED` is set explicitly, it pins guest access and overrides the new runtime toggle. Leave it unset to manage guest access from the web UI or the API.
 - `ak_http_request_duration_seconds` is now a bucketed histogram, so its `quantile` series are gone. The dashboard and alert rules in `monitoring/` already use `histogram_quantile()` over `_bucket`. Update any of your own panels that select `{quantile=...}`.
 

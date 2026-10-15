@@ -196,6 +196,35 @@ backend:
     enabled: false
     port: 9091
     bindIP: ""
+  # -- Client-IP resolution behind a reverse proxy (ingress controller or
+  # Gateway). Explicit RATE_LIMIT_TRUSTED_PROXY_CIDRS / XFF_TRUSTED_FOR_AUTHZ
+  # entries in backend.env win over these values.
+  clientIp:
+    # -- CIDR(s), comma-separated, of the proxy pods in front of the backend,
+    # rendered as RATE_LIMIT_TRUSTED_PROXY_CIDRS. The backend believes
+    # X-Forwarded-For only when the TCP peer is inside one of these ranges, and
+    # only those peers may set an inbound W3C `traceparent` (1.11.0+). Set it to
+    # your ingress controller's or Gateway proxy's pod CIDR, for example
+    # "10.1.42.0/24", and never to a range that covers other workloads: any pod
+    # inside it can claim any client IP. Empty (the default since chart 1.11.1)
+    # trusts no proxy. The backend then keys rate limits on the TCP peer, so
+    # every client behind one proxy pod shares a single API bucket, and accepts
+    # `traceparent` from any client. Login limiting does not depend on it:
+    # logins are limited per user and IP with a per-user lockout and a global
+    # backstop, so an empty list does not let one client lock out other users.
+    # Chart 1.9.28 and earlier defaulted to all RFC1918 ranges, which trusts
+    # every pod in the cluster.
+    trustedProxyCidrs: ""
+    # -- Rendered as XFF_TRUSTED_FOR_AUTHZ (backend 1.11.1+). When false (the
+    # backend default), a request whose TCP peer is a trusted proxy has an
+    # unknown client IP for `allowed_cidrs` permission conditions (they do not
+    # match, so IP-conditioned grants are denied) and for audit attribution.
+    # Set true only when EVERY proxy in trustedProxyCidrs appends the address
+    # it received the request from to X-Forwarded-For, all the way to the
+    # edge. A proxy that passes a client-supplied header through unchanged
+    # makes the client IP forgeable. Behind SNAT or a load balancer that hides
+    # the client before the first proxy, no setting recovers the real address.
+    xffTrustedForAuthz: false
   env:
     RUST_LOG: "info,artifact_keeper=debug"
     HOST: "0.0.0.0"
@@ -214,6 +243,8 @@ backend:
     # ALLOW_LOCAL_ADMIN_LOGIN: "false"
     # GRPC_BIND_IP: "0.0.0.0"               # (1.11.0) gRPC listen IP; bare IP, invalid fails startup. Keep 0.0.0.0 while the backend Service exposes the grpc port.
     # METRICS_BIND_IP: "0.0.0.0"            # (1.11.0) metrics-only listener IP (only with METRICS_PORT); prefer backend.metricsListener.bindIP.
+    # HTTP_HEADER_READ_TIMEOUT_SECS: "10"  # (1.11.1) seconds an HTTP/1 client has to send the request line and headers; also closes idle keep-alive connections. 0 disables. Keep the ingress/gateway upstream idle timeout below it.
+    # GLOBAL_REQUEST_TIMEOUT_SECS: "120"   # wall-clock limit for a non-transfer request once its head has arrived; 0 disables.
 
     # -- Storage
     # STORAGE_BACKEND: "filesystem"
@@ -311,25 +342,10 @@ backend:
     # PASSWORD_MIN_STRENGTH: "0"
 
     # -- Rate Limiting
-    # RATE_LIMIT_TRUSTED_PROXY_CIDRS — CIDR(s), comma-separated, of the reverse
-    # proxy / ingress that sits in front of the backend. The login rate limiter
-    # keys on (username, client-IP) and only believes the X-Forwarded-For header
-    # when the request's TCP peer falls inside one of these ranges; otherwise it
-    # keys on the raw TCP peer. In Kubernetes the backend is reached through an
-    # ingress controller (ingress-nginx by default), so its TCP peer is ALWAYS
-    # the ingress/proxy pod IP. Leaving this empty makes the backend key every
-    # client on that single proxy pod IP → one shared login bucket per account →
-    # a single flooding client can targeted-lock-out any user (including owner
-    # break-glass) with ~10 requests / 15 min (iac#207, ak#2298). The default
-    # trusts the standard RFC1918 private pod-network ranges so per-client keying
-    # on the real client IP works out of the box behind an in-cluster proxy.
-    # TIGHTEN this to your ingress controller's actual pod CIDR for
-    # defense-in-depth, or set it to "" only when the backend is reached
-    # directly (no proxy) so ConnectInfo already carries the real client IP.
-    # Since 1.11.0 the same list also decides which peers may set an inbound
-    # W3C `traceparent` as the trace parent (ak#4195); with it empty, every
-    # client may, and parentbased_* samplers then let a client force export.
-    RATE_LIMIT_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    # RATE_LIMIT_TRUSTED_PROXY_CIDRS and XFF_TRUSTED_FOR_AUTHZ: prefer the
+    # structured backend.clientIp values above. An entry here wins over them.
+    # RATE_LIMIT_TRUSTED_PROXY_CIDRS: ""   # trusted reverse-proxy CIDRs; see backend.clientIp.trustedProxyCidrs.
+    # XFF_TRUSTED_FOR_AUTHZ: "false"        # (1.11.1) see backend.clientIp.xffTrustedForAuthz.
     # RATE_LIMIT_AUTH_PER_MIN: "120"
     # RATE_LIMIT_API_PER_MIN: "5000"
     # RATE_LIMIT_WINDOW_SECS: "60"
@@ -403,8 +419,8 @@ backend:
     # OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"   # "grpc" or "http/protobuf".
     # OTEL_TRACES_SAMPLER: "parentbased_always_on" # (1.11.0) OTel spec sampler name; unknown names fall back to this default.
     # OTEL_TRACES_SAMPLER_ARG: "1.0"        # (1.11.0) ratio for the *traceidratio samplers.
-    # Inbound traceparent is trusted only from RATE_LIMIT_TRUSTED_PROXY_CIDRS
-    # peers (see Rate Limiting). 1.11.0 also adds upstream CLIENT spans and DB
+    # Inbound traceparent is trusted only from backend.clientIp.trustedProxyCidrs
+    # peers (RATE_LIMIT_TRUSTED_PROXY_CIDRS). 1.11.0 also adds upstream CLIENT spans and DB
     # query spans, and turns ak_http_request_duration_seconds into a bucketed
     # histogram (its quantile series are gone); there are no new knobs for those.
 

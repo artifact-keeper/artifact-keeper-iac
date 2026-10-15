@@ -116,9 +116,9 @@ WARNING: backend.env sets {{ . }}
 
 WARNING: the bundled OpenSearch runs with its Security plugin disabled
   (opensearch.disableSecurityPlugin=true): no authentication on :9200.
-  {{- if or .Values.networkPolicy.enabled .Values.opensearch.networkPolicy.enabled }}
+  {{- if or .Values.networkPolicy.enabled (dig "networkPolicy" "enabled" true .Values.opensearch) }}
   NetworkPolicy {{ include "artifact-keeper.fullname" . }}-opensearch admits :9200 from the backend pods
-  only{{ if .Values.opensearch.networkPolicy.extraFrom }} (plus opensearch.networkPolicy.extraFrom){{ end }}, which holds only if your CNI enforces NetworkPolicy.
+  only{{ if (dig "networkPolicy" "extraFrom" list .Values.opensearch) }} (plus opensearch.networkPolicy.extraFrom){{ end }}, which holds only if your CNI enforces NetworkPolicy.
   An OpenSearch profile with the Security plugin on is not shipped yet.
   {{- else }}
   No NetworkPolicy protects it (networkPolicy.enabled and
@@ -134,7 +134,7 @@ Monitoring:
   ServiceMonitor is enabled. Prometheus will scrape {{ if .Values.backend.metricsListener.enabled }}/metrics on the metrics
   listener (port {{ .Values.backend.metricsListener.port }}){{ else }}/api/v1/admin/metrics{{ end }} from the backend.
   {{- if .Values.networkPolicy.enabled }}
-  The NetworkPolicies admit scrapes from {{ if .Values.networkPolicy.monitoringPeers }}networkPolicy.monitoringPeers{{ else }}namespace {{ .Values.networkPolicy.monitoringNamespace }}{{ end }}.
+  The NetworkPolicies admit scrapes from {{ if .Values.networkPolicy.monitoringPeers }}networkPolicy.monitoringPeers{{ else }}namespace {{ dig "monitoringNamespace" "monitoring" .Values.networkPolicy }}{{ end }}.
   {{- end }}
 {{- end }}
 

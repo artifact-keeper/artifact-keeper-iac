@@ -222,5 +222,28 @@ class MetricsPolicyTests(unittest.TestCase):
         self.assertEqual(named(docs, "ServiceMonitor", "-backend")["metadata"]["labels"]["release"], "kube-prom-stack")
 
 
+class ReuseValuesTests(unittest.TestCase):
+    """`helm upgrade --reuse-values` keeps the previous chart's default values,
+    so keys added in this chart are absent. Null removes them here."""
+
+    MISSING = {
+        "backend": {"allowCredentialsInEnv": None},
+        "opensearch": {"networkPolicy": None},
+        "networkPolicy": {"monitoringNamespace": None, "monitoringPeers": None},
+        "serviceMonitor": {"labels": None, "enabled": True},
+    }
+
+    def test_new_keys_missing_keep_secure_defaults(self):
+        docs = render(self.MISSING)
+        self.assertIsNotNone(named(docs, "NetworkPolicy", "-opensearch"))
+        rule = MetricsPolicyTests.scrape_rule(self, docs)
+        self.assertEqual(rule["from"], [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "monitoring"}}}])
+        self.assertIn("namespace monitoring", notes(self.MISSING))
+        values = {**self.MISSING, "backend": {"allowCredentialsInEnv": None, "env": {"ADMIN_PASSWORD": "x"}}}
+        result = run(values)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("backend.env sets ADMIN_PASSWORD.", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

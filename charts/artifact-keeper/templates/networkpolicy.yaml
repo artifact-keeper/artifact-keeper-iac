@@ -376,7 +376,8 @@ rest of the chart's policies are turned off. Only the backend (and
 opensearch.networkPolicy.extraFrom) reaches the HTTP port, and only OpenSearch
 pods reach the transport port.
 */}}
-{{- if and .Values.opensearch.enabled (or .Values.networkPolicy.enabled .Values.opensearch.networkPolicy.enabled) }}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's defaults, which lack these keys. */}}
+{{- if and .Values.opensearch.enabled (or .Values.networkPolicy.enabled (dig "networkPolicy" "enabled" true .Values.opensearch)) }}
 ---
 # OpenSearch: accept traffic from backend on 9200 and from peer OpenSearch
 # pods on 9300 (transport for multi-node clustering).
@@ -397,7 +398,7 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
-        {{- with .Values.opensearch.networkPolicy.extraFrom }}
+        {{- with (dig "networkPolicy" "extraFrom" list .Values.opensearch) }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       ports:

@@ -390,11 +390,13 @@ Fail the render when backend.env carries credentials, unless
 backend.allowCredentialsInEnv acknowledges it (NOTES.txt then warns).
 */}}
 {{- define "artifact-keeper.validateBackendEnvCredentials" -}}
-{{- if not (kindIs "bool" .Values.backend.allowCredentialsInEnv) -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's defaults, which lack this key. */ -}}
+{{- $allow := dig "allowCredentialsInEnv" false .Values.backend -}}
+{{- if not (kindIs "bool" $allow) -}}
 {{- fail "backend.allowCredentialsInEnv must be a boolean" -}}
 {{- end -}}
 {{- $found := include "artifact-keeper.backendEnvCredentials" . -}}
-{{- if and $found (not .Values.backend.allowCredentialsInEnv) -}}
+{{- if and $found (not $allow) -}}
 {{- fail (printf "backend.env sets %s. backend.env is rendered in plaintext into the pod spec, where anyone who can read the Deployment, its pods or the Helm release can recover it. Move each one to backend.environmentSecrets (a secretKeyRef to a Secret you manage; see values.yaml) and rotate the exposed value, or set backend.allowCredentialsInEnv=true to accept the exposure (throwaway test installs only)." $found) -}}
 {{- end -}}
 {{- end -}}
@@ -856,15 +858,17 @@ matched on the kubernetes.io/metadata.name label Kubernetes stamps on every
 namespace (a bare `name` label matches nothing).
 */}}
 {{- define "artifact-keeper.networkPolicy.monitoringPeers" -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's defaults, which lack these keys. */ -}}
+{{- $namespace := dig "monitoringNamespace" "monitoring" .Values.networkPolicy -}}
 {{- if .Values.networkPolicy.monitoringPeers -}}
 {{- toYaml .Values.networkPolicy.monitoringPeers -}}
 {{- else -}}
-{{- if not .Values.networkPolicy.monitoringNamespace -}}
+{{- if not $namespace -}}
 {{- fail "networkPolicy.monitoringNamespace must name the namespace Prometheus runs in (default monitoring), or set networkPolicy.monitoringPeers" -}}
 {{- end }}
 - namespaceSelector:
     matchLabels:
-      kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | quote }}
+      kubernetes.io/metadata.name: {{ $namespace | quote }}
 {{- end -}}
 {{- end -}}
 

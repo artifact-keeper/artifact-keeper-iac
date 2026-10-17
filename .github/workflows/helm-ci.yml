@@ -20,7 +20,8 @@ on:
 # one matrix, so this workflow is staged with needs to keep at most four
 # hosted runners busy at once (it used to start 16 jobs in the same second):
 #
-#   1. lint, version-check (PRs only), image-tag-drift       <= 3
+#   1. lint, version-check (PRs only), image-tag-drift,
+#      gate-profiles                                         <= 4
 #   2. template-validation, max-parallel 4                   <= 4
 #   3. verify-image-references, max-parallel 3, and
 #      install-test (needs lint and template-validation)     <= 4
@@ -79,6 +80,48 @@ jobs:
 
       - name: Test credential, OpenSearch and metrics policy rendering
         run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_security_posture.py' -v
+
+  gate-profiles:
+    name: Release Gate Profiles Render
+    # Stage 1 of the concurrency chain at the top of this file.
+    #
+    # The release gate (artifact-keeper-test) installs THIS chart from main
+    # with its own values profiles, which this repository never rendered: #380
+    # began refusing ADMIN_PASSWORD in backend.env, every gate profile set it
+    # there, chart CI was green, and the 1.11.1 Release Candidate died at
+    # `helm install` 14 minutes in (#384, artifact-keeper/artifact-keeper#4722).
+    # This renders the PR's chart with every profile the gate installs, read
+    # from artifact-keeper-test@main's helm/gate-profiles.txt, so a chart change
+    # that refuses the gate's values fails here. A deliberate contract change
+    # lands in artifact-keeper-test first (or together); then this goes green.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout artifact-keeper-test@main (the gate's profiles)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: artifact-keeper/artifact-keeper-test
+          ref: main
+          path: .gate-test
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          # The release gate's pin (artifact-keeper-test release-gate.yml), not
+          # this file's v3.16.3: this job answers "will the gate's install
+          # render", so it renders with the gate's Helm.
+          version: v3.22.1
+
+      - name: Render the chart with every release-gate profile
+        run: .gate-test/scripts/render-gate-profiles.sh --chart-dir charts/artifact-keeper
 
   httproute-tests:
     name: HTTPRoute Render Tests (Gateway API ${{ matrix.gateway-api }})

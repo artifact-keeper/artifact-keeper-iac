@@ -146,3 +146,12 @@ CAUTION: Fleet mode shares ONE object-storage bucket across instances,
   prefix. Reusing one Secret across instances lets every instance read and
   overwrite every other instance's artifacts.
 {{- end }}
+
+{{- if and .Values.trivy.enabled .Values.scannerAdapter.enabled }}
+
+Scanner versions:
+  trivy server {{ .Values.trivy.image.tag }} and scanner-adapter {{ .Values.scannerAdapter.image.tag | default .Chart.AppVersion }}
+  must move together. With SCANNER_TRIVY_SERVER set, the adapter requires the
+  server to report the same trivy release as its bundled client (0.76.0 for
+  adapter 1.5.0); otherwise its readiness probe stays 503 and scans fail closed.
+{{- end }}

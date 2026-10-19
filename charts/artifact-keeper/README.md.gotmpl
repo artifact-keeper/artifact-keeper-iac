@@ -81,6 +81,36 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 
 {{ template "chart.valuesSection" . }}
 
+## Additional backend volumes
+
+Use `backend.extraVolumes` and `backend.extraVolumeMounts` to mount existing
+ConfigMaps, Secrets, PVCs, projected volumes or other Kubernetes volume sources.
+For example, mount a custom CA bundle for outbound HTTPS/OIDC connections:
+
+```yaml
+backend:
+  env:
+    CUSTOM_CA_CERT_PATH: /etc/artifact-keeper/custom-ca/ca.pem
+  extraVolumes:
+    - name: custom-ca
+      configMap:
+        name: backend-custom-ca
+        items:
+          - key: ca.pem
+            path: ca.pem
+  extraVolumeMounts:
+    - name: custom-ca
+      mountPath: /etc/artifact-keeper/custom-ca
+      readOnly: true
+```
+
+Create the referenced ConfigMap before deploying. The chart does not create
+resources referenced by these lists. Entries are rendered verbatim and appended
+to the existing volumes and mounts; both lists default to `[]`. Additional
+mounts apply only to the backend container, and can also reference existing pod
+volumes. Use unique volume names and mount paths so they do not conflict with
+the built-in storage, temporary, scan-workspace or shared-config mounts.
+
 ## Container registries
 
 `global.imageRegistry` defaults to `""`: images use their per-component

@@ -107,9 +107,10 @@ backend:
 Create the referenced ConfigMap before deploying. The chart does not create
 resources referenced by these lists. Entries are rendered verbatim and appended
 to the existing volumes and mounts; both lists default to `[]`. Additional
-mounts apply only to the backend container, and can also reference existing pod
-volumes. Use unique volume names and mount paths so they do not conflict with
-the built-in storage, temporary, scan-workspace or shared-config mounts.
+mounts apply only to the backend container; init containers such as the cosign
+verifier do not receive them. Mounts can also reference existing pod volumes.
+Use unique volume names and mount paths so they do not conflict with the built-in
+storage, temporary, scan-workspace or shared-config mounts.
 
 ## Container registries
 

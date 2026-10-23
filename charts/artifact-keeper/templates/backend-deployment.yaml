@@ -461,6 +461,9 @@ spec:
               mountPath: /shared
               readOnly: true
             {{- end }}
+            {{- with .Values.backend.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
@@ -494,5 +497,8 @@ spec:
         - name: shared-config
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-shared-config
+        {{- end }}
+        {{- with .Values.backend.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
 {{- end }}

@@ -116,6 +116,12 @@ backend:
   # -- Additional envFrom sources (Secrets/ConfigMaps) for the backend container,
   # rendered verbatim. Use for credentials that must come from existing Secrets.
   extraEnvFrom: []
+  # -- Additional Kubernetes volumes appended to the backend pod, rendered
+  # verbatim. Use names that do not conflict with the chart's built-in volumes.
+  extraVolumes: []
+  # -- Additional Kubernetes volumeMounts appended to the backend container,
+  # rendered verbatim. Can reference extraVolumes or existing pod volumes.
+  extraVolumeMounts: []
   # -- Extra environment variables sourced from existing Kubernetes Secrets.
   # This is the supported path for every credential the backend reads that the
   # chart does not wire itself: ADMIN_PASSWORD, OIDC_CLIENT_SECRET,

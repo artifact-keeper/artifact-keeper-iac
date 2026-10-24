@@ -1171,6 +1171,13 @@ dependencyTrack:
       ephemeral-storage: 1Gi
   bootstrap:
     enabled: true
+    # -- Create existingApiKeySecret from the bootstrap-generated API key.
+    # Opt-in: requires bootstrap.enabled and existingApiKeySecret, with
+    # existingApiKeySecretKey=API_KEY. Preserves an existing nonempty key and
+    # removes the shared-config PVC handoff. Grants namespace-scoped Secret
+    # creation to a dedicated ServiceAccount; see the README for lifecycle
+    # and Argo CD ordering.
+    manageApiKeySecret: false
     # -- Image for the one-shot bootstrap Job. It needs curl and nothing else.
     # The job installs no packages at runtime, so this works on clusters with
     # no egress to a package mirror; point the repository at your own registry

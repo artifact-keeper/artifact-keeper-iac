@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.9.36](https://img.shields.io/badge/Version-1.9.36-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.6](https://img.shields.io/badge/AppVersion-1.11.6-informational?style=flat-square)
+![Version: 1.9.37](https://img.shields.io/badge/Version-1.9.37-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.6](https://img.shields.io/badge/AppVersion-1.11.6-informational?style=flat-square)
 
 ## TL;DR
 
@@ -105,9 +105,10 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | backend.tolerations | list | `[]` | Per-component scheduling (overrides global) |
 | backend.waitForOpenSearch | object | `{"image":{"repository":"alpine","tag":"3.20"}}` | wait-for-opensearch init container image. Override for airgapped mirrors. |
 | cosign | object | `{"certificateIdentityRegexp":"https://github.com/artifact-keeper/.*","certificateOidcIssuer":"https://token.actions.githubusercontent.com","enabled":false,"image":{"repository":"gcr.io/projectsigstore/cosign","tag":"v2.4.1"}}` | Cosign image signature verification When enabled, an init container verifies the backend image signature before the pod starts. Uses sigstore keyless verification (GitHub OIDC). |
-| dependencyTrack | object | `{"adminPassword":"","affinity":{},"bootstrap":{"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}},"enabled":true,"image":{"pullPolicy":"IfNotPresent","repository":"curlimages/curl","tag":"8.11.1"},"nvdApiEnabled":false,"podSecurityContext":{"fsGroup":1000,"runAsNonRoot":true,"runAsUser":1000}},"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"database":"dependency_track","enabled":true,"existingApiKeySecret":"","existingApiKeySecretKey":"API_KEY","image":{"repository":"dependencytrack/apiserver","tag":"4.11.4"},"initContainerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"nodeSelector":{},"persistence":{"size":"5Gi","storageClass":""},"podSecurityContext":{"fsGroup":1000,"runAsNonRoot":true,"runAsUser":1000},"resources":{"limits":{"cpu":"2","ephemeral-storage":"1Gi","memory":"6Gi"},"requests":{"cpu":"500m","ephemeral-storage":"256Mi","memory":"4Gi"}},"tmpSizeLimit":"2Gi","tolerations":[],"topologySpreadConstraints":[]}` | DependencyTrack SBOM analysis Provides SBOM ingestion, license analysis, and vulnerability correlation. Requires significant memory (4Gi+) to load its internal vulnerability database on startup. The bootstrap init container creates the initial admin user and API key for backend integration. |
+| dependencyTrack | object | `{"adminPassword":"","affinity":{},"bootstrap":{"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}},"enabled":true,"image":{"pullPolicy":"IfNotPresent","repository":"curlimages/curl","tag":"8.11.1"},"manageApiKeySecret":false,"nvdApiEnabled":false,"podSecurityContext":{"fsGroup":1000,"runAsNonRoot":true,"runAsUser":1000}},"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"database":"dependency_track","enabled":true,"existingApiKeySecret":"","existingApiKeySecretKey":"API_KEY","image":{"repository":"dependencytrack/apiserver","tag":"4.11.4"},"initContainerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"nodeSelector":{},"persistence":{"size":"5Gi","storageClass":""},"podSecurityContext":{"fsGroup":1000,"runAsNonRoot":true,"runAsUser":1000},"resources":{"limits":{"cpu":"2","ephemeral-storage":"1Gi","memory":"6Gi"},"requests":{"cpu":"500m","ephemeral-storage":"256Mi","memory":"4Gi"}},"tmpSizeLimit":"2Gi","tolerations":[],"topologySpreadConstraints":[]}` | DependencyTrack SBOM analysis Provides SBOM ingestion, license analysis, and vulnerability correlation. Requires significant memory (4Gi+) to load its internal vulnerability database on startup. The bootstrap init container creates the initial admin user and API key for backend integration. |
 | dependencyTrack.adminPassword | string | `""` | Dependency-Track admin password. Leave empty and the chart generates a strong one on first install and keeps it stable across upgrades by reading the value back out of its own Secret. Set it explicitly if you want to know the password (to log into the Dependency-Track UI yourself) or if you manage the Secret externally, in which case this key must be present there. Stability relies on Helm's lookup, which only works when Helm talks to a live cluster. GitOps engines that render with "helm template" (ArgoCD, Flux) never see the stored value; this repo's ApplicationSet compensates with ignoreDifferences + RespectIgnoreDifferences on this Secret key. Other template-mode consumers should replicate that or set the password here. |
 | dependencyTrack.bootstrap.image | object | `{"pullPolicy":"IfNotPresent","repository":"curlimages/curl","tag":"8.11.1"}` | Image for the one-shot bootstrap Job. It needs curl and nothing else. The job installs no packages at runtime, so this works on clusters with no egress to a package mirror; point the repository at your own registry for air-gapped installs. |
+| dependencyTrack.bootstrap.manageApiKeySecret | bool | `false` | Create existingApiKeySecret from the bootstrap-generated API key. Opt-in: requires bootstrap.enabled and existingApiKeySecret, with existingApiKeySecretKey=API_KEY. Preserves an existing nonempty key and removes the shared-config PVC handoff. Grants namespace-scoped Secret creation to a dedicated ServiceAccount; see the README for lifecycle and Argo CD ordering. |
 | dependencyTrack.bootstrap.nvdApiEnabled | bool | `false` | Have the bootstrap Job switch Dependency-Track's NVD mirroring to the NVD REST API 2.0 (config property `vuln-source/nvd.api.enabled=true`). Off by default: without an NVD API key the API is heavily rate-limited, so also set the key in the Dependency-Track UI (Administration > Vulnerability Sources > NVD). Applied on the next install or upgrade, including existing installs; setting it back to false leaves the property as it is rather than turning mirroring off. |
 | dependencyTrack.database | string | `"dependency_track"` | Database Dependency-Track connects to: the chart's own Postgres when postgres.enabled, the external server otherwise. It must exist and be owned by externalDatabase.username before the first install, since the chart only creates it on the in-chart Postgres. Two releases sharing one PostgreSQL server collide on the default name. An empty value falls back to dependency_track. On the in-chart Postgres, setting it to postgres.auth.database shares that database and skips CREATE DATABASE. |
 | dependencyTrack.existingApiKeySecret | string | `""` | Name of an existing Secret holding a Dependency-Track API key. When set, the backend reads DEPENDENCY_TRACK_API_KEY from it and the shared-config volume, its mount, DEPENDENCY_TRACK_API_KEY_FILE and the shared-config PVC are all skipped, so backend replicas are not pinned to one node by the ReadWriteOnce claim. The bootstrap Job then only reconciles the admin password (plus bootstrap.nvdApiEnabled when that is on) and never generates a key. Set existingApiKeySecretKey with it, and do not also name DEPENDENCY_TRACK_API_KEY in backend.env or backend.environmentSecrets: that would be a second definition of the same env var, which Kubernetes rejects. |
@@ -891,6 +892,53 @@ Docker tags use semver without a `v` prefix: git tag `v1.1.0` produces Docker ta
 ### Container Registry
 
 Images are published to `ghcr.io/artifact-keeper/artifact-keeper-{backend,web}` by default. Docker Hub mirrors are available at `docker.io/artifactkeeper/{backend,web}`. Change the registry via `global.imageRegistry` or per-component `image.repository` values.
+
+## Managed Dependency-Track API-key Secret
+
+To have the bootstrap Job provision the backend's API key without a shared
+ReadWriteOnce volume, opt in with:
+
+```yaml
+dependencyTrack:
+  existingApiKeySecret: ak-dtrack-api-key
+  existingApiKeySecretKey: API_KEY
+  bootstrap:
+    enabled: true
+    manageApiKeySecret: true
+```
+
+The Job uses the existing bootstrap image and generates a key only when the
+named Secret is absent. An existing nonempty `API_KEY` is preserved; an empty
+or incorrectly populated Secret fails explicitly. A concurrent creator wins
+without its value being overwritten. The Job installs no packages and does not
+need jq or kubectl. Bootstrap must retain access to the Dependency-Track API;
+with NetworkPolicy enabled, apply the TCP 8080 egress fix tracked in #304.
+Kubernetes API HTTPS access must also be allowed by the cluster's policies.
+
+The backend consumes `DEPENDENCY_TRACK_API_KEY` from this Secret. The bootstrap
+Job and backend do not mount `shared-config`, and its PVC is not rendered. This
+removes only that PVC constraint; multi-replica backends must also address the
+artifact-storage and scan-workspace volumes described above.
+
+Only the bootstrap Job uses the dedicated ServiceAccount. Its namespace Role
+allows `get` on the designated Secret and `create` on Secrets. Kubernetes RBAC
+cannot restrict top-level creation by resource name. No list, update, patch or
+delete permissions are granted. The generated Secret has no Job owner reference
+or Argo CD tracking label, and is retained on hook cleanup and uninstall. Back
+it up along with Dependency-Track's database. API-key rotation is operator-managed;
+restart backend pods after replacing an environment-injected key.
+
+For Argo CD, RBAC resources are in sync wave `-1` and the Job is a `Sync` hook
+in wave `0`, alongside its ConfigMap and the workloads. It can create the Secret
+while the backend is waiting for it, avoiding a `PostSync` health dependency
+cycle. For Helm, it is a normal Job with a revision-suffixed name, so `--wait`
+does not wait for the backend before creating the Job and upgrades do not patch
+an immutable Job template. The default PVC mode keeps its existing Helm hooks.
+
+Keep the Dependency-Track admin password stable across GitOps renders, as
+described under "Recovering a Dependency-Track password mismatch". Do not
+switch an existing PVC installation to this mode until its API-key handoff and
+backend rollout are planned; deleting the old shared PVC is an operator action.
 
 ## Troubleshooting
 

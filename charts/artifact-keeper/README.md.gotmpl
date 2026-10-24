@@ -722,6 +722,53 @@ Docker tags use semver without a `v` prefix: git tag `v1.1.0` produces Docker ta
 
 Images are published to `ghcr.io/artifact-keeper/artifact-keeper-{backend,web}` by default. Docker Hub mirrors are available at `docker.io/artifactkeeper/{backend,web}`. Change the registry via `global.imageRegistry` or per-component `image.repository` values.
 
+## Managed Dependency-Track API-key Secret
+
+To have the bootstrap Job provision the backend's API key without a shared
+ReadWriteOnce volume, opt in with:
+
+```yaml
+dependencyTrack:
+  existingApiKeySecret: ak-dtrack-api-key
+  existingApiKeySecretKey: API_KEY
+  bootstrap:
+    enabled: true
+    manageApiKeySecret: true
+```
+
+The Job uses the existing bootstrap image and generates a key only when the
+named Secret is absent. An existing nonempty `API_KEY` is preserved; an empty
+or incorrectly populated Secret fails explicitly. A concurrent creator wins
+without its value being overwritten. The Job installs no packages and does not
+need jq or kubectl. Bootstrap must retain access to the Dependency-Track API;
+with NetworkPolicy enabled, apply the TCP 8080 egress fix tracked in #304.
+Kubernetes API HTTPS access must also be allowed by the cluster's policies.
+
+The backend consumes `DEPENDENCY_TRACK_API_KEY` from this Secret. The bootstrap
+Job and backend do not mount `shared-config`, and its PVC is not rendered. This
+removes only that PVC constraint; multi-replica backends must also address the
+artifact-storage and scan-workspace volumes described above.
+
+Only the bootstrap Job uses the dedicated ServiceAccount. Its namespace Role
+allows `get` on the designated Secret and `create` on Secrets. Kubernetes RBAC
+cannot restrict top-level creation by resource name. No list, update, patch or
+delete permissions are granted. The generated Secret has no Job owner reference
+or Argo CD tracking label, and is retained on hook cleanup and uninstall. Back
+it up along with Dependency-Track's database. API-key rotation is operator-managed;
+restart backend pods after replacing an environment-injected key.
+
+For Argo CD, RBAC resources are in sync wave `-1` and the Job is a `Sync` hook
+in wave `0`, alongside its ConfigMap and the workloads. It can create the Secret
+while the backend is waiting for it, avoiding a `PostSync` health dependency
+cycle. For Helm, it is a normal Job with a revision-suffixed name, so `--wait`
+does not wait for the backend before creating the Job and upgrades do not patch
+an immutable Job template. The default PVC mode keeps its existing Helm hooks.
+
+Keep the Dependency-Track admin password stable across GitOps renders, as
+described under "Recovering a Dependency-Track password mismatch". Do not
+switch an existing PVC installation to this mode until its API-key handoff and
+backend rollout are planned; deleting the old shared PVC is an operator action.
+
 ## Troubleshooting
 
 ### OpenSearch OOMKill

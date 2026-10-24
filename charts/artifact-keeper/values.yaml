@@ -169,7 +169,7 @@ backend:
     # tagged chart release to drive the image tag. ArgoCD Image Updater pins
     # tags to a digest automatically. For a floating tag such as "dev", set
     # pullPolicy: Always so restarts pick up new builds.
-    tag: "1.11.5"
+    tag: "1.11.6"
     pullPolicy: Always
   # -- Pod-level securityContext. Defaults are image-native: the backend
   # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
@@ -629,7 +629,7 @@ web:
     # empty ("") to fall back to the chart's appVersion (see backend.image.tag).
     # Note the appVersion tracks the backend generation, so an empty web tag can
     # resolve to a version the web image has not published; pin it here instead.
-    # Concretely: appVersion is currently 1.11.5 while the web frontend's latest
+    # Concretely: appVersion is currently 1.11.6 while the web frontend's latest
     # release is 1.11.1, so an empty tag here would resolve to a web image that
     # does not exist -- keep this pinned rather than empty.
     # Because the two components version independently, expect the appVersion
@@ -1046,7 +1046,7 @@ scannerAdapter:
     # build they first cached. Repoint this alongside backend.image.tag. The
     # deployment renders the tag as `tag | default .Chart.AppVersion`, so
     # leaving this empty ("") would fall back to appVersion and pull a
-    # non-existent tag — keep it pinned. Backend 1.11.5 ships adapter 1.5.1,
+    # non-existent tag — keep it pinned. Backend 1.11.6 ships adapter 1.5.1,
     # whose bundled trivy is 0.76.0 (image 0.76.0-r2, Go 1.27.3); when the adapter is pointed at the chart's
     # trivy server (SCANNER_TRIVY_SERVER), trivy.image.tag must be the same
     # trivy release or the adapter refuses to scan.

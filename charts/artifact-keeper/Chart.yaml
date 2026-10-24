@@ -10,8 +10,8 @@ apiVersion: v2
 name: artifact-keeper
 description: Enterprise artifact registry supporting 45+ package formats
 type: application
-version: 1.9.35
-appVersion: "1.11.5"
+version: 1.9.36
+appVersion: "1.11.6"
 home: https://artifactkeeper.com
 sources:
   - https://github.com/artifact-keeper/artifact-keeper

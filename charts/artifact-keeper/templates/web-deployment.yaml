@@ -8,6 +8,10 @@ security policies, and operational needs before use in production.
 =============================================================================
 */}}
 {{- if .Values.web.enabled }}
+{{- $enforceHttps := dig "enforceHttps" false .Values.web }}
+{{- if not (kindIs "bool" $enforceHttps) }}
+{{- fail "web.enforceHttps must be a boolean" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -68,6 +72,10 @@ spec:
               value: "http://{{ include "artifact-keeper.fullname" . }}-backend:{{ .Values.backend.service.httpPort }}"
             - name: NODE_ENV
               value: {{ .Values.web.env.NODE_ENV | quote }}
+            {{- if $enforceHttps }}
+            - name: AK_ENFORCE_HTTPS
+              value: "true"
+            {{- end }}
           resources:
             {{- include "artifact-keeper.web.resources" . | nindent 12 }}
           readinessProbe:

@@ -620,6 +620,10 @@ backend:
 # -- Next.js web frontend
 web:
   enabled: true
+  # -- Enable HSTS and CSP upgrade-insecure-requests in the web container.
+  # Set true when browsers reach the UI over HTTPS, including TLS termination
+  # at an ingress, Gateway or load balancer. Keep false for plain-HTTP access.
+  enforceHttps: false
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-web  # Docker Hub: artifactkeeper/web

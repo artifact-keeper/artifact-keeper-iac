@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.9.36](https://img.shields.io/badge/Version-1.9.36-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.6](https://img.shields.io/badge/AppVersion-1.11.6-informational?style=flat-square)
+![Version: 1.9.37](https://img.shields.io/badge/Version-1.9.37-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.6](https://img.shields.io/badge/AppVersion-1.11.6-informational?style=flat-square)
 
 ## TL;DR
 
@@ -246,7 +246,8 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | trivy.image.tag | string | `"0.76.0"` | Trivy server release. Move it together with scannerAdapter.image.tag: with SCANNER_TRIVY_SERVER set, the adapter refuses a server whose trivy release differs from its bundled client (0.76.0 for adapter 1.5.0, the pair backend 1.11.2 ships), its /probe/ready stays 503 and scans fail closed with "client/server mode needs matching releases". |
 | trivy.tmpSizeLimit | string | `"256Mi"` | Size limit for the `/tmp` emptyDir (TMPDIR). Trivy extracts image layers and scan inputs here, so large artifacts can exceed the default and get the pod evicted ("Usage of EmptyDir volume \"tmp\" exceeds the limit"). Raise it together with resources.limits.ephemeral-storage, which the kubelet enforces across the whole pod. An empty string falls back to the 256Mi default in the deployment template. |
 | trivy.tolerations | list | `[]` | Per-component scheduling (overrides global) |
-| web | object | `{"affinity":{},"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"enabled":true,"env":{"NEXT_PUBLIC_API_URL":"","NODE_ENV":"production"},"image":{"pullPolicy":"Always","repository":"ghcr.io/artifact-keeper/artifact-keeper-web","tag":"1.11.1"},"nodeSelector":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"podSecurityContext":{"fsGroup":1000,"runAsNonRoot":true,"runAsUser":1000},"replicaCount":1,"resources":{"limits":{"cpu":"1","ephemeral-storage":"2Gi","memory":"1Gi"},"requests":{"cpu":"250m","ephemeral-storage":"256Mi","memory":"256Mi"}},"service":{"port":3000,"type":"ClusterIP"},"tolerations":[],"topologySpreadConstraints":[]}` | Next.js web frontend |
+| web | object | `{"affinity":{},"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"enabled":true,"enforceHttps":false,"env":{"NEXT_PUBLIC_API_URL":"","NODE_ENV":"production"},"image":{"pullPolicy":"Always","repository":"ghcr.io/artifact-keeper/artifact-keeper-web","tag":"1.11.1"},"nodeSelector":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"podSecurityContext":{"fsGroup":1000,"runAsNonRoot":true,"runAsUser":1000},"replicaCount":1,"resources":{"limits":{"cpu":"1","ephemeral-storage":"2Gi","memory":"1Gi"},"requests":{"cpu":"250m","ephemeral-storage":"256Mi","memory":"256Mi"}},"service":{"port":3000,"type":"ClusterIP"},"tolerations":[],"topologySpreadConstraints":[]}` | Next.js web frontend |
+| web.enforceHttps | bool | `false` | Enable HSTS and CSP upgrade-insecure-requests in the web container. Set true when browsers reach the UI over HTTPS, including TLS termination at an ingress, Gateway or load balancer. Keep false for plain-HTTP access. |
 | web.image.tag | string | `"1.11.1"` | Web image tag. Defaults to the web frontend's latest published release, which drifts from the backend's version because the two release independently (only the major must align for API compatibility). Leave empty ("") to fall back to the chart's appVersion (see backend.image.tag). Note the appVersion tracks the backend generation, so an empty web tag can resolve to a version the web image has not published; pin it here instead. Concretely: appVersion is currently 1.11.6 while the web frontend's latest release is 1.11.1, so an empty tag here would resolve to a web image that does not exist -- keep this pinned rather than empty. Because the two components version independently, expect the appVersion fallback to be unusable for web most of the time -- keep this pinned. |
 | web.podLabels | object | `{}` | Extra labels merged onto the web pod template. See backend.podLabels. |
 | web.tolerations | list | `[]` | Per-component scheduling (overrides global) |
@@ -281,6 +282,14 @@ mounts apply only to the backend container; init containers such as the cosign
 verifier do not receive them. Mounts can also reference existing pod volumes.
 Use unique volume names and mount paths so they do not conflict with the built-in
 storage, temporary, scan-workspace or shared-config mounts.
+
+## Web HTTPS security headers
+
+Set `web.enforceHttps: true` when browsers reach the web UI over HTTPS, including
+when an ingress, Gateway or load balancer terminates TLS and forwards HTTP to
+the web pod. This passes `AK_ENFORCE_HTTPS=true` to the web container to enable
+its HSTS and CSP `upgrade-insecure-requests` headers. It defaults to `false` for
+plain-HTTP deployments and is not inferred from the chart's routing settings.
 
 ## Container registries
 

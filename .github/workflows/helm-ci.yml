@@ -81,6 +81,9 @@ jobs:
       - name: Test backend extra volume rendering
         run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_backend_extra_volumes.py' -v
 
+      - name: Test additional chart regressions
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_chart_*.py' -v
+
       - name: Test credential, OpenSearch and metrics policy rendering
         run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_security_posture.py' -v
 

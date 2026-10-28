@@ -447,6 +447,16 @@ backend:
     # OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"   # "grpc" or "http/protobuf".
     # OTEL_TRACES_SAMPLER: "parentbased_always_on" # (1.11.0) OTel spec sampler name; unknown names fall back to this default.
     # OTEL_TRACES_SAMPLER_ARG: "1.0"        # (1.11.0) ratio for the *traceidratio samplers.
+    # (1.12.0) Logs and metrics over OTLP are OFF by default. Turn them on only when
+    # OTEL_EXPORTER_OTLP_ENDPOINT is a collector that accepts them (OpenTelemetry
+    # Collector, Grafana Alloy): a traces-only backend used directly (Tempo, Jaeger)
+    # rejects them. Values: "otlp" or "none"; anything else keeps the default.
+    # OTEL_TRACES_EXPORTER: "otlp"          # (1.12.0) "none" stops span export.
+    # OTEL_LOGS_EXPORTER: "none"            # (1.12.0) "otlp" also exports log records; stdout is unchanged.
+    # OTEL_METRICS_EXPORTER: "none"         # (1.12.0) "otlp" also pushes the /metrics instruments; /metrics is unchanged.
+    # OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: ""     # (1.12.0) Full URL. Default: the shared endpoint (grpc), or /v1/traces -> /v1/logs (http/protobuf).
+    # OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: ""  # (1.12.0) Full URL. Default: as above, with /v1/metrics.
+    # OTEL_METRIC_EXPORT_INTERVAL: "60000"  # (1.12.0) Metric push interval, in milliseconds.
     # Inbound traceparent is trusted only from backend.clientIp.trustedProxyCidrs
     # peers (RATE_LIMIT_TRUSTED_PROXY_CIDRS). 1.11.0 also adds upstream CLIENT spans and DB
     # query spans, and turns ak_http_request_duration_seconds into a bucketed

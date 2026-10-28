@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.9.38](https://img.shields.io/badge/Version-1.9.38-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.8](https://img.shields.io/badge/AppVersion-1.11.8-informational?style=flat-square)
+![Version: 1.9.39](https://img.shields.io/badge/Version-1.9.39-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.8](https://img.shields.io/badge/AppVersion-1.11.8-informational?style=flat-square)
 
 ## TL;DR
 
@@ -748,6 +748,28 @@ All deployments include restrictive security contexts: non-root users, read-only
 Set `serviceMonitor.enabled: true` to create a Prometheus ServiceMonitor that scrapes the backend's `/metrics` endpoint. The scrape interval defaults to 30 seconds and can be adjusted via `serviceMonitor.interval`.
 
 The [monitoring/](../../monitoring/) directory contains a pre-built Grafana dashboard (12 panels across 4 rows) and 7 PrometheusRule alert definitions covering error rates, latency, pod health, storage usage, and database connectivity.
+
+### OpenTelemetry
+
+The backend exports traces over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set in `backend.env` (an empty value counts as unset). From backend 1.12.0 it can also export its log records and metrics to the same collector, over the same protocol. **Both are off by default**: turn them on only when the endpoint is a collector that accepts them, such as the OpenTelemetry Collector or Grafana Alloy. A traces-only backend used directly (Grafana Tempo, Jaeger) rejects log and metric exports, so a traces-only setup keeps working after an upgrade as long as these stay unset.
+
+```yaml
+backend:
+  env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability:4317"
+    OTEL_LOGS_EXPORTER: "otlp"      # 1.12.0, default "none"
+    OTEL_METRICS_EXPORTER: "otlp"   # 1.12.0, default "none"
+```
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OTEL_TRACES_EXPORTER` | `otlp` | `none` stops span export. |
+| `OTEL_LOGS_EXPORTER` | `none` | `otlp` also exports log records with their `trace_id` and `span_id`. Stdout logging is unchanged, so enable it only where the collector is the log pipeline. |
+| `OTEL_METRICS_EXPORTER` | `none` | `otlp` also pushes the `/metrics` instruments every `OTEL_METRIC_EXPORT_INTERVAL` ms (default `60000`). `/metrics` and the ServiceMonitor are unchanged. |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | derived | Full URL for logs. Default: the shared endpoint with `grpc`; with `http/protobuf`, the traces URL with `/v1/traces` replaced by `/v1/logs`. |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | derived | Full URL for metrics, derived the same way with `/v1/metrics`. |
+
+With `OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"`, set `OTEL_EXPORTER_OTLP_ENDPOINT` to the full traces URL (ending in `/v1/traces`). Every signal carries `service.instance.id`, which defaults to the pod name (`HOSTNAME`), so replicas stay apart. A collector auth header (`OTEL_EXPORTER_OTLP_HEADERS`) is a credential: set it through `backend.environmentSecrets`, not `backend.env`.
 
 ## High Availability
 

@@ -153,5 +153,5 @@ Scanner versions:
   trivy server {{ .Values.trivy.image.tag }} and scanner-adapter {{ .Values.scannerAdapter.image.tag | default .Chart.AppVersion }}
   must move together. With SCANNER_TRIVY_SERVER set, the adapter requires the
   server to report the same trivy release as its bundled client (0.76.0 for
-  adapter 1.5.0); otherwise its readiness probe stays 503 and scans fail closed.
+  adapter 1.5.2); otherwise its readiness probe stays 503 and scans fail closed.
 {{- end }}

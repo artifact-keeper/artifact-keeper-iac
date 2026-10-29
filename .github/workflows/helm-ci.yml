@@ -319,8 +319,16 @@ jobs:
           missing=()
           while IFS= read -r ref; do
             [ -z "${ref}" ] && continue
-            tag="${ref##*:}"
-            name="${ref%:*}"
+            if [[ "${ref}" == *@* ]]; then
+              # tag@digest (or bare @digest): probe the pinned digest, which
+              # is what the cluster pulls; the tag is informational.
+              tag="${ref#*@}"
+              name="${ref%%@*}"
+              case "${name##*/}" in *:*) name="${name%:*}" ;; esac
+            else
+              tag="${ref##*:}"
+              name="${ref%:*}"
+            fi
             case "${name}" in
               ghcr.io/*)
                 probe_name="${name#ghcr.io/}"

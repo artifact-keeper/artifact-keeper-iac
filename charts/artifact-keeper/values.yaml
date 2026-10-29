@@ -169,7 +169,7 @@ backend:
     # tagged chart release to drive the image tag. ArgoCD Image Updater pins
     # tags to a digest automatically. For a floating tag such as "dev", set
     # pullPolicy: Always so restarts pick up new builds.
-    tag: "1.11.9"
+    tag: "1.11.10"
     pullPolicy: Always
   # -- Pod-level securityContext. Defaults are image-native: the backend
   # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
@@ -639,7 +639,7 @@ web:
     # empty ("") to fall back to the chart's appVersion (see backend.image.tag).
     # Note the appVersion tracks the backend generation, so an empty web tag can
     # resolve to a version the web image has not published; pin it here instead.
-    # Concretely: appVersion is currently 1.11.9 while the web frontend's latest
+    # Concretely: appVersion is currently 1.11.10 while the web frontend's latest
     # release is 1.11.2, so an empty tag here would resolve to a web image that
     # does not exist -- keep this pinned rather than empty.
     # Because the two components version independently, expect the appVersion
@@ -960,7 +960,7 @@ trivy:
     # (same release, patched Go dependencies), pinned by digest. Move it
     # together with scannerAdapter.image.tag: with SCANNER_TRIVY_SERVER set,
     # the adapter refuses a server whose trivy release differs from its bundled
-    # client (0.76.0 for adapter 1.5.2, the pair backend 1.11.9 ships), its
+    # client (0.76.0 for adapter 1.5.2, the pair backend 1.11.10 ships), its
     # /probe/ready stays 503 and scans fail closed with "client/server mode
     # needs matching releases".
     tag: "0.76.0-r3@sha256:e324a1cc4ad525ed0a39d623a277a12cd138fd8ee2a88f60f776ae5a40b5b0ce"
@@ -1058,7 +1058,7 @@ scannerAdapter:
     # build they first cached. Repoint this alongside backend.image.tag. The
     # deployment renders the tag as `tag | default .Chart.AppVersion`, so
     # leaving this empty ("") would fall back to appVersion and pull a
-    # non-existent tag — keep it pinned. Backend 1.11.9 ships adapter 1.5.2,
+    # non-existent tag — keep it pinned. Backend 1.11.10 ships adapter 1.5.2,
     # whose bundled trivy is 0.76.0 (image 0.76.0-r3, go-jose 4.1.6); when the adapter is pointed at the chart's
     # trivy server (SCANNER_TRIVY_SERVER), trivy.image.tag must be the same
     # trivy release or the adapter refuses to scan.

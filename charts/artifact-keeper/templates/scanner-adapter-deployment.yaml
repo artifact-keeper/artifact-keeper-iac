@@ -59,7 +59,7 @@ spec:
         - name: scanner-adapter
           # appVersion drives the tag by default (same pattern as backend/web);
           # the image is multi-arch, so no arch-pinned nodeSelector is needed.
-          image: "{{ .Values.scannerAdapter.image.repository }}:{{ .Values.scannerAdapter.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.scannerAdapter.image "defaultTag" .Chart.AppVersion "context" .) | quote }}
           imagePullPolicy: {{ .Values.scannerAdapter.image.pullPolicy }}
           {{- with .Values.scannerAdapter.containerSecurityContext }}
           securityContext:

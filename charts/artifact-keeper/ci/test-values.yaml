@@ -13,6 +13,9 @@ global:
     noProxy: ".ci.invalid,.example.com"
 
 backend:
+  # Throwaway test credentials in backend.env; acknowledged so the render's
+  # credential check (#375) passes. Never copy this into a real install.
+  allowCredentialsInEnv: true
   replicaCount: 1
   image:
     tag: dev

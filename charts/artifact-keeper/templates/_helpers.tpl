@@ -16,6 +16,52 @@ Expand the name of the chart.
 {{- end }}
 
 {{/*
+Render an image from its image values and the root context.
+An optional defaultTag preserves component-specific appVersion fallbacks.
+*/}}
+{{- define "artifact-keeper.image" -}}
+{{- $repository := required "image.repository must not be empty" .image.repository -}}
+{{- $registry := .context.Values.global.imageRegistry | default "" | trim -}}
+{{- if $registry -}}
+  {{- $registry = regexReplaceAll "/+" (trimAll "/" $registry) "/" -}}
+  {{- $host := first (splitList "/" $registry) -}}
+  {{- $validRegistry := regexMatch `^(\[[0-9a-fA-F:]+\]|[^/:@[:space:]]+)(:[0-9]+)?(/[^/:@[:space:]]+)*$` $registry -}}
+  {{- $qualifiedHost := or (contains "." $host) (contains ":" $host) (eq $host "localhost") -}}
+  {{- if not (and $validRegistry $qualifiedHost) -}}
+    {{- fail "global.imageRegistry must be a registry host (optionally with port and path), without a URL scheme, tag or digest" -}}
+  {{- end -}}
+  {{- $repository = regexReplaceAll "/+" (trimAll "/" (trim $repository)) "/" -}}
+  {{- if not $repository -}}
+    {{- fail "image.repository must not be empty" -}}
+  {{- end -}}
+  {{- /* Repositories already under a destination proxy path must not gain it twice. */ -}}
+  {{- if not (and (contains "/" $registry) (hasPrefix (printf "%s/" $registry) $repository)) -}}
+    {{- $parts := splitList "/" $repository -}}
+    {{- $first := first $parts -}}
+    {{- $dockerHub := true -}}
+    {{- if and (gt (len $parts) 1) (or (contains "." $first) (contains ":" $first) (eq $first "localhost")) -}}
+      {{- $dockerHub = has $first (list "docker.io" "index.docker.io" "registry-1.docker.io") -}}
+      {{- $repository = join "/" (rest $parts) -}}
+    {{- end -}}
+    {{- if and $dockerHub (not (contains "/" $repository)) -}}
+      {{- $repository = printf "library/%s" $repository -}}
+    {{- end -}}
+    {{- $repository = printf "%s/%s" $registry $repository -}}
+  {{- end -}}
+{{- end -}}
+{{- /* A complete reference takes precedence over the separate tag, including tag@digest pins. */ -}}
+{{- if or (contains "@" $repository) (contains ":" (last (splitList "/" $repository))) -}}
+  {{- $repository -}}
+{{- else -}}
+  {{- $tag := get .image "tag" -}}
+  {{- if hasKey . "defaultTag" -}}
+    {{- $tag = $tag | default .defaultTag -}}
+  {{- end -}}
+  {{- printf "%s:%v" $repository $tag -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Create a default fully qualified app name.
 */}}
 {{- define "artifact-keeper.fullname" -}}
@@ -128,6 +174,14 @@ app.kubernetes.io/component: scanner-adapter
 {{- end }}
 
 {{/*
+Image builder (buildkitd) selector labels
+*/}}
+{{- define "artifact-keeper.imageBuilder.selectorLabels" -}}
+{{ include "artifact-keeper.selectorLabels" . }}
+app.kubernetes.io/component: image-builder
+{{- end }}
+
+{{/*
 DependencyTrack selector labels
 */}}
 {{- define "artifact-keeper.dtrack.selectorLabels" -}}
@@ -220,6 +274,64 @@ passed to forceChangePassword; Dependency-Track rejects an empty password with
 {{- end -}}
 {{- end -}}
 
+{{/*
+Whether the Dependency-Track API key travels through the shared-config volume.
+False when dependencyTrack.existingApiKeySecret supplies it instead: the volume,
+its mount, DEPENDENCY_TRACK_API_KEY_FILE and the claim are all skipped, and the
+backend reads DEPENDENCY_TRACK_API_KEY.
+
+The claim is ReadWriteOnce and has no accessModes knob, so on block storage it
+attaches to one node and pins every backend replica there, which is what stops
+backend.replicaCount > 1 from spreading. The backend's resolve_api_key prefers
+DEPENDENCY_TRACK_API_KEY over the file (dependency_track_service.rs), so the file
+is not required when the key is supplied directly. See iac issue 313.
+*/}}
+{{- define "artifact-keeper.dtrackApiKeyFile" -}}
+{{- if and .Values.dependencyTrack.enabled (not .Values.dependencyTrack.existingApiKeySecret) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Database Dependency-Track connects to (dependencyTrack.database). An empty value
+falls back to dependency_track rather than rendering a JDBC URL ending in "/"
+and an init script with "CREATE DATABASE ;".
+*/}}
+{{- define "artifact-keeper.dtrackDatabase" -}}
+{{- .Values.dependencyTrack.database | default "dependency_track" -}}
+{{- end -}}
+
+{{/*
+Whether Dependency-Track reads its database password from
+externalDatabase.existingSecret instead of the chart's app Secret (secretName).
+
+Only with an external database and externalDatabase.existingSecret set, and then
+only when one of these holds:
+- externalDatabase.existingPasswordKey is set: the operator says where it is.
+- The chart renders its own Secret (no externalSecrets.enabled, no
+  secrets.existingSecret). secrets.yaml leaves POSTGRES_PASSWORD out of that
+  Secret whenever externalDatabase.existingSecret is set, so secretName has
+  nothing to offer.
+With External Secrets (which syncs POSTGRES_PASSWORD) or secrets.existingSecret,
+the app Secret keeps supplying it, as before.
+*/}}
+{{- define "artifact-keeper.dtrackDbPasswordFromExistingSecret" -}}
+{{- $ext := .Values.externalDatabase -}}
+{{- if and (not .Values.postgres.enabled) $ext.existingSecret -}}
+{{- if or $ext.existingPasswordKey (and (not .Values.externalSecrets.enabled) (not .Values.secrets.existingSecret)) -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether Dependency-Track's JDBC host and port come from externalDatabase.existingSecret
+(keys existingHostKey / existingPortKey) instead of values. Only with an external
+database, existingSecret set and externalDatabase.host empty: a host set in values
+always wins, together with externalDatabase.port, so a Secret holding only
+DATABASE_URL keeps working.
+*/}}
+{{- define "artifact-keeper.dtrackDbHostFromExistingSecret" -}}
+{{- $ext := .Values.externalDatabase -}}
+{{- if and (not .Values.postgres.enabled) $ext.existingSecret (not $ext.host) -}}true{{- end -}}
+{{- end -}}
+
 {{- define "artifact-keeper.validateSecrets" -}}
 {{- if or .Values.externalSecrets.enabled .Values.secrets.existingSecret -}}
 {{- /* Secrets are supplied externally; no chart-owned Secret to validate. */ -}}
@@ -232,6 +344,98 @@ passed to forceChangePassword; Dependency-Track rejects an empty password with
 {{- end -}}
 {{- if and .Values.opensearch.enabled (not .Values.opensearch.disableSecurityPlugin) (eq .Values.opensearch.auth.password "") -}}
 {{- fail "opensearch.auth.password is required when opensearch is enabled and disableSecurityPlugin is false. Set it with --set opensearch.auth.password=<value>" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Credential-like keys set to a non-empty value in backend.env, as a
+comma-separated string ("" when there are none). backend.env is rendered
+verbatim into the pod spec, so a value there is readable by anyone who can get
+the Deployment or its pods, or read the Helm release Secret (#375).
+Credentials belong in backend.environmentSecrets (secretKeyRef). DATABASE_URL
+counts only when it carries a password. Empty values are placeholders and pass.
+*/}}
+{{- define "artifact-keeper.backendEnvCredentials" -}}
+{{- $env := .Values.backend.env | default dict -}}
+{{- $secretEnv := list -}}
+{{- range .Values.backend.environmentSecrets -}}
+{{- $secretEnv = append $secretEnv .name -}}
+{{- end -}}
+{{- $env = deepCopy $env -}}
+{{- range $secretEnv -}}
+{{- $_ := unset $env . -}}
+{{- end -}}
+{{- $found := list -}}
+{{- range $key := list
+    "ADMIN_PASSWORD" "INITIAL_ADMIN_PASSWORD" "JWT_SECRET"
+    "S3_SECRET_KEY" "S3_SECRET_ACCESS_KEY" "S3_PRESIGN_SECRET_ACCESS_KEY"
+    "AZURE_STORAGE_ACCESS_KEY" "AZURE_CLIENT_SECRET" "GCS_PRIVATE_KEY" "CLOUDFRONT_PRIVATE_KEY"
+    "DEPENDENCY_TRACK_API_KEY" "DTRACK_HTTP_PROXY_PASSWORD" "OPENSEARCH_PASSWORD"
+    "OIDC_CLIENT_SECRET" "LDAP_BIND_PASSWORD" "SMTP_PASSWORD" "GITHUB_TOKEN"
+    "PEER_API_KEY" "EDGE_API_KEY"
+    "SSO_ENCRYPTION_KEY" "MIGRATION_ENCRYPTION_KEY" "AK_WEBHOOK_SECRET_KEY" -}}
+{{- if toString (get $env $key) -}}
+{{- $found = append $found $key -}}
+{{- end -}}
+{{- end -}}
+{{- if regexMatch "^[A-Za-z][A-Za-z0-9+.-]*://[^/?#@]*:[^/?#@]+@" (toString (get $env "DATABASE_URL")) -}}
+{{- $found = append $found "DATABASE_URL" -}}
+{{- end -}}
+{{- join ", " $found -}}
+{{- end -}}
+
+{{/*
+Fail the render when backend.env carries credentials, unless
+backend.allowCredentialsInEnv acknowledges it (NOTES.txt then warns).
+*/}}
+{{- define "artifact-keeper.validateBackendEnvCredentials" -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's defaults, which lack this key. */ -}}
+{{- $allow := dig "allowCredentialsInEnv" false .Values.backend -}}
+{{- if not (kindIs "bool" $allow) -}}
+{{- fail "backend.allowCredentialsInEnv must be a boolean" -}}
+{{- end -}}
+{{- $found := include "artifact-keeper.backendEnvCredentials" . -}}
+{{- if and $found (not $allow) -}}
+{{- fail (printf "backend.env sets %s. backend.env is rendered in plaintext into the pod spec, where anyone who can read the Deployment, its pods or the Helm release can recover it. Move each one to backend.environmentSecrets (a secretKeyRef to a Secret you manage; see values.yaml) and rotate the exposed value, or set backend.allowCredentialsInEnv=true to accept the exposure (throwaway test installs only)." $found) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Optional backend encryption keys. Flags opt into conventional keys in an
+operator-managed Secret without putting credential-shaped placeholders in values.
+Validate only these env names; other backend environment wiring is independent.
+*/}}
+{{- define "artifact-keeper.encryptionKeyEnv" -}}
+{{- $root := . -}}
+{{- range $key := list
+    (dict "value" "migrationEncryptionKey" "flag" "migrationEncryptionKeyEnabled" "env" "MIGRATION_ENCRYPTION_KEY")
+    (dict "value" "webhookSecretKey" "flag" "webhookSecretKeyEnabled" "env" "AK_WEBHOOK_SECRET_KEY") -}}
+{{- $enabled := get $root.Values.secrets $key.flag -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail (printf "secrets.%s must be a boolean" $key.flag) -}}
+{{- end -}}
+{{- if and $enabled (or (not $root.Values.secrets.existingSecret) $root.Values.externalSecrets.enabled) -}}
+{{- fail (printf "secrets.%s requires secrets.existingSecret and externalSecrets.enabled=false" $key.flag) -}}
+{{- end -}}
+{{- $managed := or $enabled
+    (and $root.Values.externalSecrets.enabled (get $root.Values.externalSecrets.secrets $key.value))
+    (and (not $root.Values.externalSecrets.enabled) (get $root.Values.secrets $key.value)) -}}
+{{- $sources := 0 -}}
+{{- if $managed -}}{{- $sources = add $sources 1 -}}{{- end -}}
+{{- if hasKey $root.Values.backend.env $key.env -}}{{- $sources = add $sources 1 -}}{{- end -}}
+{{- range $root.Values.backend.environmentSecrets -}}
+{{- if eq .name $key.env -}}{{- $sources = add $sources 1 -}}{{- end -}}
+{{- end -}}
+{{- if gt $sources 1 -}}
+{{- fail (printf "%s has multiple definitions; use only one of chart secret wiring, backend.env, or backend.environmentSecrets" $key.env) -}}
+{{- end -}}
+{{- if $managed }}
+- name: {{ $key.env }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "artifact-keeper.secretName" $root }}
+      key: {{ $key.env }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -555,6 +759,136 @@ only the keys present there take effect, the rest stay component-aware.
 {{- end -}}
 {{- end -}}
 {{- (dict "quota" $quota "limitRange" $spec.limitRange) | toYaml -}}
+{{- end -}}
+
+{{/*
+The native package-format path prefixes that route to the backend, as a
+space-separated string. Consumed by artifact-keeper.backendPaths (_routing.tpl,
+which feeds the Ingress and the Gateway API HTTPRoute) and by the OpenShift
+Routes (route.yaml) via `splitList " " (trim ...)`, so they never drift out of
+sync. Does NOT include /api, /v2, /health, or /ready — those carry their own
+pathType/handling (see artifact-keeper.backendPaths and route.yaml).
+
+Keep this in step with the `format_routes` nests in the backend's
+backend/src/api/routes.rs. /lxc is the incus alias, /general the generic
+format, and /t the rattler/pixi conda-token prefix (/t/<token>/conda/...).
+tests/test_httproute.py holds an independent copy of this inventory.
+*/}}
+{{- define "artifact-keeper.backendFormatPaths" -}}
+/general /maven /npm /pypi /nuget /cargo /gems /go /helm /debian /rpm /alpine /pacman /composer /conan /conda /t /swift /terraform /cocoapods /hex /pub /lfs /ivy /chef /puppet /ansible /cran /bazel /huggingface /jetbrains /vscode /proto /incus /lxc /ext
+{{- end -}}
+
+{{/*
+Render one OpenShift Route. An OpenShift Route targets a single Service, so the
+single-host/many-paths Ingress is expressed as one Route per path; the HAProxy
+router does longest-path-prefix matching, so specific backend paths win over the
+"/" web catch-all. Call with a dict:
+  root        - the top-level "." (for labels)
+  name        - metadata.name
+  host        - shared external hostname (required; see route.yaml)
+  path        - spec.path prefix
+  service     - target Service name
+  targetPort  - service port name or number
+  annotations - route annotations map
+  tls         - .Values.route.tls (enabled/termination/insecureEdgeTerminationPolicy)
+*/}}
+{{- define "artifact-keeper.routeObject" -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "artifact-keeper.labels" .root | nindent 4 }}
+    app.kubernetes.io/component: route
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  host: {{ .host | quote }}
+  path: {{ .path }}
+  to:
+    kind: Service
+    name: {{ .service }}
+    weight: 100
+  port:
+    targetPort: {{ .targetPort }}
+  {{- if .tls.enabled }}
+  tls:
+    termination: {{ .tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .tls.insecureEdgeTerminationPolicy }}
+  {{- end }}
+  wildcardPolicy: None
+{{- end -}}
+
+{{/*
+NetworkPolicy `from` peers for the ingress controller (backend, web and edge
+policies). networkPolicy.ingressPeers, when non-empty, is rendered verbatim so
+non-nginx controllers (the OpenShift router, Traefik, a Gateway) can be
+admitted. Empty keeps the historical ingress-nginx peer, namespace-pinned via
+networkPolicy.ingressNamespace.
+*/}}
+{{- define "artifact-keeper.networkPolicy.ingressPeers" -}}
+{{- if .Values.networkPolicy.ingressPeers -}}
+{{- toYaml .Values.networkPolicy.ingressPeers -}}
+{{- else -}}
+{{- if .Values.networkPolicy.ingressNamespace }}
+- namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | quote }}
+{{- else }}
+# Explicit empty selector = ALL namespaces. It must be `{}` and not an
+# omitted/null value: a nil namespaceSelector means "this namespace
+# only", which would deny the ingress controller and take the instance
+# offline.
+- namespaceSelector: {}
+{{- end }}
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+{{- end -}}
+{{- end -}}
+
+{{/*
+NetworkPolicy `from` peers admitted to the Prometheus scrape ports of the
+backend, web and edge policies. networkPolicy.monitoringPeers, when non-empty,
+is rendered verbatim (for example a podSelector for the Prometheus pods).
+Empty keeps the namespace peer: every pod in networkPolicy.monitoringNamespace,
+matched on the kubernetes.io/metadata.name label Kubernetes stamps on every
+namespace (a bare `name` label matches nothing).
+*/}}
+{{- define "artifact-keeper.networkPolicy.monitoringPeers" -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's defaults, which lack these keys. */ -}}
+{{- $namespace := dig "monitoringNamespace" "monitoring" .Values.networkPolicy -}}
+{{- if .Values.networkPolicy.monitoringPeers -}}
+{{- toYaml .Values.networkPolicy.monitoringPeers -}}
+{{- else -}}
+{{- if not $namespace -}}
+{{- fail "networkPolicy.monitoringNamespace must name the namespace Prometheus runs in (default monitoring), or set networkPolicy.monitoringPeers" -}}
+{{- end }}
+- namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $namespace | quote }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+DNS egress ports (UDP and TCP for each entry of networkPolicy.dnsPorts). An
+empty list would leave the DNS egress rule with no ports, which allows ALL
+egress, so it is rejected. OpenShift needs 5353: dns-default maps service port 53 to pod port
+5353, and NetworkPolicy matches the post-DNAT pod port.
+*/}}
+{{- define "artifact-keeper.networkPolicy.dnsPorts" -}}
+{{- $ports := .Values.networkPolicy.dnsPorts -}}
+{{- if not $ports -}}
+{{- fail "networkPolicy.dnsPorts must list at least one port (default [53])" -}}
+{{- end -}}
+{{- range $p := $ports }}
+- port: {{ $p }}
+  protocol: UDP
+- port: {{ $p }}
+  protocol: TCP
+{{- end -}}
 {{- end -}}
 
 {{/*

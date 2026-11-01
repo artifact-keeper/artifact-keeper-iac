@@ -13,7 +13,7 @@ backend:
   image:
     # Tracks the latest published backend release (see the IMAGE TAGS note in
     # values.yaml — backend and web release on independent cadences).
-    tag: "1.7.1"
+    tag: "1.11.10"
   env:
     RUST_LOG: "info"
     ENVIRONMENT: "production"
@@ -54,7 +54,7 @@ web:
     # Tracks the latest published web release, which drifts from the backend's
     # version because the two release independently (see the IMAGE TAGS note in
     # values.yaml).
-    tag: "1.8.0"
+    tag: "1.11.2"
   resources:
     requests:
       cpu: 500m
@@ -91,7 +91,11 @@ postgres:
   enabled: false
 
 externalDatabase:
-  host: ""  # Set to RDS endpoint
+  # Set to the RDS endpoint. When left empty, Dependency-Track reads its JDBC
+  # host and port from the POSTGRES_HOST and POSTGRES_PORT keys of
+  # existingSecret below, so that Secret must then carry them as well as
+  # DATABASE_URL (the pod will not start without them).
+  host: ""
   port: 5432
   username: artifact_keeper
   password: ""
@@ -107,9 +111,10 @@ opensearch:
   clusterName: artifact-keeper-prod
   # -- 2 GiB JVM heap. Container memory limit must be roughly 2x this.
   javaOpts: "-Xms2g -Xmx2g"
-  # -- For production, disable the demo security plugin and provision
-  # TLS certs (see charts/artifact-keeper/README.md). Until real certs
-  # are in place, leaving disableSecurityPlugin=true is still safer than
+  # -- The chart does not provision the TLS certificates the OpenSearch
+  # Security plugin needs yet (iac#379), so this stays true. The
+  # opensearch NetworkPolicy (networkPolicy.enabled below) limits :9200 to
+  # the backend pods. Leaving disableSecurityPlugin=true is still safer than
   # shipping demo certs/keys.
   disableSecurityPlugin: true
   allowInvalidCerts: false

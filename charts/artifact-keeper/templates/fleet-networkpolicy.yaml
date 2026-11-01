@@ -44,10 +44,7 @@ spec:
   egress:
     # DNS resolution.
     - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+        {{- include "artifact-keeper.networkPolicy.dnsPorts" . | trim | nindent 8 }}
     # Intra-namespace traffic.
     - to:
         - podSelector: {}

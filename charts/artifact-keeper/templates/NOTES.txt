@@ -14,6 +14,18 @@ security policies, and operational needs before use in production.
   URL: {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
 {{- end }}
 
+{{- if .Values.httpRoute.enabled }}
+HTTPRoute: {{ include "artifact-keeper.fullname" . }}
+  Hostnames: {{ join ", " .Values.httpRoute.hostnames }}
+  The referenced Gateway listener controls HTTP/HTTPS and TLS certificates.
+  Check the route's Accepted and ResolvedRefs status and the Gateway's
+  allowedRoutes before sending traffic.
+  {{- if .Values.httpRoute.dtrack.enabled }}
+  /dtrack is publicly routed without rewriting, as with Ingress. Protect it
+  with authentication you control.
+  {{- end }}
+{{- end }}
+
 Backend API:
   kubectl port-forward svc/{{ include "artifact-keeper.fullname" . }}-backend {{ .Values.backend.service.httpPort }}:{{ .Values.backend.service.httpPort }}
 
@@ -54,10 +66,76 @@ WARNING: ALLOW_HTTP_INTEGRATIONS=1 is set on the backend
   integration requires it unless you put TLS in front of Dependency-Track.
 {{- end }}
 
+{{- $benv := .Values.backend.env | default dict }}
+{{- $presign := has (lower (toString (get $benv "PRESIGNED_DOWNLOADS_ENABLED"))) (list "true" "1") }}
+{{- $s3Redirect := has (lower (toString (get $benv "S3_REDIRECT_DOWNLOADS"))) (list "true" "1") }}
+{{- $azRedirect := has (lower (toString (get $benv "AZURE_REDIRECT_DOWNLOADS"))) (list "true" "1") }}
+{{- if and $presign $s3Redirect (get $benv "S3_ENDPOINT") (not (get $benv "S3_PUBLIC_ENDPOINT")) }}
+
+WARNING: presigned S3 downloads are on but backend.env.S3_PUBLIC_ENDPOINT
+  is unset. Redirects (including the OCI blob 307) point clients at
+  S3_ENDPOINT={{ get $benv "S3_ENDPOINT" }}; if clients cannot reach that
+  address, every redirected download fails. Set S3_PUBLIC_ENDPOINT to the
+  scheme://host[:port] clients use, forwarded to the object store with the
+  Host header and path unchanged (SigV4 signs both).
+{{- end }}
+{{- if and $presign $azRedirect (get $benv "AZURE_STORAGE_ENDPOINT") (not (get $benv "AZURE_STORAGE_PUBLIC_ENDPOINT")) }}
+
+WARNING: presigned Azure downloads are on but
+  backend.env.AZURE_STORAGE_PUBLIC_ENDPOINT is unset. SAS redirects point
+  clients at AZURE_STORAGE_ENDPOINT={{ get $benv "AZURE_STORAGE_ENDPOINT" }};
+  set AZURE_STORAGE_PUBLIC_ENDPOINT if clients cannot reach it.
+{{- end }}
+
+{{- $clientIp := .Values.backend.clientIp | default dict }}
+{{- $proxyCidrs := ternary (toString (get $benv "RATE_LIMIT_TRUSTED_PROXY_CIDRS")) (toString (default "" $clientIp.trustedProxyCidrs)) (hasKey $benv "RATE_LIMIT_TRUSTED_PROXY_CIDRS") }}
+{{- $xffAuthz := ternary (lower (toString (get $benv "XFF_TRUSTED_FOR_AUTHZ"))) (toString (dig "xffTrustedForAuthz" false $clientIp)) (hasKey $benv "XFF_TRUSTED_FOR_AUTHZ") }}
+{{- if and .Values.backend.enabled $proxyCidrs (not (has $xffAuthz (list "true" "1"))) }}
+
+NOTE: trusted proxies are set (RATE_LIMIT_TRUSTED_PROXY_CIDRS={{ $proxyCidrs }})
+  and XFF_TRUSTED_FOR_AUTHZ is false. Rate limits use the X-Forwarded-For
+  client IP, but requests through these proxies have an unknown client IP for
+  allowed_cidrs permission conditions (IP-conditioned grants are denied) and
+  audit rows. Set backend.clientIp.xffTrustedForAuthz=true only if every proxy
+  in that range appends the address it received the request from.
+{{- end }}
+
+{{- if .Values.backend.enabled }}
+{{- with include "artifact-keeper.backendEnvCredentials" . }}
+
+WARNING: backend.env sets {{ . }}
+  (backend.allowCredentialsInEnv=true). These values are in plaintext in the
+  backend pod spec and the Helm release: anyone who can read the Deployment,
+  its pods or the release Secret can recover them. Move them to
+  backend.environmentSecrets and rotate them unless this is a throwaway
+  test install.
+{{- end }}
+{{- end }}
+
+{{- if and .Values.opensearch.enabled .Values.opensearch.disableSecurityPlugin }}
+
+WARNING: the bundled OpenSearch runs with its Security plugin disabled
+  (opensearch.disableSecurityPlugin=true): no authentication on :9200.
+  {{- if or .Values.networkPolicy.enabled (dig "networkPolicy" "enabled" true .Values.opensearch) }}
+  NetworkPolicy {{ include "artifact-keeper.fullname" . }}-opensearch admits :9200 from the backend pods
+  only{{ if (dig "networkPolicy" "extraFrom" list .Values.opensearch) }} (plus opensearch.networkPolicy.extraFrom){{ end }}, which holds only if your CNI enforces NetworkPolicy.
+  An OpenSearch profile with the Security plugin on is not shipped yet.
+  {{- else }}
+  No NetworkPolicy protects it (networkPolicy.enabled and
+  opensearch.networkPolicy.enabled are both false): ANY pod in the cluster
+  can read, modify and delete the search index. Enable
+  opensearch.networkPolicy.enabled unless something else restricts :9200.
+  {{- end }}
+{{- end }}
+
 {{- if .Values.serviceMonitor.enabled }}
 
 Monitoring:
-  ServiceMonitor is enabled. Prometheus will scrape /metrics from the backend.
+  ServiceMonitor is enabled. Prometheus will scrape {{ if .Values.backend.metricsListener.enabled }}/metrics on the metrics
+  listener (port {{ .Values.backend.metricsListener.port }}){{ else }}/api/v1/admin/metrics{{ end }} from the backend.
+  {{- if .Values.networkPolicy.enabled }}
+  The NetworkPolicies admit scrapes from {{ if .Values.networkPolicy.monitoringPeers }}networkPolicy.monitoringPeers{{ else }}namespace {{ dig "monitoringNamespace" "monitoring" .Values.networkPolicy }}{{ end }}.
+  {{- end }}
 {{- end }}
 
 {{- if eq (include "artifact-keeper.fleet.enabled" .) "true" }}
@@ -67,4 +145,13 @@ CAUTION: Fleet mode shares ONE object-storage bucket across instances,
   its own credentials (fleet.storage.existingSecret) scoped to its own
   prefix. Reusing one Secret across instances lets every instance read and
   overwrite every other instance's artifacts.
+{{- end }}
+
+{{- if and .Values.trivy.enabled .Values.scannerAdapter.enabled }}
+
+Scanner versions:
+  trivy server {{ .Values.trivy.image.tag }} and scanner-adapter {{ .Values.scannerAdapter.image.tag | default .Chart.AppVersion }}
+  must move together. With SCANNER_TRIVY_SERVER set, the adapter requires the
+  server to report the same trivy release as its bundled client (0.76.0 for
+  adapter 1.5.2); otherwise its readiness probe stays 503 and scans fail closed.
 {{- end }}

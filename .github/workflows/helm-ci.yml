@@ -6,70 +6,196 @@ on:
     paths:
       - "charts/**"
       - ".github/workflows/helm-ci.yml"
+      - ".github/scripts/test-encryption-secret-refs.py"
+      - ".github/scripts/requirements.txt"
   push:
     branches: [main]
     paths:
       - "charts/**"
       - ".github/workflows/helm-ci.yml"
+      - ".github/scripts/test-encryption-secret-refs.py"
+      - ".github/scripts/requirements.txt"
 
+# Concurrency: GitHub has no run-wide job cap and max-parallel only bounds
+# one matrix, so this workflow is staged with needs to keep at most four
+# hosted runners busy at once (it used to start 16 jobs in the same second):
+#
+#   1. lint, version-check (PRs only), image-tag-drift,
+#      gate-profiles                                         <= 4
+#   2. template-validation, max-parallel 4                   <= 4
+#   3. verify-image-references, max-parallel 3, and
+#      install-test (needs lint and template-validation)     <= 4
+#   4. httproute-tests, max-parallel 3, while install-test
+#      may still be running                                 <= 4
+#
+# The later stages use `if: ${{ !cancelled() }}` so a red or skipped earlier
+# job only orders them and never skips them; every check still reports.
+# When adding a job, give it a place in this chain.
 jobs:
   lint:
     name: Lint
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.16.3
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v5
         with:
           python-version: "3.12"
 
       - name: Set up chart-testing
         uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
 
+      - name: Install render test dependencies
+        run: |
+          pip install --disable-pip-version-check \
+            --only-binary :all: \
+            --require-hashes \
+            -r .github/scripts/requirements.txt
+
+      - name: Test encryption Secret references
+        run: python3 .github/scripts/test-encryption-secret-refs.py
+
       - name: Run chart-testing lint
         run: ct lint --target-branch main --charts charts/artifact-keeper/
 
       - name: Run helm lint
-        run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test
+        run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)
+
+      - name: Test image registry rendering
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_image_registry.py' -v
+
+      - name: Test backend client-IP rendering
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_client_ip.py' -v
+
+      - name: Test backend extra volume rendering
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_backend_extra_volumes.py' -v
+
+      - name: Test credential, OpenSearch and metrics policy rendering
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_security_posture.py' -v
+
+  gate-profiles:
+    name: Release Gate Profiles Render
+    # Stage 1 of the concurrency chain at the top of this file.
+    #
+    # The release gate (artifact-keeper-test) installs THIS chart from main
+    # with its own values profiles, which this repository never rendered: #380
+    # began refusing ADMIN_PASSWORD in backend.env, every gate profile set it
+    # there, chart CI was green, and the 1.11.1 Release Candidate died at
+    # `helm install` 14 minutes in (#384, artifact-keeper/artifact-keeper#4722).
+    # This renders the PR's chart with every profile the gate installs, read
+    # from artifact-keeper-test@main's helm/gate-profiles.txt, so a chart change
+    # that refuses the gate's values fails here. A deliberate contract change
+    # lands in artifact-keeper-test first (or together); then this goes green.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout artifact-keeper-test@main (the gate's profiles)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: artifact-keeper/artifact-keeper-test
+          ref: main
+          path: .gate-test
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          # The release gate's pin (artifact-keeper-test release-gate.yml), not
+          # this file's v3.16.3: this job answers "will the gate's install
+          # render", so it renders with the gate's Helm.
+          version: v3.22.1
+
+      - name: Render the chart with every release-gate profile
+        run: .gate-test/scripts/render-gate-profiles.sh --chart-dir charts/artifact-keeper
+
+  httproute-tests:
+    name: HTTPRoute Render Tests (Gateway API ${{ matrix.gateway-api }})
+    runs-on: ubuntu-24.04
+    # Stage 4 of the concurrency chain at the top of this file; install-test
+    # may still be running, hence three.
+    needs: verify-image-references
+    if: ${{ !cancelled() }}
+    strategy:
+      max-parallel: 3
+      matrix:
+        gateway-api: [v1.0.0, v1.4.1]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.16.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
+        with:
+          python-version: "3.12"
+      - name: Install render validation tools
+        run: |
+          pip install --disable-pip-version-check --only-binary :all: \
+            --require-hashes -r .github/scripts/requirements.txt
+          mkdir -p tmp
+          curl -fsSL --proto =https \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C tmp kubeconform
+          curl -fsSL --proto =https \
+            https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/${{ matrix.gateway-api }}/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml \
+            -o tmp/httproute-crd.yaml
+      - name: Assert routing and validate against official Gateway API schema
+        env:
+          KUBECONFORM: ./tmp/kubeconform
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_httproute.py' -v
 
   template-validation:
     name: "Template & Validate (${{ matrix.variant }})"
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
+    # Stage 2 of the concurrency chain at the top of this file.
+    needs: [lint, version-check, image-tag-drift]
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - variant: default
-            values_args: "--set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
+            values_args: "--set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
           - variant: production
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
-            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
+            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
           - variant: smoke
             values_args: "-f charts/artifact-keeper/values-smoke.yaml --set backend.image.tag=dev --set web.image.tag=dev"
           - variant: mesh-main
             values_args: "-f charts/artifact-keeper/values-mesh-main.yaml"
           - variant: mesh-peer
             values_args: "-f charts/artifact-keeper/values-mesh-peer.yaml"
+          - variant: openshift
+            values_args: "-f charts/artifact-keeper/values-openshift.yaml --set route.host=artifacts.apps.ci.example.com --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.16.3
 
@@ -83,9 +209,8 @@ jobs:
       - name: Install kubeconform
         run: |
           KUBECONFORM_VERSION=0.6.7
-          # ARC runners run as a non-root user that cannot write to
-          # /usr/local/bin, so extract to /tmp first then sudo mv.
-          # Matches the helm-docs install pattern in helm-docs.yml.
+          # Extract to /tmp first then sudo mv, matching the helm-docs
+          # install pattern in helm-docs.yml.
           curl -sSL --proto =https "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
             | tar xz -C /tmp kubeconform
           sudo mv /tmp/kubeconform /usr/local/bin/kubeconform
@@ -104,27 +229,32 @@ jobs:
 
   verify-image-references:
     name: "Verify Image References (${{ matrix.variant }})"
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
+    # Stage 3 of the concurrency chain at the top of this file. Three, not
+    # four, because install-test starts in the same stage.
+    needs: template-validation
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         include:
           - variant: default
-            values_args: "--set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
+            values_args: "--set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
           - variant: production
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
-            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=ci-nonprod-jwt-76ce00933faca9df20b027521d0b2a63a9b264c7155f7bd7 --set postgres.auth.password=ci-test"
+            values_args: "-f charts/artifact-keeper/values-staging.yaml --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
           - variant: smoke
             values_args: "-f charts/artifact-keeper/values-smoke.yaml --set backend.image.tag=dev --set web.image.tag=dev"
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.16.3
 
@@ -189,8 +319,16 @@ jobs:
           missing=()
           while IFS= read -r ref; do
             [ -z "${ref}" ] && continue
-            tag="${ref##*:}"
-            name="${ref%:*}"
+            if [[ "${ref}" == *@* ]]; then
+              # tag@digest (or bare @digest): probe the pinned digest, which
+              # is what the cluster pulls; the tag is informational.
+              tag="${ref#*@}"
+              name="${ref%%@*}"
+              case "${name##*/}" in *:*) name="${name%:*}" ;; esac
+            else
+              tag="${ref##*:}"
+              name="${ref%:*}"
+            fi
             case "${name}" in
               ghcr.io/*)
                 probe_name="${name#ghcr.io/}"
@@ -229,12 +367,12 @@ jobs:
   version-check:
     name: Chart Version Check
     if: github.event_name == 'pull_request'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -268,15 +406,15 @@ jobs:
     # the chart is deliberately held back a cycle.
     if: >-
       !contains(github.event.pull_request.labels.*.name, 'image-drift-ack')
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-ci-runners' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v5
         with:
           python-version: "3.12"
 
@@ -296,30 +434,28 @@ jobs:
 
   install-test:
     name: Install Test (k3d)
-    # Runs on the ak-beefy-runners ARC scale set (8 CPU / 16 Gi limit) so the
-    # k3d cluster + full artifact-keeper chart (backend, web, postgres, trivy,
-    # opensearch, dtrack) can stand up inside chart-testing's timeout window.
-    # The regular ak-ci-runners pool (4 CPU / 8 Gi) is too tight.
-    #
-    # Requires the ak-beefy-runners ARC scale set to be deployed to the
-    # runner cluster; its configuration is maintained outside this repo.
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'ak-beefy-runners' }}
+    # Hosted ubuntu-24.04 (4 vCPU / 16 GB on public repos) matches the memory of
+    # the ak-beefy-runners pool this job used on push (8 CPU / 16 Gi limit), and
+    # every pull_request run has already used a hosted runner: the k3d cluster
+    # plus the chart's ci/ values install in 4-6 minutes there, against 6-7 on
+    # beefy after queueing for up to two hours behind rocky's backlog.
+    runs-on: ubuntu-24.04
     needs: [lint, template-validation]
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.16.3
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v5
         with:
           python-version: "3.12"
 
@@ -333,9 +469,9 @@ jobs:
 
       - name: Install k3d
         run: |
-          # k3d installs k3s inside Docker (uses the DinD sidecar).
+          # k3d installs k3s inside the runner's Docker daemon.
           # Pin version for reproducibility. Extract binary to $HOME/.local/bin
-          # because the runner pod cannot write to /usr/local/bin.
+          # so the step needs no sudo.
           K3D_VERSION=v5.7.5
           mkdir -p "$HOME/.local/bin"
           curl -sL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \
@@ -378,7 +514,7 @@ jobs:
           # Single-server cluster, no LoadBalancer (not needed for chart-testing
           # install checks).
           #
-          # --snapshotter=native: the beefy runner's DinD sidecar uses overlayfs
+          # --snapshotter=native: the runner's Docker daemon uses overlayfs
           # as its storage driver. k3s runs its own embedded containerd inside
           # the k3d node container, and containerd defaults to overlayfs too.
           # Nested overlayfs is unsupported by the kernel, so containerd fails

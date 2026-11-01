@@ -54,44 +54,12 @@ spec:
     - host: {{ include "artifact-keeper.ingressHost" . }}
       http:
         paths:
-          # API and health endpoints
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "artifact-keeper.fullname" . }}-backend
-                port:
-                  number: {{ .Values.backend.service.httpPort }}
-          - path: /health
-            pathType: Exact
-            backend:
-              service:
-                name: {{ include "artifact-keeper.fullname" . }}-backend
-                port:
-                  number: {{ .Values.backend.service.httpPort }}
-          - path: /ready
-            pathType: Exact
-            backend:
-              service:
-                name: {{ include "artifact-keeper.fullname" . }}-backend
-                port:
-                  number: {{ .Values.backend.service.httpPort }}
-          # /metrics is not exposed publicly. Use the ServiceMonitor
-          # (servicemonitor.yaml) for Prometheus scraping via ClusterIP.
-          # OCI / Docker registry
-          - path: /v2
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "artifact-keeper.fullname" . }}-backend
-                port:
-                  number: {{ .Values.backend.service.httpPort }}
-          # Native package format handlers — route directly to backend
+          # API, health, OCI and native package paths; /metrics stays private.
           {{- $backendSvc := printf "%s-backend" (include "artifact-keeper.fullname" .) }}
           {{- $backendPort := .Values.backend.service.httpPort }}
-          {{- range list "/maven" "/npm" "/pypi" "/nuget" "/cargo" "/gems" "/go" "/helm" "/debian" "/rpm" "/alpine" "/composer" "/conan" "/conda" "/swift" "/terraform" "/cocoapods" "/hex" "/pub" "/lfs" "/ivy" "/chef" "/puppet" "/ansible" "/cran" "/huggingface" "/jetbrains" "/vscode" "/proto" "/incus" "/ext" }}
-          - path: {{ . }}
-            pathType: Prefix
+          {{- range include "artifact-keeper.backendPaths" . | fromYamlArray }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
             backend:
               service:
                 name: {{ $backendSvc }}

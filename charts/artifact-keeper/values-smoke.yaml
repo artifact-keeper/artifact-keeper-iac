@@ -31,6 +31,9 @@
 fullnameOverride: artifact-keeper
 
 backend:
+  # Throwaway test credentials in backend.env; acknowledged so the render's
+  # credential check (#375) passes. Never copy this into a real install.
+  allowCredentialsInEnv: true
   replicaCount: 1
   image:
     # Image tag is set explicitly by the caller (`--set backend.image.tag=...`).

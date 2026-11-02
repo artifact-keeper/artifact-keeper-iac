@@ -47,6 +47,9 @@ PINNED_VALUE_FILES = ("values.yaml", "values-production.yaml")
 
 RELEASE_TAG_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
+# This script lives at .github/scripts/, so the repository root is two levels up.
+REPO_ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
 
 def is_release_tag(tag: str) -> bool:
     """True for a plain X.Y.Z pin; False for "dev", "", or a prerelease."""
@@ -88,6 +91,14 @@ def latest_release_tag(repo: str) -> str:
     return tag[1:] if tag.startswith("v") else tag
 
 
+def resolve_chart_dir(chart_dir: str) -> str:
+    """Resolve --chart-dir, following symlinks, and refuse a path outside the repo."""
+    resolved = os.path.realpath(chart_dir)
+    if resolved != REPO_ROOT and not resolved.startswith(REPO_ROOT + os.sep):
+        sys.exit(f"--chart-dir must be inside the repository ({REPO_ROOT}): {chart_dir}")
+    return resolved
+
+
 def read_yaml(path: str):
     try:
         import yaml
@@ -101,6 +112,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--chart-dir", default="charts/artifact-keeper")
     args = parser.parse_args()
+    chart_dir = resolve_chart_dir(args.chart_dir)
 
     # Resolve every expected tag up front so an API outage degrades to a single
     # warning rather than a per-component mess.
@@ -120,7 +132,7 @@ def main() -> int:
 
     # 1. Image tag pins in the values files.
     for filename in PINNED_VALUE_FILES:
-        path = os.path.join(args.chart_dir, filename)
+        path = os.path.join(chart_dir, filename)
         if not os.path.exists(path):
             continue
         values = read_yaml(path)
@@ -137,7 +149,7 @@ def main() -> int:
                 drift.append(f"{filename}: {component}.image.tag is {pinned}, latest published is {expected}")
 
     # 2. appVersion tracks the backend.
-    chart_path = os.path.join(args.chart_dir, "Chart.yaml")
+    chart_path = os.path.join(chart_dir, "Chart.yaml")
     chart = read_yaml(chart_path)
     app_version = str(chart.get("appVersion", "")).strip()
     expected_app = latest["backend"]

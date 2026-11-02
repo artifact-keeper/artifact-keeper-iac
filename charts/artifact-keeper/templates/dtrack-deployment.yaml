@@ -253,7 +253,8 @@ data:
     #!/bin/sh
     # Bootstrap Dependency-Track: change the default admin password, then
     # generate an API key for the Automation team and store it in a shared
-    # volume or Kubernetes Secret for the backend. Optionally enables NVD mirroring.
+    # volume or Kubernetes Secret for the backend, and grant the Automation
+    # team the permissions the backend needs. Optionally enables NVD mirroring.
     #
     # With an externally managed dependencyTrack.existingApiKeySecret there
     # is no key to generate. Unless manageApiKeySecret is enabled, this Job
@@ -276,6 +277,9 @@ data:
     API_KEY_FILE="${DEPENDENCY_TRACK_API_KEY_FILE:-}"
     API_KEY_SECRET="${DEPENDENCY_TRACK_API_KEY_SECRET:-}"
     NVD_API_ENABLED="${NVD_API_ENABLED:-false}"
+    # dependencyTrack.bootstrap.automationPermissions, validated by the chart
+    # (uppercase identifiers only). Empty skips the permission grants.
+    AUTOMATION_PERMISSIONS="{{ include "artifact-keeper.dtrackAutomationPermissions" . }}"
 
     fail() {
       echo "[dtrack-init] ERROR: $1" >&2
@@ -321,19 +325,29 @@ data:
     # Generate a key only when the managed Secret or legacy key file is absent.
     # Externally supplied Secrets are never changed.
     NEED_KEY=false
+    # Grant the Automation team its permissions on every run, including when
+    # the key already exists, so installs bootstrapped before the grants
+    # existed (or whose grants were removed) are repaired on the next upgrade.
+    # Not with an operator-supplied dependencyTrack.existingApiKeySecret: that
+    # key may belong to any team, which the operator manages.
+    GRANT_PERMISSIONS=false
+    if { [ -n "$API_KEY_SECRET" ] || [ -n "$API_KEY_FILE" ]; } && [ -n "$AUTOMATION_PERMISSIONS" ]; then
+      GRANT_PERMISSIONS=true
+    fi
     if [ -n "$API_KEY_SECRET" ]; then
       if [ "$SECRET_HTTP" = "404" ]; then
         NEED_KEY=true
       fi
     elif [ -n "$API_KEY_FILE" ]; then
       if [ -f "$API_KEY_FILE" ] && [ -s "$API_KEY_FILE" ]; then
-        if [ "$NVD_API_ENABLED" != "true" ]; then
+        if [ "$NVD_API_ENABLED" != "true" ] && [ "$GRANT_PERMISSIONS" != "true" ]; then
           echo "[dtrack-init] API key already provisioned, nothing to do"
           exit 0
         fi
-        # Keep going only to apply dependencyTrack.bootstrap.nvdApiEnabled, so
-        # turning it on for an existing install takes effect on the next upgrade.
-        echo "[dtrack-init] API key already provisioned; applying NVD setting only"
+        # Keep going only to reconcile the Automation team permissions and
+        # dependencyTrack.bootstrap.nvdApiEnabled, so either takes effect on
+        # an existing install at the next upgrade.
+        echo "[dtrack-init] API key already provisioned; reconciling settings only"
       else
         NEED_KEY=true
       fi
@@ -386,7 +400,8 @@ data:
       echo "[dtrack-init] API key supplied through dependencyTrack.existingApiKeySecret; admin password reconciled, no key to generate"
     fi
 
-    if [ "$NEED_KEY" = "true" ]; then
+    TEAM_UUID=""
+    if [ "$NEED_KEY" = "true" ] || [ "$GRANT_PERMISSIONS" = "true" ]; then
       TEAMS=$(curl -sS -f "$DT_URL/api/v1/team" -H "Authorization: Bearer $TOKEN") \
         || fail "could not list teams"
 
@@ -405,14 +420,17 @@ data:
         "") fail "could not extract the Automation team UUID. The Dependency-Track response shape may have changed." ;;
         *[!0-9A-Fa-f-]*) fail "extracted team UUID contains unexpected characters" ;;
       esac
+    fi
+
+    if [ "$NEED_KEY" = "true" ]; then
 
       # Generate a new key rather than reading one back from the team
       # listing: from 4.13 Dependency-Track hashes API keys and the listing
       # only carries a masked form. PUT /api/v1/team/{uuid}/key is the
       # generate call on every 4.x release (201 with the plaintext key in the
       # body, the only time it is returned); POST only regenerates an
-      # existing key. Each successful run adds one key to the team; the early
-      # exit above keeps that to once per shared volume.
+      # existing key. Each successful run adds one key to the team; NEED_KEY
+      # above keeps that to once per shared volume or managed Secret.
       echo "[dtrack-init] Generating an API key for the Automation team"
       KEY_RESP=$(curl -sS -f -X PUT "$DT_URL/api/v1/team/$TEAM_UUID/key" \
         -H "Authorization: Bearer $TOKEN" \
@@ -492,6 +510,33 @@ data:
       fi
     fi
 
+    # Grant the Automation team the permissions the backend needs (#168).
+    # Dependency-Track creates the team with BOM_UPLOAD and VIEW_PORTFOLIO
+    # only, so the backend's POST /api/v1/project failed with 403 and no SBOM
+    # ever reached Dependency-Track. POST /api/v1/permission/{name}/team/{uuid}
+    # is idempotent: 200 when it adds the permission, 304 when the team
+    # already has it. Runs after the key is stored, so a failure here leaves
+    # the key in place and the Job's retry only repeats the grants. A
+    # permission this Dependency-Track release does not know (404) fails the
+    # Job; remove it from dependencyTrack.bootstrap.automationPermissions.
+    if [ "$GRANT_PERMISSIONS" = "true" ]; then
+      GRANTED=""
+      PRESENT=""
+      FAILED=""
+      for PERM in $AUTOMATION_PERMISSIONS; do
+        PERM_HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+          -X POST "$DT_URL/api/v1/permission/$PERM/team/$TEAM_UUID" \
+          -H "Authorization: Bearer $TOKEN" || true)
+        case "$PERM_HTTP" in
+          200|201|204) GRANTED="$GRANTED $PERM" ;;
+          304) PRESENT="$PRESENT $PERM" ;;
+          *) FAILED="$FAILED $PERM(HTTP $PERM_HTTP)" ;;
+        esac
+      done
+      echo "[dtrack-init] Automation team permissions: granted${GRANTED:- none}; already present${PRESENT:- none}${FAILED:+; failed$FAILED}"
+      [ -z "$FAILED" ] || fail "could not grant Automation team permission(s):$FAILED"
+    fi
+
     # Opt-in (dependencyTrack.bootstrap.nvdApiEnabled): switch NVD mirroring
     # to the NVD REST API 2.0. Off by default because, without an NVD API key
     # (set in the Dependency-Track UI), the API is heavily rate-limited, and
@@ -536,9 +581,10 @@ metadata:
     # by hand. before-hook-creation deletes the previous Job before each run
     # (same pattern as fleet-db-bootstrap-job.yaml). post-install/post-upgrade
     # rather than pre-*: the Job needs the Dependency-Track Deployment, the
-    # Secret, and the script ConfigMap to exist first. The script exits 0
-    # immediately when the API key is already provisioned, so re-running on
-    # every upgrade is cheap.
+    # Secret, and the script ConfigMap to exist first. When the API key is
+    # already provisioned the script only logs in and reconciles the
+    # Automation team permissions (and the NVD setting, when enabled), so
+    # re-running on every upgrade is cheap.
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "0"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded

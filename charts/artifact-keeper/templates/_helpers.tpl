@@ -275,6 +275,28 @@ passed to forceChangePassword; Dependency-Track rejects an empty password with
 {{- end -}}
 
 {{/*
+Space-separated Dependency-Track permission names the bootstrap Job grants to
+the Automation team (dependencyTrack.bootstrap.automationPermissions). Each
+entry must be an uppercase permission identifier such as BOM_UPLOAD; anything
+else fails the render, because the names are interpolated into the bootstrap
+script and a request path. `dig` falls back to the chart default for
+`helm upgrade --reuse-values` from a chart that predates the key.
+*/}}
+{{- define "artifact-keeper.dtrackAutomationPermissions" -}}
+{{- $default := list "BOM_UPLOAD" "PROJECT_CREATION_UPLOAD" "PORTFOLIO_MANAGEMENT" "VIEW_PORTFOLIO" "VIEW_VULNERABILITY" "VULNERABILITY_ANALYSIS" -}}
+{{- $perms := dig "bootstrap" "automationPermissions" $default .Values.dependencyTrack -}}
+{{- if not (kindIs "slice" $perms) -}}
+{{- fail "dependencyTrack.bootstrap.automationPermissions must be a list of Dependency-Track permission names, e.g. [BOM_UPLOAD, VIEW_PORTFOLIO]" -}}
+{{- end -}}
+{{- range $perms -}}
+{{- if not (and (kindIs "string" .) (regexMatch "^[A-Z][A-Z0-9_]*$" .)) -}}
+{{- fail (printf "dependencyTrack.bootstrap.automationPermissions entry %q is not a Dependency-Track permission name (uppercase letters, digits and underscores, e.g. BOM_UPLOAD)" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- join " " (uniq $perms) -}}
+{{- end -}}
+
+{{/*
 Whether the Dependency-Track API key travels through the shared-config volume.
 False when dependencyTrack.existingApiKeySecret supplies it instead: the volume,
 its mount, DEPENDENCY_TRACK_API_KEY_FILE and the claim are all skipped, and the

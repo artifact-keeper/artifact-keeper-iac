@@ -1345,6 +1345,24 @@ dependencyTrack:
     # including existing installs; setting it back to false leaves the
     # property as it is rather than turning mirroring off.
     nvdApiEnabled: false
+    # -- Dependency-Track permissions the bootstrap Job grants to the
+    # Automation team, whose API key the backend uses. Dependency-Track
+    # creates that team with BOM_UPLOAD and VIEW_PORTFOLIO only, which makes
+    # the backend's project creation fail with 403 and no SBOM reach
+    # Dependency-Track. Granted on every Job run (install and upgrade, also
+    # when the key already exists) in the shared-volume and
+    # manageApiKeySecret modes; not with an operator-supplied
+    # existingApiKeySecret, whose team the operator manages. Grants are
+    # additive: removing an entry does not revoke it. Entries must be
+    # uppercase permission names; an unknown name fails the Job. Set to []
+    # to skip the grants.
+    automationPermissions:
+      - BOM_UPLOAD
+      - PROJECT_CREATION_UPLOAD
+      - PORTFOLIO_MANAGEMENT
+      - VIEW_PORTFOLIO
+      - VIEW_VULNERABILITY
+      - VULNERABILITY_ANALYSIS
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}

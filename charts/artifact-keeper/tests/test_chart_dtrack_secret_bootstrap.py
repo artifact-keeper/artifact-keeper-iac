@@ -18,6 +18,10 @@ MANAGED = {"dependencyTrack": {"existingApiKeySecret": "ak-dtrack-key",
            "bootstrap": {"manageApiKeySecret": True}}}
 NEW_KEY = "new-dtrack-key-1234567890"
 OLD_KEY = "existing-dtrack-key-1234567890"
+TEAM_UUID = "11111111-1111-1111-1111-111111111111"
+# dependencyTrack.bootstrap.automationPermissions default (#168).
+AUTOMATION_PERMISSIONS = ["BOM_UPLOAD", "PROJECT_CREATION_UPLOAD", "PORTFOLIO_MANAGEMENT",
+                          "VIEW_PORTFOLIO", "VIEW_VULNERABILITY", "VULNERABILITY_ANALYSIS"]
 
 
 def run_helm(values):
@@ -138,6 +142,10 @@ class BootstrapScriptTests(unittest.TestCase):
         self.generated = 0
         self.change_password = False
         self.password_changed = False
+        # Permissions the fake Automation team holds; Dependency-Track
+        # creates it with these two.
+        self.team_permissions = {"BOM_UPLOAD", "VIEW_PORTFOLIO"}
+        self.permission_status = None
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -161,7 +169,20 @@ class BootstrapScriptTests(unittest.TestCase):
                 elif self.path == "/api/v1/user/forceChangePassword":
                     owner.password_changed = True
                 elif self.path == "/api/v1/team":
-                    payload = [{"uuid": "11111111-1111-1111-1111-111111111111", "name": "Automation"}]
+                    payload = [{"uuid": TEAM_UUID, "name": "Automation"}]
+                elif self.path.startswith("/api/v1/permission/") and self.command == "POST":
+                    # POST /api/v1/permission/{name}/team/{uuid}: 200 when
+                    # added, 304 when the team already has it.
+                    parts = self.path.split("/")
+                    if (len(parts) != 7 or parts[5] != "team" or parts[6] != TEAM_UUID
+                            or self.headers.get("Authorization") != "Bearer test-dtrack-session-token"):
+                        status = 400
+                    elif owner.permission_status:
+                        status = owner.permission_status
+                    elif parts[4] in owner.team_permissions:
+                        status = 304
+                    else:
+                        owner.team_permissions.add(parts[4])
                 elif self.path.endswith("/key") and self.command == "PUT":
                     owner.generated += 1
                     payload = {"key": NEW_KEY}
@@ -177,6 +198,8 @@ class BootstrapScriptTests(unittest.TestCase):
                     status = 500
                 self.send_response(status)
                 self.end_headers()
+                if status == 304:
+                    return
                 if isinstance(payload, str):
                     self.wfile.write(payload.encode())
                 else:
@@ -208,6 +231,10 @@ class BootstrapScriptTests(unittest.TestCase):
             server.server_close()
         self.tmp.cleanup()
 
+    def permission_requests(self):
+        return [r[1].split("/")[4] for r in self.requests
+                if r[0] == "POST" and r[1].startswith("/api/v1/permission/")]
+
     def existing_secret(self, key):
         self.secret = {"data": {"API_KEY": base64.b64encode(key.encode()).decode()}}
         self.projected_key.write_text(key)
@@ -238,6 +265,11 @@ class BootstrapScriptTests(unittest.TestCase):
         kube_requests = [r for r in self.requests if r[1].startswith("/api/v1/namespaces/")]
         self.assertEqual([r[0] for r in kube_requests], ["GET", "POST"])
         self.assertTrue(all(r[3]["Authorization"] == "Bearer test-kubernetes-token" for r in kube_requests))
+        self.assertEqual(self.permission_requests(), AUTOMATION_PERMISSIONS)
+        self.assertEqual(self.team_permissions, set(AUTOMATION_PERMISSIONS))
+        self.assertIn("Automation team permissions: granted PROJECT_CREATION_UPLOAD "
+                      "PORTFOLIO_MANAGEMENT VIEW_VULNERABILITY VULNERABILITY_ANALYSIS; "
+                      "already present BOM_UPLOAD VIEW_PORTFOLIO", result.stdout)
 
     def test_existing_secret_is_preserved_without_generating_key(self):
         self.existing_secret(OLD_KEY)
@@ -247,6 +279,9 @@ class BootstrapScriptTests(unittest.TestCase):
         self.assertEqual(self.generated, 0)
         self.assertEqual(self.secret, original)
         self.assertFalse(any(r[0] == "POST" and r[1].endswith("/secrets") for r in self.requests))
+        # The key already exists, but the grants still run (#168).
+        self.assertEqual(self.permission_requests(), AUTOMATION_PERMISSIONS)
+        self.assertEqual(self.team_permissions, set(AUTOMATION_PERMISSIONS))
 
     def test_empty_existing_secret_fails_before_touching_dtrack(self):
         self.existing_secret("")
@@ -283,14 +318,31 @@ class BootstrapScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(path.read_text().strip(), NEW_KEY)
         self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(self.permission_requests(), AUTOMATION_PERMISSIONS)
         self.requests.clear()
         result = self.execute(managed=False, file=path)
         self.assertEqual(result.returncode, 0, result.stderr)
+        # The existing key is preserved; only the idempotent grants repeat.
         self.assertEqual(self.generated, 1)
-        self.assertEqual(self.requests, [])
+        self.assertEqual(path.read_text().strip(), NEW_KEY)
+        self.assertFalse(any(r[1].endswith("/key") for r in self.requests))
+        self.assertEqual(self.permission_requests(), AUTOMATION_PERMISSIONS)
+        self.assertIn("granted none; already present " + " ".join(AUTOMATION_PERMISSIONS),
+                      result.stdout)
+
+    def test_legacy_file_failed_grant_fails_after_storing_key(self):
+        self.permission_status = 404
+        path = self.root / "api-key"
+        result = self.execute(managed=False, file=path)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not grant Automation team permission(s): BOM_UPLOAD(HTTP 404)",
+                      result.stderr)
+        self.assertEqual(path.read_text().strip(), NEW_KEY)
 
     def test_operator_supplied_secret_only_reconciles_admin(self):
         result = self.execute(managed=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.generated, 0)
         self.assertFalse(any(r[1].startswith("/api/v1/namespaces/") for r in self.requests))
+        # An operator-supplied key's team is not touched.
+        self.assertEqual(self.permission_requests(), [])

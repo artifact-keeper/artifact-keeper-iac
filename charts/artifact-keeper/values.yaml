@@ -948,8 +948,7 @@ postgres:
     # Postgres only applies the password when it first initializes its data
     # directory, so changing it here later doesn't change the database's
     # password, and a new install over a retained PVC needs the old one. Under
-    # Argo CD, Flux or plain `helm template`, set it or use
-    # secrets.existingSecret. If you supply your own, it goes into DATABASE_URL
+    # Argo CD or plain `helm template`, set it or use secrets.existingSecret. If you supply your own, it goes into DATABASE_URL
     # unencoded, so avoid URL-reserved characters.
     password: ""
     database: artifact_registry
@@ -1426,10 +1425,8 @@ dependencyTrack:
   # the password (to log into the Dependency-Track UI yourself) or if you
   # manage the Secret externally, in which case this key must be present there.
   # Stability relies on Helm's lookup, which only works when Helm talks to a
-  # live cluster. GitOps engines that render with "helm template" (ArgoCD,
-  # Flux) never see the stored value; this repo's ApplicationSet compensates
-  # with ignoreDifferences + RespectIgnoreDifferences on this Secret key. Other
-  # template-mode consumers should replicate that or set the password here.
+  # live cluster. Engines that render with "helm template" (Argo CD) never see
+  # the stored value, so set the password here or use secrets.existingSecret.
   adminPassword: ""
   # -- Size limit for the `/tmp` emptyDir volume. DependencyTrack writes
   # ~1-2Gi into /tmp during startup (NVD mirror sync, DB migrations, JVM
@@ -1778,9 +1775,11 @@ secrets:
   # empty, and keep them across upgrades by reading them back from the chart's
   # Secret. A value you supply always wins, and this doesn't apply with
   # existingSecret or External Secrets. Reading the Secret needs a live cluster:
-  # Argo CD, Flux and plain `helm template` generate new values on every render,
-  # and a new Postgres password stops matching the existing database, so with
-  # those tools set both values or use existingSecret. Set false to fail the
+  # Argo CD and plain `helm template` generate new values on every render, and a
+  # new Postgres password stops matching the existing database, so with those
+  # tools set both values or use existingSecret. While it holds a generated value,
+  # the chart's Secret has helm.sh/resource-policy: keep, so helm uninstall leaves
+  # it in place. Set false to fail the
   # render when a value is missing, as values-production.yaml and
   # values-staging.yaml do. See "Generated credentials" in the README.
   generate: true

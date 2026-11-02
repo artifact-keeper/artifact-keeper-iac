@@ -351,14 +351,11 @@ the release.
 Note that lookup returns nothing during "helm template" and "--dry-run", since
 there is no cluster to read. For a one-off render that is harmless: the
 manifest simply shows a throwaway value. It matters a great deal under GitOps
-engines that deploy by re-running "helm template" (ArgoCD, Flux): there, step 2
-never fires and every sync would generate a fresh password, silently desyncing
-the Secret from the password Dependency-Track actually holds. The ArgoCD
-ApplicationSet in this repo handles that with ignoreDifferences on this Secret
-key plus the RespectIgnoreDifferences sync option, so the live value is kept
-after first creation. If you consume this chart through another template-mode
-engine, either replicate that ignore rule or set dependencyTrack.adminPassword
-explicitly.
+engines that deploy by re-running "helm template" (Argo CD): there, step 2 never
+fires and every sync would generate a fresh password, silently desyncing the
+Secret from the password Dependency-Track actually holds. With such an engine, set
+dependencyTrack.adminPassword explicitly or use secrets.existingSecret, as the dev
+element of this repo's ApplicationSet does (values-dev.yaml).
 
 Previously this defaulted to an empty string, which the bootstrap script then
 passed to forceChangePassword; Dependency-Track rejects an empty password with

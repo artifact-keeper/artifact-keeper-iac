@@ -48,13 +48,13 @@ Generated credentials: {{ . }}
   These are unset, so the chart generated them and stored them in the Secret
   {{ include "artifact-keeper.secretName" $ }}. helm upgrade keeps the stored values.
 
-  - GitOps (Argo CD, Flux, plain "helm template"): these tools can't read the
-    Secret, so each render generates new values, and a new Postgres password
-    stops matching the existing database. Set these values or use
-    secrets.existingSecret instead.
-  - helm uninstall deletes the Secret but keeps the Postgres PVC, so a new
-    install generates a password the database won't accept. See "Recovering a
-    PostgreSQL password mismatch" in the chart README.
+  - Argo CD and plain "helm template" can't read the Secret, so each render
+    generates new values{{ if and $.Values.postgres.enabled (not $.Values.postgres.auth.password) }}, and a new Postgres password stops matching the
+    existing database{{ end }}. Set these values or use secrets.existingSecret instead.
+  - helm uninstall keeps this Secret, so a new install reuses the same values.
+    Delete it yourself when you no longer need it{{ if and $.Values.postgres.enabled (not $.Values.postgres.auth.password) }}. If it is lost while the
+    Postgres PVC remains, see "Recovering a PostgreSQL password mismatch" in the
+    chart README{{ end }}.
 
 {{ end -}}
 Backend API:

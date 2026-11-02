@@ -1,0 +1,26 @@
+# =============================================================================
+# DEV PROFILE - the dev element of argocd/applicationset.yaml
+# =============================================================================
+# Argo CD renders with `helm template`, which can't read a stored Secret back, so
+# chart-generated credentials would change on every render. Dev therefore reads
+# them from a Secret you create. Nothing is generated, and the chart renders no
+# Secret of its own in this profile.
+#
+# Create it before the first sync:
+#
+#   kubectl create namespace artifact-keeper-dev
+#   PG=$(openssl rand -hex 16)
+#   kubectl -n artifact-keeper-dev create secret generic artifact-keeper-dev-credentials \
+#     --from-literal=JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n')" \
+#     --from-literal=POSTGRES_PASSWORD="$PG" \
+#     --from-literal=DATABASE_URL="postgresql://registry:$PG@artifact-keeper-dev-postgres:5432/artifact_registry" \
+#     --from-literal=DEPENDENCY_TRACK_ADMIN_PASSWORD="$(openssl rand -hex 16)"
+#
+# If dev already synced with a chart-generated Secret, Postgres keeps the password
+# it was initialized with: copy POSTGRES_PASSWORD, DATABASE_URL, JWT_SECRET and
+# DEPENDENCY_TRACK_ADMIN_PASSWORD from that Secret instead of making new ones. Do
+# this first, because the next sync prunes the old Secret.
+# =============================================================================
+
+secrets:
+  existingSecret: artifact-keeper-dev-credentials

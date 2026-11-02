@@ -17,9 +17,13 @@ spec:
   generators:
     - list:
         elements:
+          # Dev reads its credentials from a Secret you create before the first
+          # sync; values-dev.yaml has the command. Don't leave them to the chart
+          # here: Argo CD renders without lookup, so generated values would change
+          # on every render, and Postgres would keep the old password.
           - env: dev
             namespace: artifact-keeper-dev
-            valuesFile: values.yaml
+            valuesFile: values-dev.yaml
             targetRevision: main
             imageTag: dev
             imageUpdateStrategy: digest
@@ -72,26 +76,6 @@ spec:
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{ .namespace }}"
-      # The chart generates DEPENDENCY_TRACK_ADMIN_PASSWORD with randAlphaNum
-      # when dependencyTrack.adminPassword is unset. The chart's lookup-based
-      # stability only works when Helm runs against a live cluster; ArgoCD
-      # renders with `helm template` where lookup returns nothing, so every
-      # sync would otherwise mint a fresh password and desync the Secret from
-      # the password Dependency-Track actually has. Ignoring that one field
-      # (together with RespectIgnoreDifferences below) makes ArgoCD keep the
-      # live value after the initial creation.
-      #
-      # The same applies to JWT_SECRET and POSTGRES_PASSWORD on the dev profile,
-      # which leaves secrets.jwtSecret and postgres.auth.password to the chart: a
-      # new Postgres password every sync would stop matching the database.
-      # DATABASE_URL embeds that password, so it is pinned with it.
-      ignoreDifferences:
-        - kind: Secret
-          jsonPointers:
-            - /data/DEPENDENCY_TRACK_ADMIN_PASSWORD
-            - /data/JWT_SECRET
-            - /data/POSTGRES_PASSWORD
-            - /data/DATABASE_URL
       syncPolicy:
         {{- if eq .autoSync "true" }}
         automated:
@@ -101,7 +85,6 @@ spec:
         syncOptions:
           - CreateNamespace=true
           - ServerSideApply=true
-          - RespectIgnoreDifferences=true
         retry:
           limit: 3
           backoff:

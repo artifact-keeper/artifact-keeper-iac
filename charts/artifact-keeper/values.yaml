@@ -164,9 +164,10 @@ backend:
   # Each entry maps a container env var name to a Secret key reference. An
   # entry wins over the same key in `backend.env` (the default
   # `ADMIN_PASSWORD: ""` placeholder there needs no change).
-  # For MIGRATION_ENCRYPTION_KEY and AK_WEBHOOK_SECRET_KEY, also leave the
-  # corresponding secrets.* value empty and *Enabled flag false (or the
-  # externalSecrets.secrets.* path empty); duplicate definitions fail rendering.
+  # For MIGRATION_ENCRYPTION_KEY, AK_WEBHOOK_SECRET_KEY and SSO_ENCRYPTION_KEY,
+  # also leave the corresponding secrets.* value empty and *Enabled flag false
+  # (or the externalSecrets.secrets.* path empty); duplicate definitions fail
+  # rendering.
   # Example (create the Secret first, for instance with
   # `kubectl create secret generic ak-admin-credentials
   #  --from-literal=ADMIN_PASSWORD="$(openssl rand -base64 24)"`):
@@ -232,7 +233,13 @@ backend:
     capabilities:
       drop:
         - ALL
-  # -- wait-for-opensearch init container image. Override for airgapped mirrors.
+  # -- wait-for-opensearch init container image (only that container uses
+  # it). Override for airgapped mirrors. A replacement must provide /bin/sh
+  # and wget (the readiness check is a shell loop of `wget -qO-` against
+  # OpenSearch's _cluster/health, over HTTPS unless
+  # opensearch.disableSecurityPlugin), plus grep, date and sleep: any
+  # busybox- or alpine-compatible image works; distroless or scratch images
+  # do not. Runs with backend.initContainerSecurityContext.
   waitForOpenSearch:
     image:
       repository: alpine
@@ -283,6 +290,46 @@ backend:
     # makes the client IP forgeable. Behind SNAT or a load balancer that hides
     # the client before the first proxy, no setting recovers the real address.
     xffTrustedForAuthz: false
+  # -- Diagnostics log settings (backend 1.11.2+). Field reference:
+  # docs/operations/logging.md in the artifact-keeper backend repository. Each
+  # value is rendered as its environment variable only when it differs from
+  # the backend default, so the defaults add nothing to the pod spec. A
+  # backend.env entry with the same name wins while the value here is left at
+  # its default, and must match it otherwise.
+  logging:
+    # -- Rendered as LOG_FORMAT. `text` (the default) is the human-readable
+    # line format; `json` writes one flat JSON object per line with `method`,
+    # `uri`, `correlation_id`, `status`, `user`, `ip`, `latency_ms` and
+    # `http.route` as top-level keys, for Loki or SIEM rules. Any other value
+    # fails the render.
+    format: text
+    # -- Rendered as LOG_ANSI: ANSI colour in the `text` format. `auto` (the
+    # default) colours only when stdout is a terminal, which a pod's stdout is
+    # not; `true` or `false` forces it, for example for `kubectl logs` against
+    # a TTY-attached debug container. Any other value fails the render.
+    ansi: auto
+  # -- Stuck-scan janitor, which reaps security scans left in `running` (for
+  # example by a backend pod that died mid-scan). Both values are null by default, which renders nothing and keeps the
+  # backend defaults. When set, each must be a positive integer; the backend
+  # clamps values below its floors (60 and 30 seconds). A backend.env entry
+  # with the same name must match the value here.
+  stuckScan:
+    # -- (int) Rendered as STUCK_SCAN_THRESHOLD_SECS: seconds a scan may stay
+    # `running` before the janitor reaps it (backend default 1800).
+    thresholdSecs: null
+    # -- (int) Rendered as STUCK_SCAN_CHECK_INTERVAL_SECS: seconds between janitor
+    # sweeps (backend default 600).
+    checkIntervalSecs: null
+  # -- Extra path prefixes routed to the backend, appended to the built-in
+  # package-format prefixes on the Ingress, the Gateway API HTTPRoute and the
+  # OpenShift Routes alike. Use it for a prefix the built-in list lacks, such
+  # as one served by a backend plugin. Each entry is a single path segment:
+  # "/" followed by lowercase letters, digits and inner hyphens (the OpenShift
+  # Route is named after it), for example "/myformat". Entries that repeat a
+  # built-in prefix (see artifact-keeper.backendFormatPaths in _helpers.tpl),
+  # /api, /v2, /health, /ready, /metrics, /dtrack or another entry fail the
+  # render.
+  extraFormatPaths: []
   env:
     RUST_LOG: "info,artifact_keeper=debug"
     HOST: "0.0.0.0"
@@ -361,7 +408,8 @@ backend:
     # JWT_ACCESS_TOKEN_EXPIRY_MINUTES: "30"
     # JWT_REFRESH_TOKEN_EXPIRY_DAYS: "7"
     # SKIP_ADMIN_PROVISIONING: "false"
-    # SSO_ENCRYPTION_KEY: ""
+    # SSO_ENCRYPTION_KEY: use secrets.ssoEncryptionKey (or its *Enabled
+    # flag / externalSecrets path) or backend.environmentSecrets instead.
 
     # -- OIDC
     # OIDC_ISSUER: ""
@@ -765,6 +813,18 @@ web:
   env:
     NEXT_PUBLIC_API_URL: ""
     NODE_ENV: "production"
+  backendAlias:
+    # -- Render a Service literally named `backend` (type ExternalName,
+    # pointing at this release's backend Service) in the release namespace.
+    # It exists for web images before 1.1.0, which baked
+    # http://backend:8080 into their rewrites at build time. Web 1.1.0 and
+    # later read BACKEND_URL at runtime, and the chart always sets it to the
+    # release-qualified backend Service, so the default web image does not
+    # need the alias. The alias claims the bare `backend` name in the
+    # namespace: disable it in shared namespaces or when several releases
+    # share one namespace, where that name collides. Disabling also drops
+    # `backend` from the generated NO_PROXY list.
+    enabled: true
   resources:
     requests:
       cpu: 250m
@@ -1014,7 +1074,15 @@ opensearch:
     capabilities:
       drop:
         - ALL
-  # -- fix-ownership and sysctl-check init container image. Override for airgapped mirrors.
+  # -- Image shared by both OpenSearch init containers, fix-ownership and
+  # sysctl-check (the backend's wait-for-opensearch uses
+  # backend.waitForOpenSearch.image instead). Override for airgapped
+  # mirrors. A replacement must provide `sh` and `chown` (fix-ownership runs
+  # `chown -R` on the data volume) and `cat` (sysctl-check reads
+  # /proc/sys/vm/max_map_count): any busybox- or alpine-compatible image
+  # works; distroless or scratch images do not. Security contexts are
+  # separate: opensearch.initContainerSecurityContext applies only to
+  # sysctl-check, and fix-ownership uses opensearch.fixOwnership.securityContext.
   initContainers:
     image:
       repository: busybox
@@ -1426,6 +1494,24 @@ dependencyTrack:
     # including existing installs; setting it back to false leaves the
     # property as it is rather than turning mirroring off.
     nvdApiEnabled: false
+    # -- Dependency-Track permissions the bootstrap Job grants to the
+    # Automation team, whose API key the backend uses. Dependency-Track
+    # creates that team with BOM_UPLOAD and VIEW_PORTFOLIO only, which makes
+    # the backend's project creation fail with 403 and no SBOM reach
+    # Dependency-Track. Granted on every Job run (install and upgrade, also
+    # when the key already exists) in the shared-volume and
+    # manageApiKeySecret modes; not with an operator-supplied
+    # existingApiKeySecret, whose team the operator manages. Grants are
+    # additive: removing an entry does not revoke it. Entries must be
+    # uppercase permission names; an unknown name fails the Job. Set to []
+    # to skip the grants.
+    automationPermissions:
+      - BOM_UPLOAD
+      - PROJECT_CREATION_UPLOAD
+      - PORTFOLIO_MANAGEMENT
+      - VIEW_PORTFOLIO
+      - VIEW_VULNERABILITY
+      - VULNERABILITY_ANALYSIS
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}
@@ -1604,8 +1690,14 @@ route:
   dtrack:
     # -- Publish a /dtrack Route to the bundled Dependency-Track service.
     # Mirrors ingress.dtrack.enabled; only has effect when
-    # dependencyTrack.enabled is true.
+    # dependencyTrack.enabled is true. Also enables Dependency-Track's CORS
+    # settings (ALPINE_CORS_*), as ingress.dtrack and httpRoute.dtrack do.
     enabled: false
+    # -- Dependency-Track ALPINE_CORS_ALLOW_ORIGIN when exposed through the
+    # /dtrack Route. Empty derives the origin from route.host: https://<host>
+    # when route.tls.enabled, otherwise http://<host>. Set "*" or another
+    # origin to override.
+    corsAllowOrigin: ""
 
 # -- Gateway API routing through an existing Gateway. Mutually exclusive with
 # Ingress (ingress.enabled) and OpenShift Routes (route.enabled).
@@ -1628,6 +1720,26 @@ httpRoute:
     enabled: false
     # -- Dependency-Track ALPINE_CORS_ALLOW_ORIGIN when routed through HTTPRoute.
     corsAllowOrigin: "*"
+  # -- Gateway API `timeouts` (HTTPRouteTimeouts) on the rules that route to the
+  # backend: /api, /v2, /health, /ready and every package-format path. Large
+  # artifact uploads and downloads can outlast a Gateway's default request
+  # timeout, which then cuts the transfer off (#358). The web catch-all and
+  # /dtrack rules are left without timeouts and keep the Gateway's default.
+  # Values are Gateway API duration strings (GEP-2257): one to four
+  # <number><unit> groups with h, m, s or ms, such as "300s" or "1h30m"; "0s"
+  # disables the timeout. Empty (the default) omits the field. backendRequest
+  # may not exceed request unless request is "0s". Requires the HTTPRoute CRD
+  # from Gateway API v1.2.0 or later (standard channel): the v1.0 and v1.1
+  # standard CRDs have no `timeouts` field, so the API server drops it and the
+  # Gateway default stays in force. Support is "Extended" in Gateway API, so
+  # check that your Gateway implementation honours it.
+  timeouts:
+    # -- Rendered as rules[].timeouts.request: the whole request and response
+    # exchange, client to Gateway.
+    request: ""
+    # -- Rendered as rules[].timeouts.backendRequest: one request from the
+    # Gateway to the backend, including retries.
+    backendRequest: ""
   # -- Narrow additive access for Gateway data-plane pods when networkPolicy.enabled
   # or fleet.guardrails.networkPolicy is enabled. Both fields are then required.
   # Existing Ingress policies are unchanged; this does not resolve issue #306.
@@ -1663,7 +1775,9 @@ secrets:
   # filesystem storage or when using IAM roles (IRSA) for credentials.
   s3AccessKey: ""
   s3SecretKey: ""
-  # SMTP password (only used when backend.env.SMTP_HOST is set)
+  # SMTP password (only used when backend.env.SMTP_HOST is set). Ignored when
+  # externalSecrets.enabled: SMTP_PASSWORD is then injected whenever
+  # externalSecrets.secrets.smtpPassword is set, so leave this empty.
   smtpPassword: ""
   # Migration encryption key — required at runtime by the backend to
   # encrypt source-connection credentials in the migration_jobs table.
@@ -1685,6 +1799,20 @@ secrets:
   webhookSecretKey: ""
   # -- Inject AK_WEBHOOK_SECRET_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty webhookSecretKey.
   webhookSecretKeyEnabled: false
+  # -- SSO_ENCRYPTION_KEY: the key the backend encrypts stored SSO provider
+  # secrets (OIDC client secrets, LDAP bind passwords) and upstream repository credentials with. Empty
+  # (the default) sets nothing, and the backend falls back to JWT_SECRET, so
+  # rotating the JWT secret also breaks those stored values. Any non-empty
+  # string works; use a random value such as `openssl rand -hex 32`. The chart
+  # never generates it. WARNING: setting or changing it on an existing install
+  # re-keys: SSO secrets and upstream credentials stored under the previous key
+  # (JWT_SECRET when this was unset) can no longer be decrypted. Set it at first
+  # install, or re-enter those secrets and credentials after enabling it. With
+  # existingSecret, a nonempty value still enables the reference for
+  # compatibility; prefer ssoEncryptionKeyEnabled.
+  ssoEncryptionKey: ""
+  # -- Inject SSO_ENCRYPTION_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty ssoEncryptionKey. The re-keying warning on ssoEncryptionKey applies.
+  ssoEncryptionKeyEnabled: false
 
 # -- External Secrets Operator
 # When enabled, ExternalSecret CRDs replace the static Secret template.
@@ -1692,6 +1820,11 @@ secrets:
 # SecretStore or ClusterSecretStore configured for your provider.
 externalSecrets:
   enabled: false
+  # -- API version for the rendered ExternalSecret. The default,
+  # `external-secrets.io/v1`, needs an External Secrets Operator release that
+  # serves the v1 API; set `external-secrets.io/v1beta1` for older operators
+  # that serve only v1beta1. Must have the form external-secrets.io/<version>.
+  apiVersion: external-secrets.io/v1
   # Name of the SecretStore or ClusterSecretStore to reference.
   # If storeKind is ClusterSecretStore, the store must already exist.
   storeName: aws-secrets-manager
@@ -1706,6 +1839,9 @@ externalSecrets:
     s3Keys: artifact-keeper/${ENVIRONMENT}/s3-keys
     opensearchAuth: artifact-keeper/${ENVIRONMENT}/opensearch-auth
     dtAdminPassword: artifact-keeper/${ENVIRONMENT}/dt-admin-password
+    # SMTP_PASSWORD (property `smtp-password`). When set, the backend gets
+    # SMTP_PASSWORD from the synced Secret; secrets.smtpPassword is not needed.
+    # Set to "" if email delivery is not configured.
     smtpPassword: artifact-keeper/${ENVIRONMENT}/smtp-password
     # MIGRATION_ENCRYPTION_KEY — required at runtime to encrypt
     # source-connection credentials in the migration_jobs table. The
@@ -1718,6 +1854,13 @@ externalSecrets:
     # property name `webhook-secret-key`. Leave the value empty to skip
     # the ExternalSecret data entry (set this to a real path to enable).
     webhookSecretKey: ""
+    # SSO_ENCRYPTION_KEY — encrypts stored SSO provider secrets and upstream
+    # repository credentials (the backend falls back to JWT_SECRET without
+    # it). The AWS SM secret should expose this under the property name
+    # `sso-encryption-key`. Leave the value empty to skip the ExternalSecret
+    # data entry. Enabling it on an existing install re-keys: values stored
+    # under the old key become undecryptable (see secrets.ssoEncryptionKey).
+    ssoEncryptionKey: ""
 
 # -- Extra raw Kubernetes manifests to render alongside the chart. Each entry
 # is a YAML string (templated) emitted as its own document. Useful for objects

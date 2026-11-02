@@ -275,6 +275,28 @@ passed to forceChangePassword; Dependency-Track rejects an empty password with
 {{- end -}}
 
 {{/*
+Space-separated Dependency-Track permission names the bootstrap Job grants to
+the Automation team (dependencyTrack.bootstrap.automationPermissions). Each
+entry must be an uppercase permission identifier such as BOM_UPLOAD; anything
+else fails the render, because the names are interpolated into the bootstrap
+script and a request path. `dig` falls back to the chart default for
+`helm upgrade --reuse-values` from a chart that predates the key.
+*/}}
+{{- define "artifact-keeper.dtrackAutomationPermissions" -}}
+{{- $default := list "BOM_UPLOAD" "PROJECT_CREATION_UPLOAD" "PORTFOLIO_MANAGEMENT" "VIEW_PORTFOLIO" "VIEW_VULNERABILITY" "VULNERABILITY_ANALYSIS" -}}
+{{- $perms := dig "bootstrap" "automationPermissions" $default .Values.dependencyTrack -}}
+{{- if not (kindIs "slice" $perms) -}}
+{{- fail "dependencyTrack.bootstrap.automationPermissions must be a list of Dependency-Track permission names, e.g. [BOM_UPLOAD, VIEW_PORTFOLIO]" -}}
+{{- end -}}
+{{- range $perms -}}
+{{- if not (and (kindIs "string" .) (regexMatch "^[A-Z][A-Z0-9_]*$" .)) -}}
+{{- fail (printf "dependencyTrack.bootstrap.automationPermissions entry %q is not a Dependency-Track permission name (uppercase letters, digits and underscores, e.g. BOM_UPLOAD)" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- join " " (uniq $perms) -}}
+{{- end -}}
+
+{{/*
 Whether the Dependency-Track API key travels through the shared-config volume.
 False when dependencyTrack.existingApiKeySecret supplies it instead: the volume,
 its mount, DEPENDENCY_TRACK_API_KEY_FILE and the claim are all skipped, and the
@@ -440,6 +462,21 @@ backend.allowCredentialsInEnv acknowledges it (NOTES.txt then warns).
 {{- end -}}
 
 {{/*
+Returns "true" when the chart Secret carries SMTP_PASSWORD, so the backend
+should reference it. Mirrors the encryption-key wiring below: with
+externalSecrets.enabled the ExternalSecret maps the key whenever
+externalSecrets.secrets.smtpPassword is set, so secrets.smtpPassword (which
+then has nowhere to go) is not consulted; otherwise a nonempty
+secrets.smtpPassword enables the reference (into the chart-rendered Secret, or
+into secrets.existingSecret for compatibility).
+*/}}
+{{- define "artifact-keeper.smtpPasswordManaged" -}}
+{{- if .Values.externalSecrets.enabled -}}
+{{- if .Values.externalSecrets.secrets.smtpPassword -}}true{{- end -}}
+{{- else if .Values.secrets.smtpPassword -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Optional backend encryption keys. Flags opt into conventional keys in an
 operator-managed Secret without putting credential-shaped placeholders in values.
 Validate only these env names; other backend environment wiring is independent.
@@ -448,7 +485,8 @@ Validate only these env names; other backend environment wiring is independent.
 {{- $root := . -}}
 {{- range $key := list
     (dict "value" "migrationEncryptionKey" "flag" "migrationEncryptionKeyEnabled" "env" "MIGRATION_ENCRYPTION_KEY")
-    (dict "value" "webhookSecretKey" "flag" "webhookSecretKeyEnabled" "env" "AK_WEBHOOK_SECRET_KEY") -}}
+    (dict "value" "webhookSecretKey" "flag" "webhookSecretKeyEnabled" "env" "AK_WEBHOOK_SECRET_KEY")
+    (dict "value" "ssoEncryptionKey" "flag" "ssoEncryptionKeyEnabled" "env" "SSO_ENCRYPTION_KEY") -}}
 {{- $enabled := get $root.Values.secrets $key.flag -}}
 {{- if not (kindIs "bool" $enabled) -}}
 {{- fail (printf "secrets.%s must be a boolean" $key.flag) -}}
@@ -474,6 +512,90 @@ Validate only these env names; other backend environment wiring is independent.
     secretKeyRef:
       name: {{ include "artifact-keeper.secretName" $root }}
       key: {{ $key.env }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Optional backend tuning variables from backend.logging (LOG_FORMAT, LOG_ANSI,
+#387) and backend.stuckScan (STUCK_SCAN_THRESHOLD_SECS,
+STUCK_SCAN_CHECK_INTERVAL_SECS, #101). Each renders only when its value
+differs from the backend's own default, so an install that leaves them alone
+renders no new variables. Invalid values fail the render.
+
+As with METRICS_PORT (#381), each name is rendered at most once. A
+backend.env entry with the same name wins when the chart value is left at its
+default, and must agree with it otherwise; a backend.environmentSecrets entry
+with the same name conflicts with a non-default chart value.
+*/}}
+{{- define "artifact-keeper.backendTuningEnv" -}}
+{{- $backend := .Values.backend -}}
+{{- $env := $backend.env | default dict -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's
+       defaults, which lack these keys. */ -}}
+{{- $logging := dig "logging" dict $backend -}}
+{{- $stuck := dig "stuckScan" dict $backend -}}
+{{- if kindIs "invalid" $logging -}}{{- $logging = dict -}}{{- end -}}
+{{- if kindIs "invalid" $stuck -}}{{- $stuck = dict -}}{{- end -}}
+{{- if not (kindIs "map" $logging) -}}
+{{- fail "backend.logging must be a map" -}}
+{{- end -}}
+{{- if not (kindIs "map" $stuck) -}}
+{{- fail "backend.stuckScan must be a map" -}}
+{{- end -}}
+{{- $vars := list -}}
+{{- /* hasKey, not `default`: `default` would turn an explicit false into the
+       default and hide a mistyped value. */ -}}
+{{- $format := "text" -}}
+{{- if hasKey $logging "format" -}}{{- $format = get $logging "format" -}}{{- end -}}
+{{- if not (and (kindIs "string" $format) (has $format (list "text" "json"))) -}}
+{{- fail (printf "backend.logging.format must be \"text\" or \"json\"; got %v" $format) -}}
+{{- end -}}
+{{- if ne $format "text" -}}
+{{- $vars = append $vars (dict "name" "LOG_FORMAT" "value" $format "path" "backend.logging.format") -}}
+{{- end -}}
+{{- $ansi := "auto" -}}
+{{- if hasKey $logging "ansi" -}}{{- $ansi = get $logging "ansi" -}}{{- end -}}
+{{- if not (or (kindIs "bool" $ansi) (and (kindIs "string" $ansi) (has $ansi (list "auto" "true" "false")))) -}}
+{{- fail (printf "backend.logging.ansi must be \"auto\", \"true\" or \"false\"; got %v" $ansi) -}}
+{{- end -}}
+{{- $ansi = toString $ansi -}}
+{{- if ne $ansi "auto" -}}
+{{- $vars = append $vars (dict "name" "LOG_ANSI" "value" $ansi "path" "backend.logging.ansi") -}}
+{{- end -}}
+{{- range $item := list
+    (dict "key" "thresholdSecs" "name" "STUCK_SCAN_THRESHOLD_SECS")
+    (dict "key" "checkIntervalSecs" "name" "STUCK_SCAN_CHECK_INTERVAL_SECS") -}}
+{{- $path := printf "backend.stuckScan.%s" $item.key -}}
+{{- if and (hasKey $stuck $item.key) (not (kindIs "invalid" (get $stuck $item.key))) -}}
+{{- $value := get $stuck $item.key -}}
+{{- $valid := false -}}
+{{- if or (kindIs "int" $value) (kindIs "int64" $value) (kindIs "float64" $value) -}}
+{{- $valid = and (gt (float64 $value) 0.0) (eq (float64 (int64 $value)) (float64 $value)) -}}
+{{- else if kindIs "string" $value -}}
+{{- $valid = regexMatch "^[1-9][0-9]{0,9}$" $value -}}
+{{- end -}}
+{{- if not $valid -}}
+{{- fail (printf "%s must be a positive integer number of seconds or null; got %v" $path $value) -}}
+{{- end -}}
+{{- $vars = append $vars (dict "name" $item.name "value" (printf "%d" (int64 $value)) "path" $path) -}}
+{{- end -}}
+{{- end -}}
+{{- $secretEnv := list -}}
+{{- range $backend.environmentSecrets -}}
+{{- $secretEnv = append $secretEnv .name -}}
+{{- end -}}
+{{- range $vars -}}
+{{- if has .name $secretEnv -}}
+{{- fail (printf "%s is set by %s and also by backend.environmentSecrets; remove one" .name .path) -}}
+{{- end -}}
+{{- if hasKey $env .name -}}
+{{- if ne (toString (get $env .name)) .value -}}
+{{- fail (printf "backend.env.%s (%v) conflicts with %s (%s): remove the backend.env entry or set both to the same value" .name (get $env .name) .path .value) -}}
+{{- end -}}
+{{- else }}
+- name: {{ .name }}
+  value: {{ .value | quote }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -546,6 +668,12 @@ Preset sizing table keyed on fleet.preset (small|medium|large). Returns YAML
 for the selected preset with backend/web replica counts and resource blocks.
 Presets are chart-owned so an instance spec only carries the preset name.
 An empty preset falls back to small; any other value fails the render.
+
+Every preset gives the backend a 16Gi ephemeral-storage limit, matching the
+non-fleet backend.resources default raised in #116: with persistence off the
+backend's scratch volumes can grow to about 12Gi, and a smaller limit gets the
+pod evicted mid-operation (#350). Requests stay small so scheduling is not
+affected; the web limits are unchanged.
 */}}
 {{- define "artifact-keeper.fleet.presetSpec" -}}
 {{- $preset := default "small" .Values.fleet.preset -}}
@@ -555,7 +683,7 @@ An empty preset falls back to small; any other value fails the render.
     "webReplicas" 1
     "backend" (dict
       "requests" (dict "cpu" "250m" "memory" "512Mi" "ephemeral-storage" "256Mi")
-      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "1Gi"))
+      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "16Gi"))
     "web" (dict
       "requests" (dict "cpu" "100m" "memory" "128Mi" "ephemeral-storage" "128Mi")
       "limits" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "1Gi")))
@@ -564,7 +692,7 @@ An empty preset falls back to small; any other value fails the render.
     "webReplicas" 2
     "backend" (dict
       "requests" (dict "cpu" "500m" "memory" "1Gi" "ephemeral-storage" "512Mi")
-      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi"))
+      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "16Gi"))
     "web" (dict
       "requests" (dict "cpu" "250m" "memory" "256Mi" "ephemeral-storage" "256Mi")
       "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "2Gi")))
@@ -573,7 +701,7 @@ An empty preset falls back to small; any other value fails the render.
     "webReplicas" 2
     "backend" (dict
       "requests" (dict "cpu" "1" "memory" "2Gi" "ephemeral-storage" "1Gi")
-      "limits" (dict "cpu" "4" "memory" "4Gi" "ephemeral-storage" "4Gi"))
+      "limits" (dict "cpu" "4" "memory" "4Gi" "ephemeral-storage" "16Gi"))
     "web" (dict
       "requests" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "512Mi")
       "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi")))
@@ -811,9 +939,38 @@ Keep this in step with the `format_routes` nests in the backend's
 backend/src/api/routes.rs. /lxc is the incus alias, /general the generic
 format, and /t the rattler/pixi conda-token prefix (/t/<token>/conda/...).
 tests/test_httproute.py holds an independent copy of this inventory.
+
+backend.extraFormatPaths (#359) appends operator-supplied prefixes, for example
+for a backend plugin, after the built-in list so every consumer picks them up.
+Each must be a single path segment ("/" plus lowercase letters, digits and
+inner hyphens): the OpenShift Route for a path is named after it. Built-in
+prefixes, the other backend paths, /metrics (kept private), /dtrack and
+duplicates fail the render.
 */}}
 {{- define "artifact-keeper.backendFormatPaths" -}}
-/general /maven /npm /pypi /nuget /cargo /gems /go /helm /debian /rpm /alpine /pacman /composer /conan /conda /t /swift /terraform /cocoapods /hex /pub /lfs /ivy /chef /puppet /ansible /cran /bazel /huggingface /jetbrains /vscode /proto /incus /lxc /ext
+{{- $builtin := list "/general" "/maven" "/npm" "/pypi" "/nuget" "/cargo" "/gems" "/go" "/helm" "/debian" "/rpm" "/alpine" "/pacman" "/composer" "/conan" "/conda" "/t" "/swift" "/terraform" "/cocoapods" "/hex" "/pub" "/lfs" "/ivy" "/chef" "/puppet" "/ansible" "/cran" "/bazel" "/huggingface" "/jetbrains" "/vscode" "/proto" "/incus" "/lxc" "/ext" -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's
+       defaults, which lack this key. */ -}}
+{{- $extra := dig "extraFormatPaths" list .Values.backend -}}
+{{- if kindIs "invalid" $extra -}}{{- $extra = list -}}{{- end -}}
+{{- if not (kindIs "slice" $extra) -}}
+{{- fail "backend.extraFormatPaths must be a list of path prefixes such as \"/myplugin\"" -}}
+{{- end -}}
+{{- $reserved := concat $builtin (list "/" "/api" "/v2" "/health" "/ready" "/metrics" "/dtrack") -}}
+{{- $paths := $builtin -}}
+{{- range $extra -}}
+{{- if not (and (kindIs "string" .) (regexMatch "^/[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .)) -}}
+{{- fail (printf "backend.extraFormatPaths entry %q must be a single path segment: \"/\" followed by lowercase letters, digits and inner hyphens, with no spaces or further \"/\"" (toString .)) -}}
+{{- end -}}
+{{- if has . $reserved -}}
+{{- fail (printf "backend.extraFormatPaths entry %q is reserved: it is a built-in backend path, /metrics (kept private) or /dtrack; remove it" .) -}}
+{{- end -}}
+{{- if has . $paths -}}
+{{- fail (printf "backend.extraFormatPaths lists %q more than once" .) -}}
+{{- end -}}
+{{- $paths = append $paths . -}}
+{{- end -}}
+{{- join " " $paths -}}
 {{- end -}}
 
 {{/*
@@ -936,12 +1093,26 @@ Egress proxy helpers
 */}}
 
 {{/*
+Returns "true" when the bare "backend" ExternalName alias
+(backend-alias-service.yaml) renders: backend and web enabled and
+web.backendAlias.enabled not false. `dig` keeps the alias for
+`helm upgrade --reuse-values` from a chart that predates the knob.
+*/}}
+{{- define "artifact-keeper.backendAlias.enabled" -}}
+{{- $enabled := dig "backendAlias" "enabled" true .Values.web -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "web.backendAlias.enabled must be a boolean" -}}
+{{- end -}}
+{{- if and .Values.backend.enabled .Values.web.enabled $enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 NO_PROXY defaults: loopback, in-cluster DNS suffixes, and the short Service name
 of every enabled component. The bare names matter — a ".svc"/".cluster.local"
 suffix match misses "artifact-keeper-backend", which is how components call each
 other, so those hops would otherwise take the proxy. The bare "backend" entry is
-the ExternalName alias from backend-alias-service.yaml (the web image bakes
-http://backend:8080 into its rewrites), rendered under the same condition.
+the ExternalName alias from backend-alias-service.yaml (web images before 1.1.0
+bake http://backend:8080 into their rewrites), rendered under the same condition.
 Fleet mode: the shared search/scan/DB Services live outside the release; add
 them via noProxy, as you must any in-cluster S3 endpoint (e.g. MinIO).
 */}}
@@ -949,7 +1120,7 @@ them via noProxy, as you must any in-cluster S3 endpoint (e.g. MinIO).
 {{- $full := include "artifact-keeper.fullname" . -}}
 {{- $n := list "localhost" "127.0.0.1" ".svc" ".svc.cluster.local" ".cluster.local" -}}
 {{- $n = append $n (printf "%s-backend" $full) -}}
-{{- if and .Values.backend.enabled .Values.web.enabled -}}{{- $n = append $n "backend" -}}{{- end -}}
+{{- if eq (include "artifact-keeper.backendAlias.enabled" .) "true" -}}{{- $n = append $n "backend" -}}{{- end -}}
 {{- $n = append $n (printf "%s-web" $full) -}}
 {{- if .Values.edge.enabled -}}{{- $n = append $n (printf "%s-edge" $full) -}}{{- end -}}
 {{- if .Values.opensearch.enabled -}}{{- $n = append $n (printf "%s-opensearch" $full) -}}{{- end -}}

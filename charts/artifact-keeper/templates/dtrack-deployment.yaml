@@ -151,10 +151,13 @@ spec:
             - name: ALPINE_ENFORCE_AUTHENTICATION
               value: "true"
             # CORS is only relevant when the Dependency-Track UI/API is exposed
-            # publicly (ingress.dtrack.enabled, or httpRoute.dtrack.enabled when
-            # routing through a Gateway). In-cluster access (backend -> service,
+            # publicly (ingress.dtrack.enabled, httpRoute.dtrack.enabled when
+            # routing through a Gateway, or route.dtrack.enabled for the
+            # OpenShift Route). In-cluster access (backend -> service,
             # kubectl port-forward) is same-origin and needs no CORS, so it
-            # stays disabled otherwise.
+            # stays disabled otherwise. httpRoute excludes both Ingress and
+            # Route, so it wins outright; Ingress is checked before Route.
+            {{- $routeDtrack := and .Values.route.enabled (dig "dtrack" "enabled" false .Values.route) }}
             {{- if and .Values.httpRoute.enabled .Values.httpRoute.dtrack.enabled }}
             - name: ALPINE_CORS_ENABLED
               value: "true"
@@ -165,6 +168,19 @@ spec:
               value: "true"
             - name: ALPINE_CORS_ALLOW_ORIGIN
               value: {{ .Values.ingress.dtrack.corsAllowOrigin | quote }}
+            {{- else if and (not .Values.httpRoute.enabled) $routeDtrack }}
+            {{- /* Default origin: the shared route.host (fleet.host fallback,
+                   as in route.yaml), https when the Routes terminate TLS. */}}
+            {{- $routeOrigin := dig "dtrack" "corsAllowOrigin" "" .Values.route }}
+            {{- if not $routeOrigin }}
+            {{- $routeHost := .Values.route.host | default (dig "host" "" (.Values.fleet | default dict)) }}
+            {{- $routeHost = required "route.host must be set when route.enabled is true (the external hostname shared by every Route, e.g. artifacts.apps.<cluster-domain>)" $routeHost }}
+            {{- $routeOrigin = printf "%s://%s" (ternary "https" "http" (dig "tls" "enabled" false .Values.route)) $routeHost }}
+            {{- end }}
+            - name: ALPINE_CORS_ENABLED
+              value: "true"
+            - name: ALPINE_CORS_ALLOW_ORIGIN
+              value: {{ $routeOrigin | quote }}
             {{- else }}
             - name: ALPINE_CORS_ENABLED
               value: "false"
@@ -259,7 +275,8 @@ data:
     #!/bin/sh
     # Bootstrap Dependency-Track: change the default admin password, then
     # generate an API key for the Automation team and store it in a shared
-    # volume or Kubernetes Secret for the backend. Optionally enables NVD mirroring.
+    # volume or Kubernetes Secret for the backend, and grant the Automation
+    # team the permissions the backend needs. Optionally enables NVD mirroring.
     #
     # With an externally managed dependencyTrack.existingApiKeySecret there
     # is no key to generate. Unless manageApiKeySecret is enabled, this Job
@@ -282,6 +299,9 @@ data:
     API_KEY_FILE="${DEPENDENCY_TRACK_API_KEY_FILE:-}"
     API_KEY_SECRET="${DEPENDENCY_TRACK_API_KEY_SECRET:-}"
     NVD_API_ENABLED="${NVD_API_ENABLED:-false}"
+    # dependencyTrack.bootstrap.automationPermissions, validated by the chart
+    # (uppercase identifiers only). Empty skips the permission grants.
+    AUTOMATION_PERMISSIONS="{{ include "artifact-keeper.dtrackAutomationPermissions" . }}"
 
     fail() {
       echo "[dtrack-init] ERROR: $1" >&2
@@ -327,19 +347,29 @@ data:
     # Generate a key only when the managed Secret or legacy key file is absent.
     # Externally supplied Secrets are never changed.
     NEED_KEY=false
+    # Grant the Automation team its permissions on every run, including when
+    # the key already exists, so installs bootstrapped before the grants
+    # existed (or whose grants were removed) are repaired on the next upgrade.
+    # Not with an operator-supplied dependencyTrack.existingApiKeySecret: that
+    # key may belong to any team, which the operator manages.
+    GRANT_PERMISSIONS=false
+    if { [ -n "$API_KEY_SECRET" ] || [ -n "$API_KEY_FILE" ]; } && [ -n "$AUTOMATION_PERMISSIONS" ]; then
+      GRANT_PERMISSIONS=true
+    fi
     if [ -n "$API_KEY_SECRET" ]; then
       if [ "$SECRET_HTTP" = "404" ]; then
         NEED_KEY=true
       fi
     elif [ -n "$API_KEY_FILE" ]; then
       if [ -f "$API_KEY_FILE" ] && [ -s "$API_KEY_FILE" ]; then
-        if [ "$NVD_API_ENABLED" != "true" ]; then
+        if [ "$NVD_API_ENABLED" != "true" ] && [ "$GRANT_PERMISSIONS" != "true" ]; then
           echo "[dtrack-init] API key already provisioned, nothing to do"
           exit 0
         fi
-        # Keep going only to apply dependencyTrack.bootstrap.nvdApiEnabled, so
-        # turning it on for an existing install takes effect on the next upgrade.
-        echo "[dtrack-init] API key already provisioned; applying NVD setting only"
+        # Keep going only to reconcile the Automation team permissions and
+        # dependencyTrack.bootstrap.nvdApiEnabled, so either takes effect on
+        # an existing install at the next upgrade.
+        echo "[dtrack-init] API key already provisioned; reconciling settings only"
       else
         NEED_KEY=true
       fi
@@ -392,7 +422,8 @@ data:
       echo "[dtrack-init] API key supplied through dependencyTrack.existingApiKeySecret; admin password reconciled, no key to generate"
     fi
 
-    if [ "$NEED_KEY" = "true" ]; then
+    TEAM_UUID=""
+    if [ "$NEED_KEY" = "true" ] || [ "$GRANT_PERMISSIONS" = "true" ]; then
       TEAMS=$(curl -sS -f "$DT_URL/api/v1/team" -H "Authorization: Bearer $TOKEN") \
         || fail "could not list teams"
 
@@ -411,14 +442,17 @@ data:
         "") fail "could not extract the Automation team UUID. The Dependency-Track response shape may have changed." ;;
         *[!0-9A-Fa-f-]*) fail "extracted team UUID contains unexpected characters" ;;
       esac
+    fi
+
+    if [ "$NEED_KEY" = "true" ]; then
 
       # Generate a new key rather than reading one back from the team
       # listing: from 4.13 Dependency-Track hashes API keys and the listing
       # only carries a masked form. PUT /api/v1/team/{uuid}/key is the
       # generate call on every 4.x release (201 with the plaintext key in the
       # body, the only time it is returned); POST only regenerates an
-      # existing key. Each successful run adds one key to the team; the early
-      # exit above keeps that to once per shared volume.
+      # existing key. Each successful run adds one key to the team; NEED_KEY
+      # above keeps that to once per shared volume or managed Secret.
       echo "[dtrack-init] Generating an API key for the Automation team"
       KEY_RESP=$(curl -sS -f -X PUT "$DT_URL/api/v1/team/$TEAM_UUID/key" \
         -H "Authorization: Bearer $TOKEN" \
@@ -439,13 +473,6 @@ data:
         *[!A-Za-z0-9_-]*) fail "extracted API key contains unexpected characters, refusing to write it" ;;
       esac
 
-      # umask 077 keeps the key from being world-readable on the shared PVC.
-      # The backend pod runs as a different UID (1001, fsGroup 0) than this Job
-      # (1000/1000); it can read the 0600 file because the kubelet re-applies
-      # fsGroup ownership on volume mount (fsGroupChangePolicy defaults to
-      # Always). If you override fsGroupChangePolicy to OnRootMismatch on the
-      # backend pod, verify it can still read this file.
-      #
       # Write to a temp file and rename: the key cannot be read back from
       # Dependency-Track, and a truncated file would pass the non-empty check
       # above on the next run and never be replaced.
@@ -480,11 +507,56 @@ data:
           *) fail "Kubernetes API returned HTTP $CREATE_HTTP while creating the API-key Secret" ;;
         esac
       else
-        umask 077
+        # Legacy shared-config PVC handoff. The backend runs as a different
+        # UID (1001, fsGroup 0) than this Job (1000), so it can only read the
+        # key through the file's group: write it 0640 (umask 027), never
+        # world-readable. The previous umask 077 wrote 0600, which the backend
+        # could not read (#318). The kubelet applies fsGroup ownership and
+        # group permission bits only when a pod mounts the volume, and the
+        # backend has usually mounted it before this Job writes the key, so
+        # nothing adds group read to the file afterwards; some volume types
+        # (hostPath-backed local-path provisioners, for example) get no
+        # fsGroup handling at all. The file's group is this Job's primary
+        # group (0 unless runAsGroup is set, because the image has no account
+        # for UID 1000) or, on volumes with fsGroup handling, the directory's
+        # setgid group, and the backend reads it through fsGroup 0. When that
+        # setgid group is this Job's fsGroup (1000) instead, the backend can
+        # read the file after its next restart, when the kubelet re-applies
+        # the backend's fsGroup and group read bits. To avoid
+        # the file handoff and its group dependency entirely, use
+        # dependencyTrack.bootstrap.manageApiKeySecret.
+        umask 027
         printf '%s\n' "$API_KEY" > "$API_KEY_FILE.tmp"
         mv "$API_KEY_FILE.tmp" "$API_KEY_FILE"
         echo "[dtrack-init] API key written to $API_KEY_FILE"
       fi
+    fi
+
+    # Grant the Automation team the permissions the backend needs (#168).
+    # Dependency-Track creates the team with BOM_UPLOAD and VIEW_PORTFOLIO
+    # only, so the backend's POST /api/v1/project failed with 403 and no SBOM
+    # ever reached Dependency-Track. POST /api/v1/permission/{name}/team/{uuid}
+    # is idempotent: 200 when it adds the permission, 304 when the team
+    # already has it. Runs after the key is stored, so a failure here leaves
+    # the key in place and the Job's retry only repeats the grants. A
+    # permission this Dependency-Track release does not know (404) fails the
+    # Job; remove it from dependencyTrack.bootstrap.automationPermissions.
+    if [ "$GRANT_PERMISSIONS" = "true" ]; then
+      GRANTED=""
+      PRESENT=""
+      FAILED=""
+      for PERM in $AUTOMATION_PERMISSIONS; do
+        PERM_HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+          -X POST "$DT_URL/api/v1/permission/$PERM/team/$TEAM_UUID" \
+          -H "Authorization: Bearer $TOKEN" || true)
+        case "$PERM_HTTP" in
+          200|201|204) GRANTED="$GRANTED $PERM" ;;
+          304) PRESENT="$PRESENT $PERM" ;;
+          *) FAILED="$FAILED $PERM(HTTP $PERM_HTTP)" ;;
+        esac
+      done
+      echo "[dtrack-init] Automation team permissions: granted${GRANTED:- none}; already present${PRESENT:- none}${FAILED:+; failed$FAILED}"
+      [ -z "$FAILED" ] || fail "could not grant Automation team permission(s):$FAILED"
     fi
 
     # Opt-in (dependencyTrack.bootstrap.nvdApiEnabled): switch NVD mirroring
@@ -531,9 +603,10 @@ metadata:
     # by hand. before-hook-creation deletes the previous Job before each run
     # (same pattern as fleet-db-bootstrap-job.yaml). post-install/post-upgrade
     # rather than pre-*: the Job needs the Dependency-Track Deployment, the
-    # Secret, and the script ConfigMap to exist first. The script exits 0
-    # immediately when the API key is already provisioned, so re-running on
-    # every upgrade is cheap.
+    # Secret, and the script ConfigMap to exist first. When the API key is
+    # already provisioned the script only logs in and reconciles the
+    # Automation team permissions (and the NVD setting, when enabled), so
+    # re-running on every upgrade is cheap.
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "0"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded

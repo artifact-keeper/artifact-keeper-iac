@@ -127,3 +127,29 @@ jobs:
           # Passed as an environment variable rather than interpolated into the script body, so the
           # token never becomes part of the shell command line.
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Pages deployment of the index chart-releaser committed is asynchronous and can fail
+      # silently: a stale index and a current one both answer 200, and the 1.9.8 index sat three
+      # weeks behind before anyone noticed (#312). Poll the served index until it lists the version
+      # just released, so a wedged Pages build turns into a red release instead of a quiet one.
+      - name: Verify the published Helm repository index
+        run: |
+          set -euo pipefail
+          version=$(grep '^version:' charts/artifact-keeper/Chart.yaml | awk '{print $2}')
+          url="https://artifact-keeper.github.io/artifact-keeper-iac/index.yaml"
+          deadline=$((SECONDS + 900))
+          while :; do
+            if curl -fsSL --proto =https --max-time 30 "${url}?nocache=$(date +%s)" \
+                 | grep -Eq "^\s*version: ${version}\$"; then
+              echo "index.yaml lists artifact-keeper ${version}"
+              exit 0
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::${url} still does not list chart ${version} after 15 minutes."
+              echo "The release asset and the OCI copy are published; the Pages deployment is what failed."
+              echo "Check the 'pages build and deployment' run, or requeue it with:"
+              echo "  gh api -X POST repos/${GITHUB_REPOSITORY}/pages/builds"
+              exit 1
+            fi
+            sleep 30
+          done

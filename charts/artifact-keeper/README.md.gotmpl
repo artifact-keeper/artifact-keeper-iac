@@ -209,7 +209,7 @@ or set it to `""` unless you intend to rewrite every image.
 
 ## Encryption Keys in an Existing Secret
 
-If an operator-supplied Secret contains the optional migration and webhook
+If an operator-supplied Secret contains the optional migration, webhook and SSO
 encryption keys, opt into their environment references without putting plaintext
 keys or placeholder credentials in Helm values:
 
@@ -218,20 +218,21 @@ secrets:
   existingSecret: application-credentials
   migrationEncryptionKeyEnabled: true
   webhookSecretKeyEnabled: true
+  ssoEncryptionKeyEnabled: true   # read the re-keying warning below first
 ```
 
-The backend reads `MIGRATION_ENCRYPTION_KEY` and `AK_WEBHOOK_SECRET_KEY` from that
-Secret in the release namespace. The chart does not create a Secret or copy
+The backend reads `MIGRATION_ENCRYPTION_KEY`, `AK_WEBHOOK_SECRET_KEY` and
+`SSO_ENCRYPTION_KEY` from that Secret in the release namespace. The chart does not create a Secret or copy
 credential values into the rendered manifests. These references are required:
 if an enabled key is missing, Kubernetes prevents the backend container from
-starting. Both flags default to `false`, so existing Secrets without these
-optional keys keep working. Enable either flag independently.
+starting. All three flags default to `false`, so existing Secrets without these
+optional keys keep working. Enable each flag independently.
 
 The flags must be YAML booleans, not strings such as `"false"`. Setting a flag to
 `true` requires `secrets.existingSecret` and `externalSecrets.enabled: false`;
 otherwise rendering fails. They only opt into existing-Secret references:
-`false` does not override a nonempty `secrets.migrationEncryptionKey` or
-`secrets.webhookSecretKey`. Chart-managed Secrets still use those inline values,
+`false` does not override a nonempty `secrets.migrationEncryptionKey`,
+`secrets.webhookSecretKey` or `secrets.ssoEncryptionKey`. Chart-managed Secrets still use those inline values,
 and legacy existing-Secret configurations with nonempty placeholder values still
 work. Replace placeholders with the flags above. With External Secrets Operator,
 continue setting the corresponding `externalSecrets.secrets.*` provider paths
@@ -255,12 +256,33 @@ backend:
 ```
 
 Leave the corresponding inline value empty and flag `false` (or the ESO path
-empty) when using `backend.environmentSecrets`. For these two environment
+empty) when using `backend.environmentSecrets`. For these three environment
 variables, multiple definitions across chart secret wiring, `backend.env`, or
 `backend.environmentSecrets` fail rendering; choose one source per variable.
 An `optional: true` reference permits startup without the key but leaves the
 feature unavailable. Helm does not look up the supplied Secret, so these options
 also work with offline `helm template`, ArgoCD, and Flux.
+
+### SSO encryption key
+
+The backend encrypts stored SSO provider secrets (OIDC client secrets and LDAP
+bind passwords) and upstream repository credentials with
+`SSO_ENCRYPTION_KEY`. When it is unset, which is the chart default, the backend
+falls back to `JWT_SECRET`, so rotating the JWT secret also makes those stored
+values undecryptable. To give them their own key, set it from any of the same
+sources as the keys above: `secrets.ssoEncryptionKey` (chart-managed Secret),
+`secrets.ssoEncryptionKeyEnabled: true` (key `SSO_ENCRYPTION_KEY` in
+`secrets.existingSecret`), `externalSecrets.secrets.ssoEncryptionKey`
+(provider property `sso-encryption-key`), or `backend.environmentSecrets`.
+Use a random value such as `openssl rand -hex 32`. The chart does not generate
+one.
+
+> **Setting this on an existing install re-keys.** SSO secrets and upstream
+> credentials already stored were encrypted with `JWT_SECRET` (or the previous
+> `SSO_ENCRYPTION_KEY`), and the backend cannot decrypt them under the new key.
+> Set the key at first install. On an existing install, plan to re-enter every
+> SSO provider secret and upstream repository credential after enabling it, and
+> never change the key afterwards without doing the same.
 
 Run the offline regression tests from the repository root with Helm and the
 Python dependencies in `.github/scripts/requirements.txt` installed:
@@ -289,8 +311,8 @@ global:
 
 `NO_PROXY` is generated: loopback, the cluster DNS suffixes (`.svc`,
 `.svc.cluster.local`, `.cluster.local`), the short Service name of every enabled
-in-chart component (including the bare `backend` alias the web image is built
-against), and the Postgres Service or `externalDatabase.host`. `noProxy` only
+in-chart component (including the bare `backend` alias, unless
+`web.backendAlias.enabled` is false), and the Postgres Service or `externalDatabase.host`. `noProxy` only
 needs to add hosts the chart cannot know about. In particular an in-cluster S3
 endpoint such as MinIO is **not** detected: add its hostname to `noProxy`, or
 the backend's storage traffic takes the proxy. The same goes for the shared
@@ -610,16 +632,35 @@ Helm rendering deliberately does not require live cluster discovery.
 TLS termination and `certificateRefs` belong to the existing Gateway listener.
 `ingress.tls` and Ingress annotations do not apply to HTTPRoute.
 
-> **Upload size and timeouts have no HTTPRoute equivalent.** On Ingress the
-> chart derives `nginx.ingress.kubernetes.io/proxy-body-size`,
+> **Upload size has no HTTPRoute equivalent, and timeouts are opt-in.** On
+> Ingress the chart derives `nginx.ingress.kubernetes.io/proxy-body-size`,
 > `proxy-read-timeout` and `proxy-send-timeout` from `ingress.maxBodySize`,
 > `ingress.proxyReadTimeoutSeconds` and `ingress.proxySendTimeoutSeconds`.
-> The HTTPRoute sets none of these, so large artifact uploads and long OCI
-> pushes are bound by your Gateway implementation's own request-size and
-> timeout defaults, which are often far lower. Configure them on the Gateway or
-> controller (for example an Envoy Gateway `ClientTrafficPolicy`/
-> `BackendTrafficPolicy`, or the equivalent policy of your implementation),
-> together with any redirects and other controller-specific policies.
+> The HTTPRoute sets no request-size limit, and by default no timeouts, so
+> large artifact uploads and long OCI pushes are bound by your Gateway
+> implementation's own defaults, which are often far lower. Configure request
+> size on the Gateway or controller (for example an Envoy Gateway
+> `ClientTrafficPolicy`/`BackendTrafficPolicy`, or the equivalent policy of
+> your implementation), together with any redirects and other
+> controller-specific policies.
+
+To lift the timeout for the backend routes, set `httpRoute.timeouts`. Both
+fields take Gateway API duration strings and render as `timeouts` on every rule
+that targets the backend (`/api`, `/v2`, `/health`, `/ready` and the package
+prefixes); the web `/` and `/dtrack` rules keep the Gateway default:
+
+```yaml
+httpRoute:
+  timeouts:
+    request: 0s          # no limit on the whole client exchange
+    backendRequest: 1h   # per request to the backend
+```
+
+`0s` disables a timeout. `backendRequest` may not exceed `request` unless
+`request` is `0s`, and malformed durations fail the render. The `timeouts`
+field needs the Gateway API v1.2.0 or later HTTPRoute CRD (standard channel);
+the v1.0 and v1.1 CRDs do not define it, so the API server drops it. Gateway API
+marks it Extended support, so confirm that your implementation honours it.
 
 Both exposure modes are optional, but enabling them simultaneously fails the
 render. HTTPRoute is likewise mutually exclusive with the OpenShift Routes
@@ -636,6 +677,21 @@ into rules of at most eight matches to also satisfy the older v1.0.0 schema
 catch-all in separate rules.
 Gateway API's most-specific match precedence keeps the catch-all from shadowing
 package routes.
+
+To route an additional prefix to the backend, for example one served by a
+backend plugin, list it in `backend.extraFormatPaths`. The Ingress, the
+HTTPRoute and the OpenShift Routes all take it from the same inventory:
+
+```yaml
+backend:
+  extraFormatPaths:
+    - /myformat
+```
+
+Each entry must be a single lowercase path segment. Repeating a built-in
+prefix, `/api`, `/v2`, `/health`, `/ready`, `/metrics`, `/dtrack` or another
+entry fails the render, as does a list long enough to push the HTTPRoute past
+the Gateway API limit of 16 rules.
 
 Dependency-Track exposure is a separate opt-in:
 `httpRoute.dtrack.enabled: true` requires `dependencyTrack.enabled: true` and

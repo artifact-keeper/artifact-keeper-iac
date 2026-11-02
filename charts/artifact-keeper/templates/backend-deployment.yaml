@@ -346,7 +346,7 @@ spec:
             - name: ALLOW_HTTP_INTEGRATIONS
               value: "1"
             {{- end }}
-            {{- if .Values.secrets.smtpPassword }}
+            {{- if eq (include "artifact-keeper.smtpPasswordManaged" .) "true" }}
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -395,6 +395,7 @@ spec:
             - name: XFF_TRUSTED_FOR_AUTHZ
               value: {{ dig "xffTrustedForAuthz" false $clientIp | quote }}
             {{- end }}
+            {{- with include "artifact-keeper.backendTuningEnv" . }}{{ . | trim | nindent 12 }}{{- end }}
             {{- if eq (include "artifact-keeper.fleet.enabled" .) "true" }}
             # Object storage for this instance. Artifacts share one bucket with
             # a per-instance key prefix; the non-secret settings (STORAGE_BACKEND,

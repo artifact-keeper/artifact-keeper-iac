@@ -232,7 +232,13 @@ backend:
     capabilities:
       drop:
         - ALL
-  # -- wait-for-opensearch init container image. Override for airgapped mirrors.
+  # -- wait-for-opensearch init container image (only that container uses
+  # it). Override for airgapped mirrors. A replacement must provide /bin/sh
+  # and wget (the readiness check is a shell loop of `wget -qO-` against
+  # OpenSearch's _cluster/health, over HTTPS unless
+  # opensearch.disableSecurityPlugin), plus grep, date and sleep: any
+  # busybox- or alpine-compatible image works; distroless or scratch images
+  # do not. Runs with backend.initContainerSecurityContext.
   waitForOpenSearch:
     image:
       repository: alpine
@@ -977,7 +983,15 @@ opensearch:
     capabilities:
       drop:
         - ALL
-  # -- fix-ownership and sysctl-check init container image. Override for airgapped mirrors.
+  # -- Image shared by both OpenSearch init containers, fix-ownership and
+  # sysctl-check (the backend's wait-for-opensearch uses
+  # backend.waitForOpenSearch.image instead). Override for airgapped
+  # mirrors. A replacement must provide `sh` and `chown` (fix-ownership runs
+  # `chown -R` on the data volume) and `cat` (sysctl-check reads
+  # /proc/sys/vm/max_map_count): any busybox- or alpine-compatible image
+  # works; distroless or scratch images do not. Security contexts are
+  # separate: opensearch.initContainerSecurityContext applies only to
+  # sysctl-check, and fix-ownership uses opensearch.fixOwnership.securityContext.
   initContainers:
     image:
       repository: busybox

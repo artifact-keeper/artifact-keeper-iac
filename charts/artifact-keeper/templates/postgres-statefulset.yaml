@@ -113,17 +113,29 @@ spec:
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
             {{- end }}
-      {{- if .Values.postgres.initDb.enabled }}
+      {{- if or .Values.postgres.initDb.enabled .Values.postgres.persistence.existingClaim }}
       volumes:
+        {{- if .Values.postgres.initDb.enabled }}
         - name: init-db
           configMap:
             name: {{ include "artifact-keeper.fullname" . }}-init-db
+        {{- end }}
+        {{- with .Values.postgres.persistence.existingClaim }}
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: {{ . }}
+        {{- end }}
       {{- end }}
+  {{- if not .Values.postgres.persistence.existingClaim }}
   volumeClaimTemplates:
     - metadata:
         name: postgres-data
         labels:
           {{- include "artifact-keeper.postgres.selectorLabels" . | nindent 10 }}
+        {{- with .Values.postgres.persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
       spec:
         accessModes:
           - ReadWriteOnce
@@ -133,6 +145,7 @@ spec:
         {{- if .Values.postgres.persistence.storageClass }}
         storageClassName: {{ .Values.postgres.persistence.storageClass | quote }}
         {{- end }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: Service

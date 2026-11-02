@@ -204,7 +204,8 @@ spec:
             sizeLimit: {{ .Values.dependencyTrack.tmpSizeLimit | default "2Gi" }}
         - name: dtrack-data
           persistentVolumeClaim:
-            claimName: {{ include "artifact-keeper.fullname" . }}-dtrack
+            claimName: {{ .Values.dependencyTrack.persistence.existingClaim | default (printf "%s-dtrack" (include "artifact-keeper.fullname" .)) }}
+{{- if not .Values.dependencyTrack.persistence.existingClaim }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -213,6 +214,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: dependency-track
+  {{- with .Values.dependencyTrack.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes:
     - ReadWriteOnce
@@ -222,6 +227,7 @@ spec:
   {{- if .Values.dependencyTrack.persistence.storageClass }}
   storageClassName: {{ .Values.dependencyTrack.persistence.storageClass | quote }}
   {{- end }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -649,7 +655,7 @@ spec:
         {{- if eq (include "artifact-keeper.dtrackApiKeyFile" .) "true" }}
         - name: shared-config
           persistentVolumeClaim:
-            claimName: {{ include "artifact-keeper.fullname" . }}-shared-config
+            claimName: {{ include "artifact-keeper.sharedConfigClaimName" . }}
         {{- end }}
 {{- end }}
 {{- end }}

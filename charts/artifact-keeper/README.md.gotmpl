@@ -512,6 +512,51 @@ headroom for container logs and the writable layer.
 | Trivy | 5Gi | Vulnerability database cache |
 | DependencyTrack | 5Gi | Internal vulnerability database |
 
+### Using pre-existing PersistentVolumeClaims
+
+Every PVC the chart creates can be replaced with a claim you manage yourself, for example one created outside the release so that deleting the release (or an Argo CD application) never deletes the data. Set `existingClaim` under the volume's persistence block. The chart then skips its own PVC and mounts the named claim everywhere its own claim was mounted. The claim must already exist in the release namespace; `size`, `storageClass`, `accessModes` and `annotations` for that volume are ignored.
+
+| Value | Replaces | Mounted by | Access mode needed |
+|-------|----------|------------|--------------------|
+| `backend.persistence.existingClaim` | `<fullname>-storage` | backend | ReadWriteOnce for one replica; ReadWriteMany for `backend.replicaCount` > 1, autoscaling, or `strategy.type: RollingUpdate` |
+| `backend.scanWorkspace.existingClaim` | `<fullname>-scan-workspace` | backend | Same as `storage`. A multi-replica backend normally sets `scanWorkspace.enabled: false` instead |
+| `backend.sharedConfig.existingClaim` | `<fullname>-shared-config` | backend and the Dependency-Track bootstrap Job | ReadWriteMany unless both always land on the same node, and for a multi-replica backend |
+| `postgres.persistence.existingClaim` | `postgres-data-<fullname>-postgres-0` (StatefulSet `volumeClaimTemplates`) | PostgreSQL (always one replica) | ReadWriteOnce |
+| `opensearch.persistence.existingClaim` | `<fullname>-opensearch` | OpenSearch, `replicaCount: 1` only | ReadWriteOnce |
+| `trivy.persistence.existingClaim` | `<fullname>-trivy-cache` | Trivy | ReadWriteOnce |
+| `dependencyTrack.persistence.existingClaim` | `<fullname>-dtrack` | Dependency-Track | ReadWriteOnce |
+| `imageBuilder.persistence.existingClaim` | `<fullname>-buildkitd-cache` | BuildKit daemon | ReadWriteOnce for one replica; ReadWriteMany if `imageBuilder.replicaCount` > 1 |
+
+```yaml
+backend:
+  persistence:
+    enabled: true
+    existingClaim: artifact-keeper-storage
+postgres:
+  persistence:
+    existingClaim: artifact-keeper-postgres
+```
+
+The render fails when an `existingClaim` cannot be honored:
+
+- `backend.persistence.existingClaim` with `backend.persistence.enabled: false`, or together with `backend.persistence.ephemeral.enabled` (the ephemeral mode creates one PVC per pod, so there is no shared claim to replace).
+- `backend.scanWorkspace.existingClaim` with `backend.scanWorkspace.enabled: false`, `opensearch.persistence.existingClaim` with `opensearch.persistence.enabled: false`, and `imageBuilder.persistence.existingClaim` with `imageBuilder.persistence.enabled: false`.
+- `opensearch.persistence.existingClaim` with `opensearch.replicaCount` > 1. A multi-node cluster is a StatefulSet whose `volumeClaimTemplates` give every node its own PVC, and a single claim cannot back several nodes.
+
+PostgreSQL is a single-replica StatefulSet, so with `postgres.persistence.existingClaim` the chart drops its `volumeClaimTemplates` and mounts the claim through `volumes:`. StatefulSet `volumeClaimTemplates` are immutable: switching an installed release to or from `existingClaim` needs `kubectl delete statefulset <fullname>-postgres --cascade=orphan` before `helm upgrade`. To keep the current data, set `existingClaim` to the claim the StatefulSet already created, `postgres-data-<fullname>-postgres-0`.
+
+To keep the chart-managed PVCs instead, annotate them. Each persistence block also takes `annotations` (default `{}`), for example:
+
+```yaml
+backend:
+  persistence:
+    annotations:
+      helm.sh/resource-policy: keep                       # helm uninstall leaves the PVC
+      argocd.argoproj.io/sync-options: Prune=false        # Argo CD never prunes it
+```
+
+The keys are `backend.persistence.annotations`, `backend.scanWorkspace.annotations`, `backend.sharedConfig.annotations`, `postgres.persistence.annotations`, `opensearch.persistence.annotations`, `trivy.persistence.annotations`, `dependencyTrack.persistence.annotations` and `imageBuilder.persistence.annotations`. For PostgreSQL and multi-node OpenSearch the annotations go on the StatefulSet's `volumeClaimTemplates`, so they only apply to PVCs created after they are set, and changing them on an installed release hits the same immutability as above. Those StatefulSet PVCs already survive the deletion of their StatefulSet, and neither Helm nor Argo CD prunes them.
+
 ## Ingress
 
 The chart creates a single Ingress resource that routes traffic to the backend and web frontend. By default it uses the `nginx` IngressClass with a 1024m proxy body size limit (for large artifact uploads) and 300-second timeouts.

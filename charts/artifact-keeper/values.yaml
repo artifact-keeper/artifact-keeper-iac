@@ -558,6 +558,18 @@ backend:
     enabled: true
     size: 10Gi
     storageClass: ""
+    # -- Name of a pre-existing PersistentVolumeClaim to mount as the backend
+    # `storage` volume instead of the chart-created `<fullname>-storage` PVC.
+    # Requires `enabled: true` and cannot be combined with `ephemeral.enabled`.
+    # `size`, `storageClass`, `accessModes` and `annotations` are then unused;
+    # the claim needs ReadWriteMany for `replicaCount` > 1. See "Using
+    # pre-existing PersistentVolumeClaims" in the README.
+    existingClaim: ""
+    # -- Annotations for the backend storage PVC the chart creates (ignored when
+    # `existingClaim` is set). For example `helm.sh/resource-policy: keep` to
+    # keep it on `helm uninstall`, or `argocd.argoproj.io/sync-options:
+    # Prune=false` so Argo CD never prunes it.
+    annotations: {}
     # -- Access modes for the backend storage PVC. Defaults to ["ReadWriteOnce"] when unset/empty.
     # Set to ["ReadWriteMany"] with a ReadWriteMany-capable storageClass (e.g. Azure Files) to let
     # backend.replicaCount run >1 without every replica fighting over one zone-pinned RWO volume.
@@ -596,6 +608,15 @@ backend:
   scanWorkspace:
     enabled: true
     size: 2Gi
+    # -- Name of a pre-existing PersistentVolumeClaim to mount at
+    # /scan-workspace instead of the chart-created `<fullname>-scan-workspace`
+    # PVC. Requires `enabled: true`; `size` and `annotations` are then unused.
+    existingClaim: ""
+    # -- Annotations for the scan-workspace PVC the chart creates (ignored when
+    # `existingClaim` is set). For example `helm.sh/resource-policy: keep` to
+    # keep it on `helm uninstall`, or `argocd.argoproj.io/sync-options:
+    # Prune=false` so Argo CD never prunes it.
+    annotations: {}
   # The `shared-config` PVC (1Gi, mounted at /shared), created whenever
   # `dependencyTrack.enabled` is true. The Dependency-Track bootstrap Job
   # writes the backend's API key there, and the backend reads it, so the
@@ -613,6 +634,18 @@ backend:
     # from different nodes, and so a multi-replica backend or
     # `strategy.type: RollingUpdate` works with Dependency-Track enabled.
     accessModes: []
+    # -- Name of a pre-existing PersistentVolumeClaim mounted as /shared by the
+    # backend and the Dependency-Track bootstrap Job, instead of the
+    # chart-created `<fullname>-shared-config` PVC. Only used while that PVC
+    # would be rendered (`dependencyTrack.enabled` without
+    # `dependencyTrack.existingApiKeySecret`). `storageClass`, `accessModes`
+    # and `annotations` are then unused.
+    existingClaim: ""
+    # -- Annotations for the shared-config PVC the chart creates (ignored when
+    # `existingClaim` is set). For example `helm.sh/resource-policy: keep` to
+    # keep it on `helm uninstall`, or `argocd.argoproj.io/sync-options:
+    # Prune=false` so Argo CD never prunes it.
+    annotations: {}
   # -- Deployment update strategy for the backend.
   #
   # `Recreate` (the default, and the behavior this chart hardcoded before the
@@ -856,6 +889,22 @@ postgres:
   persistence:
     size: 20Gi
     storageClass: ""
+    # -- Name of a pre-existing PersistentVolumeClaim to mount as the
+    # PostgreSQL data directory. When set, the StatefulSet drops its
+    # `volumeClaimTemplates` and mounts this claim through `volumes:` instead
+    # (PostgreSQL always runs one replica). `size`, `storageClass` and
+    # `annotations` are then unused. StatefulSet `volumeClaimTemplates` are
+    # immutable, so switching an installed release to or from this value needs
+    # `kubectl delete statefulset <fullname>-postgres --cascade=orphan` before
+    # the upgrade. To keep the data, point it at the existing
+    # `postgres-data-<fullname>-postgres-0` claim.
+    existingClaim: ""
+    # -- Annotations for the PVC created from the StatefulSet's
+    # `volumeClaimTemplates` (ignored when `existingClaim` is set). StatefulSet
+    # PVCs already outlive the StatefulSet and are not pruned by Helm or Argo
+    # CD. Changing this on an installed release hits the same immutability as
+    # `existingClaim`.
+    annotations: {}
   resources:
     requests:
       cpu: 250m
@@ -1027,6 +1076,19 @@ opensearch:
     enabled: true
     size: 5Gi
     storageClass: ""
+    # -- Name of a pre-existing PersistentVolumeClaim to mount as the
+    # OpenSearch data directory instead of the chart-created
+    # `<fullname>-opensearch` PVC. Requires `enabled: true` and `replicaCount:
+    # 1`: a multi-node cluster is a StatefulSet whose `volumeClaimTemplates`
+    # give each node its own PVC, so one claim cannot back it. `size`,
+    # `storageClass` and `annotations` are then unused.
+    existingClaim: ""
+    # -- Annotations for the OpenSearch PVC the chart creates (ignored when
+    # `existingClaim` is set), e.g. `helm.sh/resource-policy: keep` or
+    # `argocd.argoproj.io/sync-options: Prune=false`. With `replicaCount` > 1
+    # they go on the StatefulSet's `volumeClaimTemplates`, which are immutable
+    # on an installed release.
+    annotations: {}
   resources:
     requests:
       cpu: 250m
@@ -1126,6 +1188,15 @@ trivy:
   persistence:
     size: 5Gi
     storageClass: ""
+    # -- Name of a pre-existing PersistentVolumeClaim to mount as the Trivy
+    # cache instead of the chart-created `<fullname>-trivy-cache` PVC. `size`,
+    # `storageClass` and `annotations` are then unused.
+    existingClaim: ""
+    # -- Annotations for the Trivy cache PVC the chart creates (ignored when
+    # `existingClaim` is set). For example `helm.sh/resource-policy: keep` to
+    # keep it on `helm uninstall`, or `argocd.argoproj.io/sync-options:
+    # Prune=false` so Argo CD never prunes it.
+    annotations: {}
   resources:
     requests:
       cpu: 250m
@@ -1302,6 +1373,16 @@ dependencyTrack:
   persistence:
     size: 5Gi
     storageClass: ""
+    # -- Name of a pre-existing PersistentVolumeClaim to mount as the
+    # Dependency-Track data directory instead of the chart-created
+    # `<fullname>-dtrack` PVC. `size`, `storageClass` and `annotations` are
+    # then unused.
+    existingClaim: ""
+    # -- Annotations for the Dependency-Track data PVC the chart creates (ignored when
+    # `existingClaim` is set). For example `helm.sh/resource-policy: keep` to
+    # keep it on `helm uninstall`, or `argocd.argoproj.io/sync-options:
+    # Prune=false` so Argo CD never prunes it.
+    annotations: {}
   resources:
     requests:
       cpu: 500m
@@ -1391,6 +1472,16 @@ imageBuilder:
     enabled: true
     size: 40Gi
     storageClass: ""
+    # -- Name of a pre-existing PersistentVolumeClaim to mount as the BuildKit
+    # cache instead of the chart-created `<fullname>-buildkitd-cache` PVC.
+    # Requires `enabled: true`; `size`, `storageClass` and `annotations` are
+    # then unused.
+    existingClaim: ""
+    # -- Annotations for the BuildKit cache PVC the chart creates (ignored when
+    # `existingClaim` is set). For example `helm.sh/resource-policy: keep` to
+    # keep it on `helm uninstall`, or `argocd.argoproj.io/sync-options:
+    # Prune=false` so Argo CD never prunes it.
+    annotations: {}
   resources:
     requests:
       cpu: 500m

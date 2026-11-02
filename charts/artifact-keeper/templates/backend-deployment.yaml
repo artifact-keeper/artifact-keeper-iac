@@ -509,7 +509,7 @@ spec:
           {{- fail "backend.persistence.enabled and backend.persistence.ephemeral.enabled cannot both be true" }}
           {{- end }}
           persistentVolumeClaim:
-            claimName: {{ include "artifact-keeper.fullname" . }}-storage
+            claimName: {{ .Values.backend.persistence.existingClaim | default (printf "%s-storage" (include "artifact-keeper.fullname" .)) }}
           {{- else if .Values.backend.persistence.ephemeral.enabled }}
           ephemeral:
             volumeClaimTemplate:
@@ -530,7 +530,7 @@ spec:
         - name: scan-workspace
           {{- if .Values.backend.scanWorkspace.enabled }}
           persistentVolumeClaim:
-            claimName: {{ include "artifact-keeper.fullname" . }}-scan-workspace
+            claimName: {{ .Values.backend.scanWorkspace.existingClaim | default (printf "%s-scan-workspace" (include "artifact-keeper.fullname" .)) }}
           {{- else }}
           {{- /* Trivy is enabled, so SCAN_WORKSPACE_PATH=/scan-workspace is in
                  the env above, but no PVC was requested. The container root
@@ -546,7 +546,7 @@ spec:
         {{- if eq (include "artifact-keeper.dtrackApiKeyFile" .) "true" }}
         - name: shared-config
           persistentVolumeClaim:
-            claimName: {{ include "artifact-keeper.fullname" . }}-shared-config
+            claimName: {{ include "artifact-keeper.sharedConfigClaimName" . }}
         {{- end }}
         {{- with .Values.backend.extraVolumes }}
         {{- toYaml . | nindent 8 }}

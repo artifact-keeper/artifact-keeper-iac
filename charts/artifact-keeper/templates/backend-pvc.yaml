@@ -7,7 +7,8 @@ reviewed and modified to match your specific infrastructure requirements,
 security policies, and operational needs before use in production.
 =============================================================================
 */}}
-{{- if and .Values.backend.enabled .Values.backend.persistence.enabled }}
+{{- include "artifact-keeper.validateExistingClaims" . }}
+{{- if and .Values.backend.enabled .Values.backend.persistence.enabled (not .Values.backend.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -15,6 +16,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
+  {{- with .Values.backend.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes:
     {{- range (.Values.backend.persistence.accessModes | default (list "ReadWriteOnce")) }}
@@ -27,7 +32,7 @@ spec:
   storageClassName: {{ .Values.backend.persistence.storageClass | quote }}
   {{- end }}
 {{- end }}
-{{- if and .Values.backend.enabled .Values.backend.scanWorkspace.enabled }}
+{{- if and .Values.backend.enabled .Values.backend.scanWorkspace.enabled (not .Values.backend.scanWorkspace.existingClaim) }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -36,6 +41,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
+  {{- with .Values.backend.scanWorkspace.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes:
     - ReadWriteOnce
@@ -46,7 +55,7 @@ spec:
   storageClassName: {{ .Values.backend.persistence.storageClass | quote }}
   {{- end }}
 {{- end }}
-{{- if eq (include "artifact-keeper.dtrackApiKeyFile" .) "true" }}
+{{- if and (eq (include "artifact-keeper.dtrackApiKeyFile" .) "true") (not .Values.backend.sharedConfig.existingClaim) }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -55,6 +64,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: shared
+  {{- with .Values.backend.sharedConfig.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes:
     {{- range (.Values.backend.sharedConfig.accessModes | default (list "ReadWriteOnce")) }}

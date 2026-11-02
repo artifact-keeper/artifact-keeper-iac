@@ -157,7 +157,8 @@ spec:
             sizeLimit: {{ .Values.trivy.tmpSizeLimit | default "256Mi" }}
         - name: trivy-cache
           persistentVolumeClaim:
-            claimName: {{ include "artifact-keeper.fullname" . }}-trivy-cache
+            claimName: {{ .Values.trivy.persistence.existingClaim | default (printf "%s-trivy-cache" (include "artifact-keeper.fullname" .)) }}
+{{- if not .Values.trivy.persistence.existingClaim }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -166,6 +167,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: trivy
+  {{- with .Values.trivy.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes:
     - ReadWriteOnce
@@ -175,6 +180,7 @@ spec:
   {{- if .Values.trivy.persistence.storageClass }}
   storageClassName: {{ .Values.trivy.persistence.storageClass | quote }}
   {{- end }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

@@ -583,6 +583,16 @@ The keys are `backend.persistence.annotations`, `backend.scanWorkspace.annotatio
 
 The chart creates a single Ingress resource that routes traffic to the backend and web frontend. By default it uses the `nginx` IngressClass with a 1024m proxy body size limit (for large artifact uploads) and 300-second timeouts.
 
+The body size and timeouts come from `ingress.maxBodySize`, `ingress.proxyReadTimeoutSeconds` and `ingress.proxySendTimeoutSeconds`, which render as `nginx.ingress.kubernetes.io/*` annotations. They render for `className: nginx`. For any other class they are left out, and the install notes warn about it. If another class name is served by ingress-nginx, opt it in, otherwise uploads hit the controller's default limit:
+
+```yaml
+ingress:
+  className: nginx-internal
+  nginxAnnotations: true
+```
+
+For a controller that isn't ingress-nginx, set the equivalent limits on the controller. A key you set in `ingress.annotations` always wins over the derived value.
+
 To enable TLS with cert-manager:
 
 ```yaml

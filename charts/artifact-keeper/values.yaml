@@ -1638,18 +1638,23 @@ ingress:
     # entirely). "*" preserves the chart's previous behavior; restrict it to
     # the origin(s) that should call the Dependency-Track API cross-origin.
     corsAllowOrigin: "*"
+  # -- Render the nginx proxy annotations below for a className other than
+  # `nginx`, such as an internal ingress-nginx class named `nginx-internal`.
+  # className `nginx` always gets them. For any other class they are left out
+  # unless this is true, and NOTES.txt warns that the limits are not applied.
+  nginxAnnotations: false
   # Maximum client request body size, rendered as the nginx `proxy-body-size`
-  # annotation when className is `nginx`. Registries host large artifacts, so
+  # annotation when className is `nginx` or nginxAnnotations is true. Registries host large artifacts, so
   # this defaults high; "0" disables the limit entirely. Set to "" to omit the
   # annotation (for example when a non-nginx controller manages it elsewhere).
   maxBodySize: "1024m"
   # Proxy read timeout in seconds, rendered as the nginx `proxy-read-timeout`
-  # annotation when className is `nginx`. Raise this for multi-GiB uploads over
+  # annotation when className is `nginx` or nginxAnnotations is true. Raise this for multi-GiB uploads over
   # slow links, where the default 300 can be too short. Set to null to omit the
   # annotation.
   proxyReadTimeoutSeconds: 300
   # Proxy send timeout in seconds, rendered as the nginx `proxy-send-timeout`
-  # annotation when className is `nginx`. Set to null to omit the annotation.
+  # annotation when className is `nginx` or nginxAnnotations is true. Set to null to omit the annotation.
   proxySendTimeoutSeconds: 300
   host: artifacts.example.com
   tls:

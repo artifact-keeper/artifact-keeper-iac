@@ -3,8 +3,12 @@
 # =============================================================================
 # Layer this file on top of values.yaml:
 #
-#   helm install ak . -f values.yaml -f values-cnpg.yaml \
-#     --set secrets.jwtSecret=$(openssl rand -base64 48)
+#   helm install ak . -f values.yaml -f values-cnpg.yaml
+#
+# The chart generates secrets.jwtSecret if it is unset and keeps it across
+# upgrades. With Argo CD, Flux or plain helm template, set it or use
+# secrets.existingSecret, because those render a new value every time. No
+# database password is generated in this mode.
 #
 # It expects two CloudNativePG Cluster resources in the release namespace,
 # for example:

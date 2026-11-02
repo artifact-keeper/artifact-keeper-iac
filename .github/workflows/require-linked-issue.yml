@@ -18,6 +18,10 @@ concurrency:
 jobs:
   require-linked-issue:
     name: Require linked issue in PR body
+    # Dependabot cannot write a "Closes #N" line, and its bumps are traceable
+    # through the dependabot commit and the `dependencies` label the config
+    # applies, so the gate does not apply to it (#408).
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     steps:
       - name: Check PR body for linked issue

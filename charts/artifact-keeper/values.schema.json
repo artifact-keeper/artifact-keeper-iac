@@ -8,6 +8,12 @@
         "nginxAnnotations": {"type": "boolean"}
       }
     },
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "generate": {"type": "boolean"}
+      }
+    },
     "httpRoute": {
       "type": "object",
       "additionalProperties": false,

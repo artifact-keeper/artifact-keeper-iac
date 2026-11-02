@@ -1,20 +1,20 @@
 # artifact-keeper
 
-![Version: 1.9.52](https://img.shields.io/badge/Version-1.9.52-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.10](https://img.shields.io/badge/AppVersion-1.11.10-informational?style=flat-square)
+![Version: 1.9.53](https://img.shields.io/badge/Version-1.9.53-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.10](https://img.shields.io/badge/AppVersion-1.11.10-informational?style=flat-square)
 
 ## TL;DR
 
-Install from a cloned checkout:
-
 ```bash
-git clone https://github.com/artifact-keeper/artifact-keeper-iac.git
-cd artifact-keeper-iac
-helm install ak charts/artifact-keeper/ \
+helm repo add artifact-keeper https://artifact-keeper.github.io/artifact-keeper-iac/
+helm repo update
+helm install ak artifact-keeper/artifact-keeper \
   --namespace artifact-keeper \
   --create-namespace
 ```
 
-A published Helm repository at `https://artifact-keeper.github.io/artifact-keeper-iac/` is planned but not yet live. See [issue #51](https://github.com/artifact-keeper/artifact-keeper-iac/issues/51) for tracking.
+To install from a cloned checkout instead, use `helm install ak charts/artifact-keeper/` in place of `artifact-keeper/artifact-keeper`.
+
+No values are required: the chart generates the JWT secret and the Postgres password. If you deploy with Argo CD, Flux or plain `helm template`, read [Generated credentials](#generated-credentials) first.
 
 ## Introduction
 
@@ -33,7 +33,7 @@ The chart and backend versions must match. The current chart on `main` deploys O
 
 For deployments running backend v1.1.x, pin the chart to a tag matching that line. Mixing chart `main` with backend `:1.1-dev` will fail at startup because the backend will not find an OpenSearch endpoint.
 
-Tracking issues: chart release tags are coordinated in [#74](https://github.com/artifact-keeper/artifact-keeper-iac/issues/74), and a published Helm repository is tracked in [#51](https://github.com/artifact-keeper/artifact-keeper-iac/issues/51).
+Tracking issues: chart release tags are coordinated in [#74](https://github.com/artifact-keeper/artifact-keeper-iac/issues/74).
 
 ## Prerequisites
 
@@ -61,7 +61,15 @@ helm install ak charts/artifact-keeper/ \
   --create-namespace
 ```
 
-A published Helm repository at `https://artifact-keeper.github.io/artifact-keeper-iac/` is planned but not yet live (see [issue #51](https://github.com/artifact-keeper/artifact-keeper-iac/issues/51)). Once published, the equivalent install command will be `helm install ak artifact-keeper/artifact-keeper`.
+The chart is also published to a Helm repository:
+
+```bash
+helm repo add artifact-keeper https://artifact-keeper.github.io/artifact-keeper-iac/
+helm repo update
+helm install ak artifact-keeper/artifact-keeper \
+  --namespace artifact-keeper \
+  --create-namespace
+```
 
 If you are running backend v1.1.x, do not install from `main`. See the [Compatibility Matrix](#compatibility-matrix) above for chart/backend version pairing.
 
@@ -259,6 +267,7 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | opensearch.waitTimeoutSeconds | int | `180` | Seconds the backend's wait-for-opensearch init container waits for OpenSearch to reach green/yellow before proceeding on the Postgres-native search fallback. OpenSearch is an optional accelerator (the backend boots without it), so an unbounded wait turns a slow/degraded OpenSearch into a backend-that-never-starts. 0 restores the legacy wait-forever behavior. |
 | postgres | object | `{"affinity":{},"annotations":{},"auth":{"database":"artifact_registry","password":"","username":"registry"},"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}},"enabled":true,"image":{"repository":"postgres","tag":"16-alpine"},"initDb":{"enabled":true},"nodeSelector":{},"persistence":{"annotations":{},"existingClaim":"","size":"20Gi","storageClass":""},"podAnnotations":{},"podSecurityContext":{"fsGroup":999,"runAsNonRoot":true,"runAsUser":999},"resources":{"limits":{"cpu":"1","ephemeral-storage":"512Mi","memory":"1Gi"},"requests":{"cpu":"250m","ephemeral-storage":"128Mi","memory":"256Mi"}},"tolerations":[],"topologySpreadConstraints":[]}` | PostgreSQL (in-cluster, disable for external/RDS) For production, set postgres.enabled=false and configure externalDatabase to point at a managed database (RDS, Cloud SQL, etc.). The in-cluster instance is suitable for dev/testing only. |
 | postgres.annotations | object | `{}` | Annotations added to the PostgreSQL StatefulSet metadata. See backend.annotations. |
+| postgres.auth.password | string | `""` | Empty generates one and keeps it across upgrades (see secrets.generate). Postgres only applies the password when it first initializes its data directory, so changing it here later doesn't change the database's password, and a new install over a retained PVC needs the old one. Under Argo CD, Flux or plain `helm template`, set it or use secrets.existingSecret. If you supply your own, it goes into DATABASE_URL unencoded, so avoid URL-reserved characters. |
 | postgres.containerSecurityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}` | Container-level securityContext. Drops all capabilities and disables privilege escalation; the pod already runs as non-root UID 999 (podSecurityContext above), so the postgres entrypoint takes its non-root path and never needs CHOWN/FOWNER on the data directory.  readOnlyRootFilesystem is intentionally NOT set: postgres writes its unix socket, lock files, and initdb artifacts outside the data volume (/var/run/postgresql, /tmp), so a read-only rootfs prevents the pod from starting. To enable it, also mount emptyDir volumes at those paths. |
 | postgres.persistence.annotations | object | `{}` | Annotations for the PVC created from the StatefulSet's `volumeClaimTemplates` (ignored when `existingClaim` is set). StatefulSet PVCs already outlive the StatefulSet and are not pruned by Helm or Argo CD. Changing this on an installed release hits the same immutability as `existingClaim`. |
 | postgres.persistence.existingClaim | string | `""` | Name of a pre-existing PersistentVolumeClaim to mount as the PostgreSQL data directory. When set, the StatefulSet drops its `volumeClaimTemplates` and mounts this claim through `volumes:` instead (PostgreSQL always runs one replica). `size`, `storageClass` and `annotations` are then unused. StatefulSet `volumeClaimTemplates` are immutable, so switching an installed release to or from this value needs `kubectl delete statefulset <fullname>-postgres --cascade=orphan` before the upgrade. To keep the data, point it at the existing `postgres-data-<fullname>-postgres-0` claim. |
@@ -279,8 +288,9 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | scannerAdapter.image.tag | string | `"1.5.2"` | The scanner-adapter is versioned independently of the AK backend/web/edge images (its own `1.x` line; there is no `scanner-adapter:<appVersion>`). Pin the exact adapter release that the pinned backend release ships with, so every node runs the same digest: the floating `1`/`1.5`/`latest` tags move on each adapter release and, combined with pullPolicy IfNotPresent, would leave nodes on whichever build they first cached. Repoint this alongside backend.image.tag. The deployment renders the tag as `tag | default .Chart.AppVersion`, so leaving this empty ("") would fall back to appVersion and pull a non-existent tag — keep it pinned. Backend 1.11.10 ships adapter 1.5.2, whose bundled trivy is 0.76.0 (image 0.76.0-r3, go-jose 4.1.6); when the adapter is pointed at the chart's trivy server (SCANNER_TRIVY_SERVER), trivy.image.tag must be the same trivy release or the adapter refuses to scan. |
 | scannerAdapter.proxy | object | `{"enabled":true,"existingSecret":"","httpProxy":"","httpsProxy":"","noProxy":""}` | Egress proxy for the scanner-adapter: inherits global.proxy field by field (noProxy is appended to the global list). Fetches the Trivy DB, so it usually needs egress; set enabled: false to cut it off. |
 | scannerAdapter.tolerations | list | `[]` | Per-component scheduling (overrides global). Do NOT arch-pin here; the image is multi-arch. |
-| secrets | object | `{"existingSecret":"","jwtSecret":"","migrationEncryptionKey":"","migrationEncryptionKeyEnabled":false,"s3AccessKey":"","s3SecretKey":"","smtpPassword":"","ssoEncryptionKey":"","ssoEncryptionKeyEnabled":false,"webhookSecretKey":"","webhookSecretKeyEnabled":false}` | Secrets These are development defaults. For production, override via --set or use existingSecret references. Never commit real credentials here. |
+| secrets | object | `{"existingSecret":"","generate":true,"jwtSecret":"","migrationEncryptionKey":"","migrationEncryptionKeyEnabled":false,"s3AccessKey":"","s3SecretKey":"","smtpPassword":"","ssoEncryptionKey":"","ssoEncryptionKeyEnabled":false,"webhookSecretKey":"","webhookSecretKeyEnabled":false}` | Secrets These are development defaults. For production, override via --set or use existingSecret references. Never commit real credentials here. |
 | secrets.existingSecret | string | `""` | Name of an existing Secret that already holds the core application credentials (JWT_SECRET, and DATABASE_URL/POSTGRES_PASSWORD when the chart would otherwise manage them). When set, the chart does not render its own Secret and all workloads read from this Secret instead, so the values under `secrets` and `postgres.auth.password` are not required. Useful for GitOps and secret-manager workflows where the Secret is provisioned out of band. Optional encryption keys are wired separately using the *Enabled flags below, or backend.environmentSecrets for custom Secret/key names. |
+| secrets.generate | bool | `true` | Generate secrets.jwtSecret and postgres.auth.password when they are left empty, and keep them across upgrades by reading them back from the chart's Secret. A value you supply always wins, and this doesn't apply with existingSecret or External Secrets. Reading the Secret needs a live cluster: Argo CD, Flux and plain `helm template` generate new values on every render, and a new Postgres password stops matching the existing database, so with those tools set both values or use existingSecret. Set false to fail the render when a value is missing, as values-production.yaml and values-staging.yaml do. See "Generated credentials" in the README. |
 | secrets.migrationEncryptionKeyEnabled | bool | `false` | Inject MIGRATION_ENCRYPTION_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty migrationEncryptionKey. |
 | secrets.ssoEncryptionKey | string | `""` | SSO_ENCRYPTION_KEY: the key the backend encrypts stored SSO provider secrets (OIDC client secrets, LDAP bind passwords) and upstream repository credentials with. Empty (the default) sets nothing, and the backend falls back to JWT_SECRET, so rotating the JWT secret also breaks those stored values. Any non-empty string works; use a random value such as `openssl rand -hex 32`. The chart never generates it. WARNING: setting or changing it on an existing install re-keys: SSO secrets and upstream credentials stored under the previous key (JWT_SECRET when this was unset) can no longer be decrypted. Set it at first install, or re-enter those secrets and credentials after enabling it. With existingSecret, a nonempty value still enables the reference for compatibility; prefer ssoEncryptionKeyEnabled. |
 | secrets.ssoEncryptionKeyEnabled | bool | `false` | Inject SSO_ENCRYPTION_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty ssoEncryptionKey. The re-keying warning on ssoEncryptionKey applies. |
@@ -978,10 +988,23 @@ When `networkPolicy.enabled` is set to `true`, the chart creates NetworkPolicy r
 
 ### Secrets Management
 
-For development, secrets are stored directly in the chart's Secret template. For production, two options exist:
+For development, the chart generates what it needs and stores it in its own Secret (see [Generated credentials](#generated-credentials)). For production, two options exist:
 
 1. **External overrides**: Pass secrets via `--set` flags or external values files that are not committed to version control.
 2. **External Secrets Operator**: Set `externalSecrets.enabled: true` to pull secrets from AWS Secrets Manager (or another provider) using ExternalSecret CRDs.
+
+#### Generated credentials
+
+When `secrets.jwtSecret` or `postgres.auth.password` is empty, the chart generates it and stores it in the `<fullname>-secrets` Secret. On later upgrades it reads the stored value back with `lookup`, so upgrades, including `--reuse-values`, never rotate it.
+
+- A value you supply always wins. Supplying a new `postgres.auth.password` later doesn't change the password inside an initialized database; see [Recovering a PostgreSQL password mismatch](#recovering-a-postgresql-password-mismatch).
+- Nothing is generated with `secrets.existingSecret` or `externalSecrets.enabled`, or for an external database.
+- `secrets.generate: false` turns generation off, so a missing value fails the render. `values-production.yaml` and `values-staging.yaml` set this.
+- Moving from `secrets.existingSecret` back to the chart's Secret generates new values, because the chart's Secret doesn't exist yet. Copy the values across first.
+
+> **Argo CD, Flux and plain `helm template`: set the values or use `secrets.existingSecret`.** `lookup` needs a live cluster. These tools render without one, so every render generates new values. Each sync would then rotate the JWT secret, ending every session and, unless `secrets.ssoEncryptionKey` is set, breaking stored SSO secrets and upstream credentials. It would also change the Postgres password in the Secret, which stops matching the existing database, so the backend can't connect. These tools don't show `NOTES.txt` either, so nothing warns you at deploy time.
+>
+> The dev profile in this repo's `argocd/applicationset.yaml` leaves these values to the chart and pins them with `ignoreDifferences` plus `RespectIgnoreDifferences=true`, so the live values are kept after first creation. That is only suitable for throwaway environments: if the Secret is ever recreated, the values change.
 
 **Backend credentials go in `backend.environmentSecrets`, never in `backend.env`.** `backend.env` is copied into the backend Deployment as plain `value:` entries. Anyone who can `get` the Deployment or its pods, or read the Helm release Secret, can read it. The render fails when `backend.env` sets a non-empty credential: `ADMIN_PASSWORD`, `INITIAL_ADMIN_PASSWORD`, `JWT_SECRET`, `S3_SECRET_ACCESS_KEY` (or `S3_SECRET_KEY`), a `DATABASE_URL` with a password, `DEPENDENCY_TRACK_API_KEY`, `OPENSEARCH_PASSWORD`, `OIDC_CLIENT_SECRET`, `LDAP_BIND_PASSWORD`, `SMTP_PASSWORD`, `PEER_API_KEY`, `EDGE_API_KEY`, `GITHUB_TOKEN`, an Azure, GCS or CloudFront key, or an encryption key. Put a Secret reference in `backend.environmentSecrets` instead. An entry there wins over the same key in `backend.env`.
 
@@ -1246,6 +1269,27 @@ When `replicaCount >= 2`, the chart renders a StatefulSet with `cluster.initial_
 ### DependencyTrack Slow Startup
 
 DependencyTrack loads its vulnerability database on first boot, which requires 4Gi+ of memory and can take several minutes. The readiness probe is configured with a generous initial delay. If the pod is killed before initialization completes, increase `dependencyTrack.resources.limits.memory`.
+
+### Recovering a PostgreSQL password mismatch
+
+Postgres applies its password only when it first initializes its data directory. When `postgres.auth.password` is unset, the chart generates a password on first install and keeps it stable by reading it back from the Secret on later renders. These situations break the pairing between the Secret and the password the database actually has:
+
+1. `helm uninstall` followed by `helm install`. Uninstall deletes the Secret, but the Postgres PVC survives (StatefulSet PVCs are never removed by Helm), so the new install generates a fresh password while the database still has the old one.
+2. A new `postgres.auth.password` on an existing release, or the Secret edited or replaced out of band.
+3. Rendering with Argo CD, Flux or plain `helm template` (see [Generated credentials](#generated-credentials)).
+
+The backend's `wait-for-postgres` init container only checks that Postgres is up, so the backend then starts, logs `password authentication failed` and restarts in a loop, and `helm install --wait` times out. To recover, pick one (`<fullname>` is usually `<release>-artifact-keeper`):
+
+- **Restore the old password**: if you still have it (a Secret backup, a values file), set it as `postgres.auth.password` and run the upgrade again.
+- **Change the database to match the Secret**: the local socket in the Postgres image doesn't ask for a password, so you can apply the Secret's value directly:
+
+  ```bash
+  kubectl exec <fullname>-postgres-0 -n <namespace> -- sh -c \
+    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER USER \"$POSTGRES_USER\" PASSWORD '"'"'$POSTGRES_PASSWORD'"'"'"'
+  kubectl rollout restart deployment/<fullname>-backend -n <namespace>
+  ```
+
+- **Start over**: delete the claim (`kubectl delete pvc postgres-data-<fullname>-postgres-0`) and the Postgres pod, which initializes an empty database with the Secret's password. This loses all data in the database.
 
 ### Recovering a Dependency-Track password mismatch
 

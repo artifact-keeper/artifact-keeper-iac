@@ -80,7 +80,7 @@ jobs:
         run: ct lint --target-branch main --charts charts/artifact-keeper/
 
       - name: Run helm lint
-        run: helm lint charts/artifact-keeper/ --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)
+        run: helm lint charts/artifact-keeper/
 
       - name: Run chart render tests
         run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_render_*.py' -v
@@ -190,7 +190,8 @@ jobs:
       matrix:
         include:
           - variant: default
-            values_args: "--set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
+            # No values: the chart generates the JWT secret and Postgres password (#317).
+            values_args: ""
           - variant: production
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging
@@ -255,7 +256,8 @@ jobs:
       matrix:
         include:
           - variant: default
-            values_args: "--set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
+            # No values: the chart generates the JWT secret and Postgres password (#317).
+            values_args: ""
           - variant: production
             values_args: "-f charts/artifact-keeper/values-production.yaml"
           - variant: staging

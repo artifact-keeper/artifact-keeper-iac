@@ -220,7 +220,7 @@ Database URL helper — returns the full DATABASE_URL string
 */}}
 {{- define "artifact-keeper.databaseUrl" -}}
 {{- if .Values.postgres.enabled -}}
-postgresql://{{ .Values.postgres.auth.username }}:{{ .Values.postgres.auth.password }}@{{ include "artifact-keeper.fullname" . }}-postgres:5432/{{ .Values.postgres.auth.database }}
+postgresql://{{ .Values.postgres.auth.username }}:{{ include "artifact-keeper.postgresPassword" . }}@{{ include "artifact-keeper.fullname" . }}-postgres:5432/{{ .Values.postgres.auth.database }}
 {{- else -}}
 postgresql://{{ .Values.externalDatabase.username }}:{{ .Values.externalDatabase.password }}@{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port }}/{{ .Values.externalDatabase.database }}
 {{- end -}}
@@ -250,6 +250,87 @@ operator-supplied Secret; otherwise this is the chart-managed
 {{- else -}}
 {{- printf "%s-secrets" (include "artifact-keeper.fullname" .) -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+A credential the chart generates when the operator leaves it empty. Takes a dict
+with root (the chart context), key (the key in the chart's Secret) and length.
+
+Resolution order, and the order matters:
+
+  1. The value stored under that key in the chart's Secret, read back with
+     lookup. This is what keeps it stable across "helm upgrade".
+  2. A value already generated during this render. randAlphaNum differs on every
+     call, and DATABASE_URL and POSTGRES_PASSWORD must hold the same password,
+     so the first result is kept in .Values for the rest of the render. Helm
+     does not store this: a release stores only the values the operator passed.
+  3. A freshly generated alphanumeric value. Alphanumeric because the password
+     goes into DATABASE_URL unencoded.
+
+lookup returns nothing under "helm template" and client-side "--dry-run", so
+those renders produce a new value every time. A GitOps engine that deploys by
+running "helm template" would rotate these on every sync, so such operators must
+set the values or use secrets.existingSecret. See the README, "Generated
+credentials".
+*/}}
+{{- define "artifact-keeper.generatedSecret" -}}
+{{- $values := .root.Values -}}
+{{- if not (hasKey $values "_generatedSecrets") -}}
+{{- $_ := set $values "_generatedSecrets" dict -}}
+{{- end -}}
+{{- if not (hasKey $values._generatedSecrets .key) -}}
+{{- $existing := "" -}}
+{{- $secret := lookup "v1" "Secret" .root.Release.Namespace (include "artifact-keeper.secretName" .root) -}}
+{{- if and $secret $secret.data -}}
+{{- $existing = index $secret.data .key | default "" | b64dec -}}
+{{- end -}}
+{{- $_ := set $values._generatedSecrets .key (default (randAlphaNum .length) $existing) -}}
+{{- end -}}
+{{- index $values._generatedSecrets .key -}}
+{{- end -}}
+
+{{/*
+JWT signing secret: secrets.jwtSecret if set, otherwise generated. 64 alphanumeric
+characters clears the backend's checks (32 characters, 128 estimated bits).
+*/}}
+{{- define "artifact-keeper.jwtSecret" -}}
+{{- if .Values.secrets.jwtSecret -}}
+{{- .Values.secrets.jwtSecret -}}
+{{- else -}}
+{{- include "artifact-keeper.generatedSecret" (dict "root" . "key" "JWT_SECRET" "length" 64) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+In-chart Postgres password: postgres.auth.password if set, otherwise generated.
+*/}}
+{{- define "artifact-keeper.postgresPassword" -}}
+{{- if .Values.postgres.auth.password -}}
+{{- .Values.postgres.auth.password -}}
+{{- else -}}
+{{- include "artifact-keeper.generatedSecret" (dict "root" . "key" "POSTGRES_PASSWORD" "length" 32) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether generation is off. Only an explicit false turns it off: "helm upgrade
+--reuse-values" from a chart without secrets.generate leaves the key unset.
+*/}}
+{{- define "artifact-keeper.secretGenerationDisabled" -}}
+{{- if eq (toString .Values.secrets.generate) "false" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Comma-separated values the chart is generating or preserving for this release,
+empty when every credential is supplied or the chart renders no Secret.
+*/}}
+{{- define "artifact-keeper.generatedSecretNames" -}}
+{{- $names := list -}}
+{{- if and (not .Values.externalSecrets.enabled) (not .Values.secrets.existingSecret) (ne (include "artifact-keeper.secretGenerationDisabled" .) "true") -}}
+{{- if not .Values.secrets.jwtSecret -}}{{- $names = append $names "secrets.jwtSecret" -}}{{- end -}}
+{{- if and .Values.postgres.enabled (not .Values.postgres.auth.password) -}}{{- $names = append $names "postgres.auth.password" -}}{{- end -}}
+{{- end -}}
+{{- join ", " $names -}}
 {{- end -}}
 
 {{/*
@@ -422,11 +503,13 @@ DATABASE_URL keeps working.
 {{- if or .Values.externalSecrets.enabled .Values.secrets.existingSecret -}}
 {{- /* Secrets are supplied externally; no chart-owned Secret to validate. */ -}}
 {{- else -}}
+{{- if eq (include "artifact-keeper.secretGenerationDisabled" .) "true" -}}
 {{- if eq .Values.secrets.jwtSecret "" -}}
-{{- fail "secrets.jwtSecret is required when externalSecrets is not enabled. Set it with --set secrets.jwtSecret=<value>" -}}
+{{- fail "secrets.jwtSecret is required when externalSecrets is not enabled and secrets.generate is false. Set it with --set secrets.jwtSecret=<value>" -}}
 {{- end -}}
 {{- if and .Values.postgres.enabled (eq .Values.postgres.auth.password "") -}}
-{{- fail "postgres.auth.password is required when postgres is enabled. Set it with --set postgres.auth.password=<value>" -}}
+{{- fail "postgres.auth.password is required when postgres is enabled and secrets.generate is false. Set it with --set postgres.auth.password=<value>" -}}
+{{- end -}}
 {{- end -}}
 {{- if and .Values.opensearch.enabled (not .Values.opensearch.disableSecurityPlugin) (eq .Values.opensearch.auth.password "") -}}
 {{- fail "opensearch.auth.password is required when opensearch is enabled and disableSecurityPlugin is false. Set it with --set opensearch.auth.password=<value>" -}}

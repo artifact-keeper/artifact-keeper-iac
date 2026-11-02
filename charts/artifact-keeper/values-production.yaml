@@ -190,6 +190,9 @@ ingress:
     enabled: true
 
 secrets:
+  # Credentials here come from External Secrets. If that is turned off, fail the
+  # render on a missing value rather than generate a production JWT secret.
+  generate: false
   jwtSecret: ""
   s3AccessKey: ""
   s3SecretKey: ""

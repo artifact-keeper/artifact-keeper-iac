@@ -638,6 +638,15 @@ backend:
   # a specific label (e.g. azure.workload.identity/use: "true") alongside a
   # matching serviceAccount.annotations entry above.
   podLabels: {}
+  # -- Annotations added to the backend Deployment metadata, for operators
+  # that watch workload annotations such as Stakater Reloader
+  # (reloader.stakater.com/auto: "true") to restart pods when a referenced
+  # Secret or ConfigMap changes (#344).
+  annotations: {}
+  # -- Annotations added to the backend pod template, for example
+  # cluster-autoscaler.kubernetes.io/safe-to-evict: "false" to keep the
+  # autoscaler from draining the node under a running backend (#334).
+  podAnnotations: {}
   serviceAccount:
     create: true
     annotations: {}
@@ -698,6 +707,10 @@ web:
   topologySpreadConstraints: []
   # -- Extra labels merged onto the web pod template. See backend.podLabels.
   podLabels: {}
+  # -- Annotations added to the web Deployment metadata. See backend.annotations.
+  annotations: {}
+  # -- Annotations added to the web pod template. See backend.podAnnotations.
+  podAnnotations: {}
 
 # -- Edge replication service
 # NOTE: The ghcr.io/artifact-keeper/artifact-keeper-edge image is not yet
@@ -757,6 +770,11 @@ edge:
 # instance is suitable for dev/testing only.
 postgres:
   enabled: true
+  # -- Annotations added to the PostgreSQL StatefulSet metadata. See backend.annotations.
+  annotations: {}
+  # -- Annotations added to the PostgreSQL pod template, for example
+  # cluster-autoscaler.kubernetes.io/safe-to-evict: "false" (#334).
+  podAnnotations: {}
   image:
     repository: postgres
     tag: "16-alpine"
@@ -1123,6 +1141,10 @@ scannerAdapter:
 # admin user and API key for backend integration.
 dependencyTrack:
   enabled: true
+  # -- Annotations added to the Dependency-Track Deployment metadata. See backend.annotations.
+  annotations: {}
+  # -- Annotations added to the Dependency-Track pod template. See backend.podAnnotations.
+  podAnnotations: {}
   # -- Name of an existing Secret holding a Dependency-Track API key. When set,
   # the backend reads DEPENDENCY_TRACK_API_KEY from it and the shared-config
   # volume, its mount, DEPENDENCY_TRACK_API_KEY_FILE and the shared-config PVC

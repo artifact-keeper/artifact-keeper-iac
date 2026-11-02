@@ -84,6 +84,9 @@ jobs:
       - name: Test credential, OpenSearch and metrics policy rendering
         run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_security_posture.py' -v
 
+      - name: Test additional chart regressions
+        run: python3 -m unittest discover -s charts/artifact-keeper/tests -p 'test_chart_*.py' -v
+
   gate-profiles:
     name: Release Gate Profiles Render
     # Stage 1 of the concurrency chain at the top of this file.

@@ -163,7 +163,7 @@ fleet:
 # directory it does not own. Choose one before deploying:
 #   (a) RECOMMENDED: use an external/managed PostgreSQL and set postgres.enabled
 #       false with the externalDatabase.* values (or a Postgres operator such as
-#       CloudNativePG / Crunchy).
+#       CloudNativePG, see values-cnpg.yaml, or Crunchy).
 #   (b) Swap postgres.image for a UID-agnostic image (e.g. Red Hat
 #       rhel9/postgresql-16); note its data path and env vars differ from the
 #       docker-official image, so the statefulset template needs matching edits.

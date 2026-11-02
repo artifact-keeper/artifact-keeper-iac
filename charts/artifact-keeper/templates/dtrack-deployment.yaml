@@ -8,6 +8,7 @@ security policies, and operational needs before use in production.
 =============================================================================
 */}}
 {{- if .Values.dependencyTrack.enabled }}
+{{- include "artifact-keeper.validateDedicatedDatabase" . }}
 {{- $manageApiKeySecret := dig "bootstrap" "manageApiKeySecret" false .Values.dependencyTrack }}
 apiVersion: apps/v1
 kind: Deployment
@@ -75,28 +76,20 @@ spec:
               memory: 64Mi
               ephemeral-storage: 64Mi
           {{- if include "artifact-keeper.dedicatedDatabase" . }}
-          # pg_isready reads PGHOST/PGPORT/PGUSER from the environment.
+          # The URI, not the Secret's host key: CloudNativePG's host is the bare
+          # Service name, which does not resolve from another namespace, while its
+          # uri carries the namespace.
           env:
-            - name: PGHOST
+            - name: WAIT_DATABASE_URI
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.dependencyTrack.dedicatedDatabase.existingSecret }}
-                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "host" "default" "host") }}
-            - name: PGPORT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.dependencyTrack.dedicatedDatabase.existingSecret }}
-                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "port" "default" "port") }}
-            - name: PGUSER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.dependencyTrack.dedicatedDatabase.existingSecret }}
-                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "username" "default" "username") }}
+                  key: {{ include "artifact-keeper.dtrack.dbSecretKey" (dict "root" $ "key" "uri" "default" "uri") }}
           command: ["/bin/sh", "-c"]
           args:
             - |
               echo "Waiting for PostgreSQL..."
-              until pg_isready; do
+              until pg_isready -d "$WAIT_DATABASE_URI"; do
                 sleep 3
               done
               echo "PostgreSQL is ready"

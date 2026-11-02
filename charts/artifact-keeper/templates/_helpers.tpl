@@ -222,10 +222,12 @@ externalDatabase remains the default (externalDatabase.enabled defaults to
 true); setting externalDatabase.enabled to false switches backend and
 DependencyTrack to their per-service dedicatedDatabase.existingSecret
 references (e.g. CloudNativePG `<cluster>-app` Secrets). Returns "true" when
-the per-service references are active.
+the per-service references are active. A missing key counts as true so a
+`helm upgrade --reuse-values` from an older chart, whose stored values predate
+externalDatabase.enabled, stays on the external path.
 */}}
 {{- define "artifact-keeper.dedicatedDatabase" -}}
-{{- if and (not .Values.postgres.enabled) (not .Values.externalDatabase.enabled) -}}
+{{- if and (not .Values.postgres.enabled) (not (dig "enabled" true .Values.externalDatabase)) -}}
 true
 {{- end -}}
 {{- end }}
@@ -243,6 +245,30 @@ application-secret key names when secretKeys (or an individual key) is unset.
 {{- $keys := .root.Values.dependencyTrack.dedicatedDatabase.secretKeys | default dict -}}
 {{- get $keys .key | default .default -}}
 {{- end }}
+
+{{/*
+Checks for dedicated database mode. secrets.yaml, and validateSecrets with it,
+does not render under externalSecrets.enabled or secrets.existingSecret, so both
+Deployments include this instead and it fires in every Secret mode. Each service
+is only required when it is enabled.
+
+Fleet mode is refused because its database path is a single shared server with a
+hook Job (fleet-db-bootstrap-job.yaml) that would still render and provision a
+role and database the backend then never connects to.
+*/}}
+{{- define "artifact-keeper.validateDedicatedDatabase" -}}
+{{- if include "artifact-keeper.dedicatedDatabase" . -}}
+{{- if eq (include "artifact-keeper.fleet.enabled" .) "true" -}}
+{{- fail "fleet.enabled cannot be combined with dedicated database mode (postgres.enabled=false and externalDatabase.enabled=false): fleet instances use a shared PostgreSQL server provisioned by fleet.externalDatabaseBootstrap. Disable fleet, or set externalDatabase.enabled=true." -}}
+{{- end -}}
+{{- if and .Values.backend.enabled (not (dig "dedicatedDatabase" "existingSecret" "" .Values.backend)) -}}
+{{- fail "backend.dedicatedDatabase.existingSecret is required when postgres.enabled=false and externalDatabase.enabled=false: name the Secret holding the backend's database connection (e.g. a CloudNativePG <cluster>-app Secret), or set externalDatabase.enabled=true." -}}
+{{- end -}}
+{{- if and .Values.dependencyTrack.enabled (not (dig "dedicatedDatabase" "existingSecret" "" .Values.dependencyTrack)) -}}
+{{- fail "dependencyTrack.dedicatedDatabase.existingSecret is required when postgres.enabled=false, externalDatabase.enabled=false and dependencyTrack.enabled=true: name the Secret holding Dependency-Track's database connection (e.g. a CloudNativePG <cluster>-app Secret), or set dependencyTrack.enabled=false." -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 
 {{/*
 Database URL helper — returns the full DATABASE_URL string
@@ -496,8 +522,9 @@ and an init script with "CREATE DATABASE ;".
 Whether Dependency-Track reads its database password from
 externalDatabase.existingSecret instead of the chart's app Secret (secretName).
 
-Only with an external database and externalDatabase.existingSecret set, and then
-only when one of these holds:
+Only with an external database (not dedicated mode, which reads the password from
+dependencyTrack.dedicatedDatabase) and externalDatabase.existingSecret set, and
+then only when one of these holds:
 - externalDatabase.existingPasswordKey is set: the operator says where it is.
 - The chart renders its own Secret (no externalSecrets.enabled, no
   secrets.existingSecret). secrets.yaml leaves POSTGRES_PASSWORD out of that
@@ -508,7 +535,7 @@ the app Secret keeps supplying it, as before.
 */}}
 {{- define "artifact-keeper.dtrackDbPasswordFromExistingSecret" -}}
 {{- $ext := .Values.externalDatabase -}}
-{{- if and (not .Values.postgres.enabled) $ext.existingSecret -}}
+{{- if and (not .Values.postgres.enabled) (not (include "artifact-keeper.dedicatedDatabase" .)) $ext.existingSecret -}}
 {{- if or $ext.existingPasswordKey (and (not .Values.externalSecrets.enabled) (not .Values.secrets.existingSecret)) -}}true{{- end -}}
 {{- end -}}
 {{- end -}}
@@ -516,13 +543,14 @@ the app Secret keeps supplying it, as before.
 {{/*
 Whether Dependency-Track's JDBC host and port come from externalDatabase.existingSecret
 (keys existingHostKey / existingPortKey) instead of values. Only with an external
-database, existingSecret set and externalDatabase.host empty: a host set in values
-always wins, together with externalDatabase.port, so a Secret holding only
-DATABASE_URL keeps working.
+database (not dedicated mode, whose JDBC URL comes whole from
+dependencyTrack.dedicatedDatabase), existingSecret set and externalDatabase.host
+empty: a host set in values always wins, together with externalDatabase.port, so
+a Secret holding only DATABASE_URL keeps working.
 */}}
 {{- define "artifact-keeper.dtrackDbHostFromExistingSecret" -}}
 {{- $ext := .Values.externalDatabase -}}
-{{- if and (not .Values.postgres.enabled) $ext.existingSecret (not $ext.host) -}}true{{- end -}}
+{{- if and (not .Values.postgres.enabled) (not (include "artifact-keeper.dedicatedDatabase" .)) $ext.existingSecret (not $ext.host) -}}true{{- end -}}
 {{- end -}}
 
 {{- define "artifact-keeper.validateSecrets" -}}
@@ -1250,6 +1278,9 @@ the ExternalName alias from backend-alias-service.yaml (web images before 1.1.0
 bake http://backend:8080 into their rewrites), rendered under the same condition.
 Fleet mode: the shared search/scan/DB Services live outside the release; add
 them via noProxy, as you must any in-cluster S3 endpoint (e.g. MinIO).
+Dedicated database mode: the hosts are in Secrets the chart cannot read, and
+PostgreSQL connections do not go through an HTTP proxy anyway, so nothing is added
+(a leftover externalDatabase.host does not describe this install).
 */}}
 {{- define "artifact-keeper.noProxyDefaults" -}}
 {{- $full := include "artifact-keeper.fullname" . -}}
@@ -1263,7 +1294,7 @@ them via noProxy, as you must any in-cluster S3 endpoint (e.g. MinIO).
 {{- if .Values.scannerAdapter.enabled -}}{{- $n = append $n (printf "%s-scanner-adapter" $full) -}}{{- end -}}
 {{- if .Values.dependencyTrack.enabled -}}{{- $n = append $n (printf "%s-dtrack" $full) -}}{{- end -}}
 {{- if .Values.imageBuilder.enabled -}}{{- $n = append $n (printf "%s-buildkitd" $full) -}}{{- end -}}
-{{- if .Values.postgres.enabled -}}{{- $n = append $n (printf "%s-postgres" $full) -}}{{- else if .Values.externalDatabase.host -}}{{- $n = append $n .Values.externalDatabase.host -}}{{- end -}}
+{{- if .Values.postgres.enabled -}}{{- $n = append $n (printf "%s-postgres" $full) -}}{{- else if and .Values.externalDatabase.host (not (include "artifact-keeper.dedicatedDatabase" .)) -}}{{- $n = append $n .Values.externalDatabase.host -}}{{- end -}}
 {{- join "," $n -}}
 {{- end -}}
 

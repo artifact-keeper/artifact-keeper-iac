@@ -249,18 +249,15 @@ backend:
     httpPort: 8080
     grpcPort: 9090
   # -- Dedicated backend database via an existing Secret (e.g. the CloudNativePG
-  # `<cluster>-app` Secret). Takes precedence over postgres.enabled and
-  # externalDatabase. Key names default to the CNPG layout and can be remapped;
-  # use `fqdn-uri`/`fqdn-*` keys when the cluster is in another namespace.
+  # `<cluster>-app` Secret). Only used when postgres.enabled=false AND
+  # externalDatabase.enabled=false. See values-cnpg.yaml.
   dedicatedDatabase:
+    # -- Name of the Secret. Required in dedicated mode, in every Secret mode.
     existingSecret: ""
     secretKeys:
-      # postgresql:// URI -> DATABASE_URL.
+      # -- Key holding the postgresql:// URI, used for DATABASE_URL and by the
+      # wait-for-postgres init container.
       uri: uri
-      # Used by the wait-for-postgres init container.
-      host: host
-      port: port
-      username: username
   # -- Unauthenticated Prometheus metrics listener.
   # When enabled, the backend starts a second TCP listener on `metricsPort`
   # serving only `GET /metrics` with no authentication. Intended for
@@ -1446,20 +1443,23 @@ dependencyTrack:
   # live cluster. Engines that render with "helm template" (Argo CD) never see
   # the stored value, so set the password here or use secrets.existingSecret.
   adminPassword: ""
-  # -- Dedicated DependencyTrack database via an existing Secret (e.g. the
-  # CloudNativePG `<cluster>-app` Secret). Takes precedence over the shared
-  # postgres and externalDatabase. username/password are passed separately
-  # from jdbcUri because DependencyTrack expects them as distinct variables.
+  # -- Dedicated Dependency-Track database via an existing Secret (e.g. the
+  # CloudNativePG `<cluster>-app` Secret). Only used when postgres.enabled=false
+  # AND externalDatabase.enabled=false. See values-cnpg.yaml.
   dedicatedDatabase:
+    # -- Name of the Secret. Required in dedicated mode when Dependency-Track is
+    # enabled, in every Secret mode.
     existingSecret: ""
     secretKeys:
-      # jdbc:postgresql:// URI -> ALPINE_DATABASE_URL.
+      # -- Key holding the jdbc:postgresql:// URI (ALPINE_DATABASE_URL).
       jdbcUri: jdbc-uri
+      # -- Key holding the username (ALPINE_DATABASE_USERNAME).
       username: username
+      # -- Key holding the password (ALPINE_DATABASE_PASSWORD).
       password: password
-      # Used by the wait-for-postgres init container.
-      host: host
-      port: port
+      # -- Key holding the postgresql:// URI, used by the wait-for-postgres init
+      # container (pg_isready cannot parse the JDBC form).
+      uri: uri
   # -- Size limit for the `/tmp` emptyDir volume. DependencyTrack writes
   # ~1-2Gi into /tmp during startup (NVD mirror sync, DB migrations, JVM
   # working files), so the default is sized to fit. Operators on
@@ -1473,6 +1473,7 @@ dependencyTrack:
   # server collide on the default name. An empty value falls back to
   # dependency_track. On the in-chart Postgres, setting it to
   # postgres.auth.database shares that database and skips CREATE DATABASE.
+  # Ignored with dependencyTrack.dedicatedDatabase, whose JDBC URI names it.
   database: "dependency_track"
   persistence:
     size: 5Gi

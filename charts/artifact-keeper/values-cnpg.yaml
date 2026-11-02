@@ -35,23 +35,25 @@
 #
 # The operator generates the `ak-backend-db-app` and `ak-dtrack-db-app`
 # Secrets referenced below. The default key names match the CNPG
-# application-secret layout; if the Cluster resources live in a different
-# namespace than this release, mirror the Secrets into the release
-# namespace and switch the uri/jdbcUri keys to `fqdn-uri`/`fqdn-jdbc-uri`.
+# application-secret layout.
 #
-# Relationship to fleet mode: this profile and fleet.externalDatabaseBootstrap
-# both source the backend database from an existing Secret, but they solve
-# different problems and are mutually exclusive. The fleet bootstrap path
-# provisions one role/database per release on a single shared PostgreSQL
-# server (backend only); this profile gives one install a dedicated cluster
-# per service and relies on the CloudNativePG operator to provision. Dedicated
-# mode takes precedence for the backend DATABASE_URL if both are set, so do
-# not combine them.
+# Clusters in another namespace: a pod can only read Secrets from its own
+# namespace, so mirror both Secrets into the release namespace. CNPG's `uri` and
+# `jdbc-uri` already name the host as `<cluster>-rw.<namespace>`, so they keep
+# working from here. Remap to `fqdn-uri`/`fqdn-jdbc-uri` only if that short form
+# does not resolve in your cluster. With networkPolicy.enabled the backend and
+# Dependency-Track may reach port 5432 in any namespace; another port needs its
+# own NetworkPolicy.
 #
-# Airgap note: the wait-for-postgres init containers still run pg_isready
-# from postgres.image (postgres:16-alpine by default) even though the
-# in-cluster PostgreSQL itself is disabled here, so keep postgres.image on
-# pre-pull lists.
+# Fleet mode: mutually exclusive with this profile, and the render fails if both
+# are set. fleet.externalDatabaseBootstrap provisions one role and database per
+# release on a single shared PostgreSQL server (backend only); this profile gives
+# one install a dedicated cluster per service and relies on the CloudNativePG
+# operator to provision.
+#
+# Airgap note: the wait-for-postgres init containers still run pg_isready from
+# postgres.image (postgres:16-alpine by default) even though the in-cluster
+# PostgreSQL itself is disabled here, so keep postgres.image on pre-pull lists.
 # =============================================================================
 
 # The shared in-cluster PostgreSQL is replaced by the two CNPG clusters.
@@ -59,7 +61,7 @@ postgres:
   enabled: false
 
 # Opt out of the legacy externalDatabase default so the per-service
-# database.existingSecret references below take effect.
+# dedicatedDatabase.existingSecret references below take effect.
 externalDatabase:
   enabled: false
 

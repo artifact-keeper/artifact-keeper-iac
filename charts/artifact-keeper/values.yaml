@@ -544,15 +544,15 @@ backend:
       cpu: "2"
       memory: 2Gi
       # `ephemeral-storage` covers the container writable layer, container
-      # logs, AND all emptyDir volumes (including `/data/storage`, which
-      # has `sizeLimit: 10Gi` below). Streaming format handlers (Incus,
-      # large OCI layer pushes) stage uploads on local disk before
-      # finalizing, so any single artifact larger than this limit gets
-      # the pod kubelet-evicted mid-upload with `Pod ephemeral local
-      # storage usage exceeds the total limit of containers <N>Gi`, and
-      # the client sees a TLS EOF. Size to match `persistence.size` plus
-      # headroom; `16Gi` is a sensible default for the `10Gi` storage
-      # emptyDir / PVC and the writable layer.
+      # logs, AND all emptyDir volumes. When persistence is disabled without
+      # a generic ephemeral PVC, `/data/storage` uses an emptyDir capped by
+      # `persistence.emptyDir.sizeLimit`. Streaming format handlers (Incus,
+      # large OCI layer pushes) stage uploads on local disk before finalizing,
+      # so any single artifact larger than this limit gets the pod
+      # kubelet-evicted mid-upload with `Pod ephemeral local storage usage
+      # exceeds the total limit of containers <N>Gi`, and the client sees a
+      # TLS EOF. Keep this above `persistence.emptyDir.sizeLimit` with
+      # headroom for other emptyDirs, logs, and the writable layer.
       ephemeral-storage: 16Gi
   persistence:
     enabled: true
@@ -566,6 +566,22 @@ backend:
     # `dependencyTrack.enabled` is true, a ReadWriteMany class for the `shared-config` PVC
     # (`sharedConfig.accessModes` / `sharedConfig.storageClass` below).
     accessModes: []
+    # -- Configuration for the per-pod emptyDir used when persistence is
+    # disabled and ephemeral.enabled is false. The size limit also counts
+    # against resources.limits.ephemeral-storage, so keep that container limit
+    # above this value with enough headroom for logs and the writable layer.
+    emptyDir:
+      sizeLimit: 10Gi
+    # -- Per-pod generic ephemeral volume used when persistence is disabled.
+    # This creates one PVC from volumeClaimTemplate for each backend pod and
+    # deletes it with the pod. It is suitable for upload scratch space in
+    # multi-replica deployments that keep artifacts in object storage.
+    ephemeral:
+      enabled: false
+      size: 10Gi
+      storageClass: ""
+      accessModes:
+        - ReadWriteOnce
   # -- Scratch space for security scans (SCAN_WORKSPACE_PATH=/scan-workspace,
   # set whenever trivy.enabled). `enabled: true` backs it with a
   # ReadWriteOnce PVC, which pins every backend replica to one node. Set it
@@ -654,6 +670,15 @@ backend:
   # a specific label (e.g. azure.workload.identity/use: "true") alongside a
   # matching serviceAccount.annotations entry above.
   podLabels: {}
+  # -- Annotations added to the backend Deployment metadata, for operators
+  # that watch workload annotations such as Stakater Reloader
+  # (reloader.stakater.com/auto: "true") to restart pods when a referenced
+  # Secret or ConfigMap changes (#344).
+  annotations: {}
+  # -- Annotations added to the backend pod template, for example
+  # cluster-autoscaler.kubernetes.io/safe-to-evict: "false" to keep the
+  # autoscaler from draining the node under a running backend (#334).
+  podAnnotations: {}
   serviceAccount:
     create: true
     annotations: {}
@@ -671,6 +696,10 @@ web:
     httpsProxy: ""
     noProxy: ""
     existingSecret: ""
+  # -- Enable HSTS and CSP upgrade-insecure-requests in the web container.
+  # Set true when browsers reach the UI over HTTPS, including TLS termination
+  # at an ingress, Gateway or load balancer. Keep false for plain-HTTP access.
+  enforceHttps: false
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-web  # Docker Hub: artifactkeeper/web
@@ -723,6 +752,10 @@ web:
   topologySpreadConstraints: []
   # -- Extra labels merged onto the web pod template. See backend.podLabels.
   podLabels: {}
+  # -- Annotations added to the web Deployment metadata. See backend.annotations.
+  annotations: {}
+  # -- Annotations added to the web pod template. See backend.podAnnotations.
+  podAnnotations: {}
 
 # -- Edge replication service
 # NOTE: The ghcr.io/artifact-keeper/artifact-keeper-edge image is not yet
@@ -790,6 +823,11 @@ edge:
 # instance is suitable for dev/testing only.
 postgres:
   enabled: true
+  # -- Annotations added to the PostgreSQL StatefulSet metadata. See backend.annotations.
+  annotations: {}
+  # -- Annotations added to the PostgreSQL pod template, for example
+  # cluster-autoscaler.kubernetes.io/safe-to-evict: "false" (#334).
+  podAnnotations: {}
   image:
     repository: postgres
     tag: "16-alpine"
@@ -1195,6 +1233,10 @@ dependencyTrack:
     httpsProxy: ""
     noProxy: ""
     existingSecret: ""
+  # -- Annotations added to the Dependency-Track Deployment metadata. See backend.annotations.
+  annotations: {}
+  # -- Annotations added to the Dependency-Track pod template. See backend.podAnnotations.
+  podAnnotations: {}
   # -- Name of an existing Secret holding a Dependency-Track API key. When set,
   # the backend reads DEPENDENCY_TRACK_API_KEY from it and the shared-config
   # volume, its mount, DEPENDENCY_TRACK_API_KEY_FILE and the shared-config PVC
@@ -1271,6 +1313,13 @@ dependencyTrack:
       ephemeral-storage: 1Gi
   bootstrap:
     enabled: true
+    # -- Create existingApiKeySecret from the bootstrap-generated API key.
+    # Opt-in: requires bootstrap.enabled and existingApiKeySecret, with
+    # existingApiKeySecretKey=API_KEY. Preserves an existing nonempty key and
+    # removes the shared-config PVC handoff. Grants namespace-scoped Secret
+    # creation to a dedicated ServiceAccount; see the README for lifecycle
+    # and Argo CD ordering.
+    manageApiKeySecret: false
     # -- Image for the one-shot bootstrap Job. It needs curl and nothing else.
     # The job installs no packages at runtime, so this works on clusters with
     # no egress to a package mirror; point the repository at your own registry

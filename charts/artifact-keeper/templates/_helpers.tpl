@@ -857,9 +857,38 @@ Keep this in step with the `format_routes` nests in the backend's
 backend/src/api/routes.rs. /lxc is the incus alias, /general the generic
 format, and /t the rattler/pixi conda-token prefix (/t/<token>/conda/...).
 tests/test_httproute.py holds an independent copy of this inventory.
+
+backend.extraFormatPaths (#359) appends operator-supplied prefixes, for example
+for a backend plugin, after the built-in list so every consumer picks them up.
+Each must be a single path segment ("/" plus lowercase letters, digits and
+inner hyphens): the OpenShift Route for a path is named after it. Built-in
+prefixes, the other backend paths, /metrics (kept private), /dtrack and
+duplicates fail the render.
 */}}
 {{- define "artifact-keeper.backendFormatPaths" -}}
-/general /maven /npm /pypi /nuget /cargo /gems /go /helm /debian /rpm /alpine /pacman /composer /conan /conda /t /swift /terraform /cocoapods /hex /pub /lfs /ivy /chef /puppet /ansible /cran /bazel /huggingface /jetbrains /vscode /proto /incus /lxc /ext
+{{- $builtin := list "/general" "/maven" "/npm" "/pypi" "/nuget" "/cargo" "/gems" "/go" "/helm" "/debian" "/rpm" "/alpine" "/pacman" "/composer" "/conan" "/conda" "/t" "/swift" "/terraform" "/cocoapods" "/hex" "/pub" "/lfs" "/ivy" "/chef" "/puppet" "/ansible" "/cran" "/bazel" "/huggingface" "/jetbrains" "/vscode" "/proto" "/incus" "/lxc" "/ext" -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's
+       defaults, which lack this key. */ -}}
+{{- $extra := dig "extraFormatPaths" list .Values.backend -}}
+{{- if kindIs "invalid" $extra -}}{{- $extra = list -}}{{- end -}}
+{{- if not (kindIs "slice" $extra) -}}
+{{- fail "backend.extraFormatPaths must be a list of path prefixes such as \"/myplugin\"" -}}
+{{- end -}}
+{{- $reserved := concat $builtin (list "/" "/api" "/v2" "/health" "/ready" "/metrics" "/dtrack") -}}
+{{- $paths := $builtin -}}
+{{- range $extra -}}
+{{- if not (and (kindIs "string" .) (regexMatch "^/[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .)) -}}
+{{- fail (printf "backend.extraFormatPaths entry %q must be a single path segment: \"/\" followed by lowercase letters, digits and inner hyphens, with no spaces or further \"/\"" (toString .)) -}}
+{{- end -}}
+{{- if has . $reserved -}}
+{{- fail (printf "backend.extraFormatPaths entry %q is reserved: it is a built-in backend path, /metrics (kept private) or /dtrack; remove it" .) -}}
+{{- end -}}
+{{- if has . $paths -}}
+{{- fail (printf "backend.extraFormatPaths lists %q more than once" .) -}}
+{{- end -}}
+{{- $paths = append $paths . -}}
+{{- end -}}
+{{- join " " $paths -}}
 {{- end -}}
 
 {{/*

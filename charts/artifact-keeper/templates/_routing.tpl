@@ -1,8 +1,9 @@
 {{/*
 Public backend paths shared by Ingress and HTTPRoute. Keep /metrics private.
 Use Ingress path types here; HTTPRoute translates Prefix to PathPrefix.
-The package-format prefixes come from artifact-keeper.backendFormatPaths
-(_helpers.tpl), which the OpenShift Routes (route.yaml) also consume.
+The package-format prefixes, including backend.extraFormatPaths, come from
+artifact-keeper.backendFormatPaths (_helpers.tpl), which the OpenShift Routes
+(route.yaml) also consume.
 */}}
 {{- define "artifact-keeper.backendPaths" -}}
 - path: /api

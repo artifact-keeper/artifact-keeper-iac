@@ -313,6 +313,16 @@ backend:
     # -- (int) Rendered as STUCK_SCAN_CHECK_INTERVAL_SECS: seconds between janitor
     # sweeps (backend default 600).
     checkIntervalSecs: null
+  # -- Extra path prefixes routed to the backend, appended to the built-in
+  # package-format prefixes on the Ingress, the Gateway API HTTPRoute and the
+  # OpenShift Routes alike. Use it for a prefix the built-in list lacks, such
+  # as one served by a backend plugin. Each entry is a single path segment:
+  # "/" followed by lowercase letters, digits and inner hyphens (the OpenShift
+  # Route is named after it), for example "/myformat". Entries that repeat a
+  # built-in prefix (see artifact-keeper.backendFormatPaths in _helpers.tpl),
+  # /api, /v2, /health, /ready, /metrics, /dtrack or another entry fail the
+  # render.
+  extraFormatPaths: []
   env:
     RUST_LOG: "info,artifact_keeper=debug"
     HOST: "0.0.0.0"

@@ -22,8 +22,14 @@ spec:
            artifact uploads and downloads run; the web and Dependency-Track
            rules keep the Gateway's default. */}}
     {{- $timeouts := include "artifact-keeper.httpRoute.timeouts" . | fromYaml }}
+    {{- $backendRules := chunk 8 (include "artifact-keeper.backendPaths" . | fromYamlArray) }}
+    {{- /* The HTTPRoute CRD allows at most 16 rules. */}}
+    {{- $ruleCount := add (len $backendRules) (ternary 1 0 .Values.httpRoute.dtrack.enabled) (ternary 1 0 .Values.web.enabled) }}
+    {{- if gt (int $ruleCount) 16 }}
+    {{- fail (printf "HTTPRoute would need %d rules, more than the Gateway API limit of 16; shorten backend.extraFormatPaths" (int $ruleCount)) }}
+    {{- end }}
     {{- /* Eight matches per rule also supports the Gateway API v1.0 CRDs. */}}
-    {{- range chunk 8 (include "artifact-keeper.backendPaths" . | fromYamlArray) }}
+    {{- range $backendRules }}
     - matches:
         {{- range . }}
         - path:

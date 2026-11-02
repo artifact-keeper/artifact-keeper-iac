@@ -611,6 +611,21 @@ catch-all in separate rules.
 Gateway API's most-specific match precedence keeps the catch-all from shadowing
 package routes.
 
+To route an additional prefix to the backend, for example one served by a
+backend plugin, list it in `backend.extraFormatPaths`. The Ingress, the
+HTTPRoute and the OpenShift Routes all take it from the same inventory:
+
+```yaml
+backend:
+  extraFormatPaths:
+    - /myformat
+```
+
+Each entry must be a single lowercase path segment. Repeating a built-in
+prefix, `/api`, `/v2`, `/health`, `/ready`, `/metrics`, `/dtrack` or another
+entry fails the render, as does a list long enough to push the HTTPRoute past
+the Gateway API limit of 16 rules.
+
 Dependency-Track exposure is a separate opt-in:
 `httpRoute.dtrack.enabled: true` requires `dependencyTrack.enabled: true` and
 routes `/dtrack` to the bundled service on port 8080. As with the existing

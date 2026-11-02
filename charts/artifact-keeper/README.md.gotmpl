@@ -112,6 +112,14 @@ verifier do not receive them. Mounts can also reference existing pod volumes.
 Use unique volume names and mount paths so they do not conflict with the built-in
 storage, temporary, scan-workspace or shared-config mounts.
 
+## Web HTTPS security headers
+
+Set `web.enforceHttps: true` when browsers reach the web UI over HTTPS, including
+when an ingress, Gateway or load balancer terminates TLS and forwards HTTP to
+the web pod. This passes `AK_ENFORCE_HTTPS=true` to the web container to enable
+its HSTS and CSP `upgrade-insecure-requests` headers. It defaults to `false` for
+plain-HTTP deployments and is not inferred from the chart's routing settings.
+
 ## Container registries
 
 `global.imageRegistry` defaults to `""`: images use their per-component

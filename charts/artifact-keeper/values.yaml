@@ -512,15 +512,15 @@ backend:
       cpu: "2"
       memory: 2Gi
       # `ephemeral-storage` covers the container writable layer, container
-      # logs, AND all emptyDir volumes (including `/data/storage`, which
-      # has `sizeLimit: 10Gi` below). Streaming format handlers (Incus,
-      # large OCI layer pushes) stage uploads on local disk before
-      # finalizing, so any single artifact larger than this limit gets
-      # the pod kubelet-evicted mid-upload with `Pod ephemeral local
-      # storage usage exceeds the total limit of containers <N>Gi`, and
-      # the client sees a TLS EOF. Size to match `persistence.size` plus
-      # headroom; `16Gi` is a sensible default for the `10Gi` storage
-      # emptyDir / PVC and the writable layer.
+      # logs, AND all emptyDir volumes. When persistence is disabled without
+      # a generic ephemeral PVC, `/data/storage` uses an emptyDir capped by
+      # `persistence.emptyDir.sizeLimit`. Streaming format handlers (Incus,
+      # large OCI layer pushes) stage uploads on local disk before finalizing,
+      # so any single artifact larger than this limit gets the pod
+      # kubelet-evicted mid-upload with `Pod ephemeral local storage usage
+      # exceeds the total limit of containers <N>Gi`, and the client sees a
+      # TLS EOF. Keep this above `persistence.emptyDir.sizeLimit` with
+      # headroom for other emptyDirs, logs, and the writable layer.
       ephemeral-storage: 16Gi
   persistence:
     enabled: true
@@ -534,6 +534,22 @@ backend:
     # `dependencyTrack.enabled` is true, a ReadWriteMany class for the `shared-config` PVC
     # (`sharedConfig.accessModes` / `sharedConfig.storageClass` below).
     accessModes: []
+    # -- Configuration for the per-pod emptyDir used when persistence is
+    # disabled and ephemeral.enabled is false. The size limit also counts
+    # against resources.limits.ephemeral-storage, so keep that container limit
+    # above this value with enough headroom for logs and the writable layer.
+    emptyDir:
+      sizeLimit: 10Gi
+    # -- Per-pod generic ephemeral volume used when persistence is disabled.
+    # This creates one PVC from volumeClaimTemplate for each backend pod and
+    # deletes it with the pod. It is suitable for upload scratch space in
+    # multi-replica deployments that keep artifacts in object storage.
+    ephemeral:
+      enabled: false
+      size: 10Gi
+      storageClass: ""
+      accessModes:
+        - ReadWriteOnce
   # -- Scratch space for security scans (SCAN_WORKSPACE_PATH=/scan-workspace,
   # set whenever trivy.enabled). `enabled: true` backs it with a
   # ReadWriteOnce PVC, which pins every backend replica to one node. Set it

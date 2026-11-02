@@ -8,6 +8,10 @@ security policies, and operational needs before use in production.
 =============================================================================
 */}}
 {{- if .Values.web.enabled }}
+{{- $enforceHttps := dig "enforceHttps" false .Values.web }}
+{{- if not (kindIs "bool" $enforceHttps) }}
+{{- fail "web.enforceHttps must be a boolean" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,6 +19,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: web
+  {{- with .Values.web.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ include "artifact-keeper.web.replicaCount" . }}
   selector:
@@ -27,6 +35,10 @@ spec:
         {{- range $key, $value := .Values.web.podLabels }}
         {{ $key }}: {{ $value | quote }}
         {{- end }}
+      {{- with .Values.web.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       {{- with (.Values.web.tolerations | default .Values.global.tolerations) }}
       tolerations:
@@ -68,6 +80,10 @@ spec:
               value: "http://{{ include "artifact-keeper.fullname" . }}-backend:{{ .Values.backend.service.httpPort }}"
             - name: NODE_ENV
               value: {{ .Values.web.env.NODE_ENV | quote }}
+            {{- if $enforceHttps }}
+            - name: AK_ENFORCE_HTTPS
+              value: "true"
+            {{- end }}
           resources:
             {{- include "artifact-keeper.web.resources" . | nindent 12 }}
           readinessProbe:

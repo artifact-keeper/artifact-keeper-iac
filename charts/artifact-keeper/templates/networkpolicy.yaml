@@ -342,6 +342,15 @@ spec:
     - ports:
         - port: 443
           protocol: TCP
+    # The bootstrap Job carries the dtrack selector labels, so this policy
+    # also isolates its egress. Allow it to reach this release's dtrack API.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
 ---
 # PostgreSQL: accept traffic from backend and DependencyTrack
 apiVersion: networking.k8s.io/v1

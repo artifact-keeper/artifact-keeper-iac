@@ -15,6 +15,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
+  {{- with .Values.postgres.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   serviceName: {{ include "artifact-keeper.fullname" . }}-postgres
   replicas: 1
@@ -25,6 +29,10 @@ spec:
     metadata:
       labels:
         {{- include "artifact-keeper.postgres.selectorLabels" . | nindent 8 }}
+      {{- with .Values.postgres.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       {{- with (.Values.postgres.tolerations | default .Values.global.tolerations) }}
       tolerations:

@@ -289,8 +289,8 @@ global:
 
 `NO_PROXY` is generated: loopback, the cluster DNS suffixes (`.svc`,
 `.svc.cluster.local`, `.cluster.local`), the short Service name of every enabled
-in-chart component (including the bare `backend` alias the web image is built
-against), and the Postgres Service or `externalDatabase.host`. `noProxy` only
+in-chart component (including the bare `backend` alias, unless
+`web.backendAlias.enabled` is false), and the Postgres Service or `externalDatabase.host`. `noProxy` only
 needs to add hosts the chart cannot know about. In particular an in-cluster S3
 endpoint such as MinIO is **not** detected: add its hostname to `noProxy`, or
 the backend's storage traffic takes the proxy. The same goes for the shared

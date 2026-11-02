@@ -732,6 +732,18 @@ web:
   env:
     NEXT_PUBLIC_API_URL: ""
     NODE_ENV: "production"
+  backendAlias:
+    # -- Render a Service literally named `backend` (type ExternalName,
+    # pointing at this release's backend Service) in the release namespace.
+    # It exists for web images before 1.1.0, which baked
+    # http://backend:8080 into their rewrites at build time. Web 1.1.0 and
+    # later read BACKEND_URL at runtime, and the chart always sets it to the
+    # release-qualified backend Service, so the default web image does not
+    # need the alias. The alias claims the bare `backend` name in the
+    # namespace: disable it in shared namespaces or when several releases
+    # share one namespace, where that name collides. Disabling also drops
+    # `backend` from the generated NO_PROXY list.
+    enabled: true
   resources:
     requests:
       cpu: 250m

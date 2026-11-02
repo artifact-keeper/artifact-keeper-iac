@@ -935,12 +935,26 @@ Egress proxy helpers
 */}}
 
 {{/*
+Returns "true" when the bare "backend" ExternalName alias
+(backend-alias-service.yaml) renders: backend and web enabled and
+web.backendAlias.enabled not false. `dig` keeps the alias for
+`helm upgrade --reuse-values` from a chart that predates the knob.
+*/}}
+{{- define "artifact-keeper.backendAlias.enabled" -}}
+{{- $enabled := dig "backendAlias" "enabled" true .Values.web -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "web.backendAlias.enabled must be a boolean" -}}
+{{- end -}}
+{{- if and .Values.backend.enabled .Values.web.enabled $enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 NO_PROXY defaults: loopback, in-cluster DNS suffixes, and the short Service name
 of every enabled component. The bare names matter — a ".svc"/".cluster.local"
 suffix match misses "artifact-keeper-backend", which is how components call each
 other, so those hops would otherwise take the proxy. The bare "backend" entry is
-the ExternalName alias from backend-alias-service.yaml (the web image bakes
-http://backend:8080 into its rewrites), rendered under the same condition.
+the ExternalName alias from backend-alias-service.yaml (web images before 1.1.0
+bake http://backend:8080 into their rewrites), rendered under the same condition.
 Fleet mode: the shared search/scan/DB Services live outside the release; add
 them via noProxy, as you must any in-cluster S3 endpoint (e.g. MinIO).
 */}}
@@ -948,7 +962,7 @@ them via noProxy, as you must any in-cluster S3 endpoint (e.g. MinIO).
 {{- $full := include "artifact-keeper.fullname" . -}}
 {{- $n := list "localhost" "127.0.0.1" ".svc" ".svc.cluster.local" ".cluster.local" -}}
 {{- $n = append $n (printf "%s-backend" $full) -}}
-{{- if and .Values.backend.enabled .Values.web.enabled -}}{{- $n = append $n "backend" -}}{{- end -}}
+{{- if eq (include "artifact-keeper.backendAlias.enabled" .) "true" -}}{{- $n = append $n "backend" -}}{{- end -}}
 {{- $n = append $n (printf "%s-web" $full) -}}
 {{- if .Values.edge.enabled -}}{{- $n = append $n (printf "%s-edge" $full) -}}{{- end -}}
 {{- if .Values.opensearch.enabled -}}{{- $n = append $n (printf "%s-opensearch" $full) -}}{{- end -}}

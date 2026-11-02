@@ -108,11 +108,11 @@ spec:
         - name: cache
           {{- if $ib.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ include "artifact-keeper.fullname" . }}-buildkitd-cache
+            claimName: {{ $ib.persistence.existingClaim | default (printf "%s-buildkitd-cache" (include "artifact-keeper.fullname" .)) }}
           {{- else }}
           emptyDir: {}
           {{- end }}
-{{- if $ib.persistence.enabled }}
+{{- if and $ib.persistence.enabled (not $ib.persistence.existingClaim) }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -121,6 +121,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: image-builder
+  {{- with $ib.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes:
     - ReadWriteOnce

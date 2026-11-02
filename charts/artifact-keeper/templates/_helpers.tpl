@@ -313,6 +313,44 @@ is not required when the key is supplied directly. See iac issue 313.
 {{- end -}}
 
 {{/*
+Name of the shared-config claim mounted by the backend and the
+Dependency-Track bootstrap Job: backend.sharedConfig.existingClaim when set,
+otherwise the chart-managed <fullname>-shared-config PVC.
+*/}}
+{{- define "artifact-keeper.sharedConfigClaimName" -}}
+{{- .Values.backend.sharedConfig.existingClaim | default (printf "%s-shared-config" (include "artifact-keeper.fullname" .)) -}}
+{{- end -}}
+
+{{/*
+Reject existingClaim values the chart cannot honor. An existingClaim replaces a
+chart-managed PVC, so it only makes sense while that volume is persistent.
+*/}}
+{{- define "artifact-keeper.validateExistingClaims" -}}
+{{- if and .Values.backend.enabled .Values.backend.persistence.existingClaim -}}
+{{- if .Values.backend.persistence.ephemeral.enabled -}}
+{{- fail "backend.persistence.existingClaim cannot be combined with backend.persistence.ephemeral.enabled: the ephemeral mode creates a per-pod PVC, so there is no shared claim to replace. Unset one of them." -}}
+{{- end -}}
+{{- if not .Values.backend.persistence.enabled -}}
+{{- fail "backend.persistence.existingClaim requires backend.persistence.enabled=true (with persistence disabled the backend uses an emptyDir and would ignore the claim)" -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.backend.enabled .Values.backend.scanWorkspace.existingClaim (not .Values.backend.scanWorkspace.enabled) -}}
+{{- fail "backend.scanWorkspace.existingClaim requires backend.scanWorkspace.enabled=true (with it disabled each backend pod gets an emptyDir and would ignore the claim)" -}}
+{{- end -}}
+{{- if and .Values.opensearch.enabled .Values.opensearch.persistence.existingClaim -}}
+{{- if not .Values.opensearch.persistence.enabled -}}
+{{- fail "opensearch.persistence.existingClaim requires opensearch.persistence.enabled=true (with persistence disabled OpenSearch uses an emptyDir and would ignore the claim)" -}}
+{{- end -}}
+{{- if gt (int .Values.opensearch.replicaCount) 1 -}}
+{{- fail "opensearch.persistence.existingClaim is only supported with opensearch.replicaCount=1: a multi-node cluster is a StatefulSet whose volumeClaimTemplates give each node its own PVC, and one claim cannot back several nodes" -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.imageBuilder.enabled .Values.imageBuilder.persistence.existingClaim (not .Values.imageBuilder.persistence.enabled) -}}
+{{- fail "imageBuilder.persistence.existingClaim requires imageBuilder.persistence.enabled=true (with persistence disabled the build cache is an emptyDir and would ignore the claim)" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Database Dependency-Track connects to (dependencyTrack.database). An empty value
 falls back to dependency_track rather than rendering a JDBC URL ending in "/"
 and an init script with "CREATE DATABASE ;".

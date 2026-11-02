@@ -191,12 +191,16 @@ spec:
         {{- else if $singleNode }}
         - name: opensearch-data
           persistentVolumeClaim:
-            claimName: {{ $fullName }}-opensearch
+            claimName: {{ .Values.opensearch.persistence.existingClaim | default (printf "%s-opensearch" $fullName) }}
         {{- end }}
   {{- if not $singleNode }}
   volumeClaimTemplates:
     - metadata:
         name: opensearch-data
+        {{- with .Values.opensearch.persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
       spec:
         accessModes:
           - ReadWriteOnce
@@ -207,7 +211,7 @@ spec:
         storageClassName: {{ .Values.opensearch.persistence.storageClass | quote }}
         {{- end }}
   {{- end }}
-{{- if and $singleNode .Values.opensearch.persistence.enabled }}
+{{- if and $singleNode .Values.opensearch.persistence.enabled (not .Values.opensearch.persistence.existingClaim) }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -216,6 +220,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: opensearch
+  {{- with .Values.opensearch.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes:
     - ReadWriteOnce

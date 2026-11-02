@@ -209,7 +209,7 @@ or set it to `""` unless you intend to rewrite every image.
 
 ## Encryption Keys in an Existing Secret
 
-If an operator-supplied Secret contains the optional migration and webhook
+If an operator-supplied Secret contains the optional migration, webhook and SSO
 encryption keys, opt into their environment references without putting plaintext
 keys or placeholder credentials in Helm values:
 
@@ -218,20 +218,21 @@ secrets:
   existingSecret: application-credentials
   migrationEncryptionKeyEnabled: true
   webhookSecretKeyEnabled: true
+  ssoEncryptionKeyEnabled: true   # read the re-keying warning below first
 ```
 
-The backend reads `MIGRATION_ENCRYPTION_KEY` and `AK_WEBHOOK_SECRET_KEY` from that
-Secret in the release namespace. The chart does not create a Secret or copy
+The backend reads `MIGRATION_ENCRYPTION_KEY`, `AK_WEBHOOK_SECRET_KEY` and
+`SSO_ENCRYPTION_KEY` from that Secret in the release namespace. The chart does not create a Secret or copy
 credential values into the rendered manifests. These references are required:
 if an enabled key is missing, Kubernetes prevents the backend container from
-starting. Both flags default to `false`, so existing Secrets without these
-optional keys keep working. Enable either flag independently.
+starting. All three flags default to `false`, so existing Secrets without these
+optional keys keep working. Enable each flag independently.
 
 The flags must be YAML booleans, not strings such as `"false"`. Setting a flag to
 `true` requires `secrets.existingSecret` and `externalSecrets.enabled: false`;
 otherwise rendering fails. They only opt into existing-Secret references:
-`false` does not override a nonempty `secrets.migrationEncryptionKey` or
-`secrets.webhookSecretKey`. Chart-managed Secrets still use those inline values,
+`false` does not override a nonempty `secrets.migrationEncryptionKey`,
+`secrets.webhookSecretKey` or `secrets.ssoEncryptionKey`. Chart-managed Secrets still use those inline values,
 and legacy existing-Secret configurations with nonempty placeholder values still
 work. Replace placeholders with the flags above. With External Secrets Operator,
 continue setting the corresponding `externalSecrets.secrets.*` provider paths
@@ -255,12 +256,33 @@ backend:
 ```
 
 Leave the corresponding inline value empty and flag `false` (or the ESO path
-empty) when using `backend.environmentSecrets`. For these two environment
+empty) when using `backend.environmentSecrets`. For these three environment
 variables, multiple definitions across chart secret wiring, `backend.env`, or
 `backend.environmentSecrets` fail rendering; choose one source per variable.
 An `optional: true` reference permits startup without the key but leaves the
 feature unavailable. Helm does not look up the supplied Secret, so these options
 also work with offline `helm template`, ArgoCD, and Flux.
+
+### SSO encryption key
+
+The backend encrypts stored SSO provider secrets (OIDC client secrets and LDAP
+bind passwords) and upstream repository credentials with
+`SSO_ENCRYPTION_KEY`. When it is unset, which is the chart default, the backend
+falls back to `JWT_SECRET`, so rotating the JWT secret also makes those stored
+values undecryptable. To give them their own key, set it from any of the same
+sources as the keys above: `secrets.ssoEncryptionKey` (chart-managed Secret),
+`secrets.ssoEncryptionKeyEnabled: true` (key `SSO_ENCRYPTION_KEY` in
+`secrets.existingSecret`), `externalSecrets.secrets.ssoEncryptionKey`
+(provider property `sso-encryption-key`), or `backend.environmentSecrets`.
+Use a random value such as `openssl rand -hex 32`. The chart does not generate
+one.
+
+> **Setting this on an existing install re-keys.** SSO secrets and upstream
+> credentials already stored were encrypted with `JWT_SECRET` (or the previous
+> `SSO_ENCRYPTION_KEY`), and the backend cannot decrypt them under the new key.
+> Set the key at first install. On an existing install, plan to re-enter every
+> SSO provider secret and upstream repository credential after enabling it, and
+> never change the key afterwards without doing the same.
 
 Run the offline regression tests from the repository root with Helm and the
 Python dependencies in `.github/scripts/requirements.txt` installed:

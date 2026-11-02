@@ -164,9 +164,10 @@ backend:
   # Each entry maps a container env var name to a Secret key reference. An
   # entry wins over the same key in `backend.env` (the default
   # `ADMIN_PASSWORD: ""` placeholder there needs no change).
-  # For MIGRATION_ENCRYPTION_KEY and AK_WEBHOOK_SECRET_KEY, also leave the
-  # corresponding secrets.* value empty and *Enabled flag false (or the
-  # externalSecrets.secrets.* path empty); duplicate definitions fail rendering.
+  # For MIGRATION_ENCRYPTION_KEY, AK_WEBHOOK_SECRET_KEY and SSO_ENCRYPTION_KEY,
+  # also leave the corresponding secrets.* value empty and *Enabled flag false
+  # (or the externalSecrets.secrets.* path empty); duplicate definitions fail
+  # rendering.
   # Example (create the Secret first, for instance with
   # `kubectl create secret generic ak-admin-credentials
   #  --from-literal=ADMIN_PASSWORD="$(openssl rand -base64 24)"`):
@@ -401,7 +402,8 @@ backend:
     # JWT_ACCESS_TOKEN_EXPIRY_MINUTES: "30"
     # JWT_REFRESH_TOKEN_EXPIRY_DAYS: "7"
     # SKIP_ADMIN_PROVISIONING: "false"
-    # SSO_ENCRYPTION_KEY: ""
+    # SSO_ENCRYPTION_KEY: use secrets.ssoEncryptionKey (or its *Enabled
+    # flag / externalSecrets path) or backend.environmentSecrets instead.
 
     # -- OIDC
     # OIDC_ISSUER: ""
@@ -1654,6 +1656,20 @@ secrets:
   webhookSecretKey: ""
   # -- Inject AK_WEBHOOK_SECRET_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty webhookSecretKey.
   webhookSecretKeyEnabled: false
+  # -- SSO_ENCRYPTION_KEY: the key the backend encrypts stored SSO provider
+  # secrets (OIDC client secrets, LDAP bind passwords) and upstream repository credentials with. Empty
+  # (the default) sets nothing, and the backend falls back to JWT_SECRET, so
+  # rotating the JWT secret also breaks those stored values. Any non-empty
+  # string works; use a random value such as `openssl rand -hex 32`. The chart
+  # never generates it. WARNING: setting or changing it on an existing install
+  # re-keys: SSO secrets and upstream credentials stored under the previous key
+  # (JWT_SECRET when this was unset) can no longer be decrypted. Set it at first
+  # install, or re-enter those secrets and credentials after enabling it. With
+  # existingSecret, a nonempty value still enables the reference for
+  # compatibility; prefer ssoEncryptionKeyEnabled.
+  ssoEncryptionKey: ""
+  # -- Inject SSO_ENCRYPTION_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty ssoEncryptionKey. The re-keying warning on ssoEncryptionKey applies.
+  ssoEncryptionKeyEnabled: false
 
 # -- External Secrets Operator
 # When enabled, ExternalSecret CRDs replace the static Secret template.
@@ -1687,6 +1703,13 @@ externalSecrets:
     # property name `webhook-secret-key`. Leave the value empty to skip
     # the ExternalSecret data entry (set this to a real path to enable).
     webhookSecretKey: ""
+    # SSO_ENCRYPTION_KEY — encrypts stored SSO provider secrets and upstream
+    # repository credentials (the backend falls back to JWT_SECRET without
+    # it). The AWS SM secret should expose this under the property name
+    # `sso-encryption-key`. Leave the value empty to skip the ExternalSecret
+    # data entry. Enabling it on an existing install re-keys: values stored
+    # under the old key become undecryptable (see secrets.ssoEncryptionKey).
+    ssoEncryptionKey: ""
 
 # -- Extra raw Kubernetes manifests to render alongside the chart. Each entry
 # is a YAML string (templated) emitted as its own document. Useful for objects

@@ -410,7 +410,8 @@ Validate only these env names; other backend environment wiring is independent.
 {{- $root := . -}}
 {{- range $key := list
     (dict "value" "migrationEncryptionKey" "flag" "migrationEncryptionKeyEnabled" "env" "MIGRATION_ENCRYPTION_KEY")
-    (dict "value" "webhookSecretKey" "flag" "webhookSecretKeyEnabled" "env" "AK_WEBHOOK_SECRET_KEY") -}}
+    (dict "value" "webhookSecretKey" "flag" "webhookSecretKeyEnabled" "env" "AK_WEBHOOK_SECRET_KEY")
+    (dict "value" "ssoEncryptionKey" "flag" "ssoEncryptionKeyEnabled" "env" "SSO_ENCRYPTION_KEY") -}}
 {{- $enabled := get $root.Values.secrets $key.flag -}}
 {{- if not (kindIs "bool" $enabled) -}}
 {{- fail (printf "secrets.%s must be a boolean" $key.flag) -}}

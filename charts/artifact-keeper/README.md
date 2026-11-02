@@ -90,7 +90,7 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | backend.clientIp | object | `{"trustedProxyCidrs":"","xffTrustedForAuthz":false}` | Client-IP resolution behind a reverse proxy (ingress controller or Gateway). Explicit RATE_LIMIT_TRUSTED_PROXY_CIDRS / XFF_TRUSTED_FOR_AUTHZ entries in backend.env win over these values. |
 | backend.clientIp.trustedProxyCidrs | string | `""` | CIDR(s), comma-separated, of the proxy pods in front of the backend, rendered as RATE_LIMIT_TRUSTED_PROXY_CIDRS. The backend believes X-Forwarded-For only when the TCP peer is inside one of these ranges, and only those peers may set an inbound W3C `traceparent` (1.11.0+). Set it to your ingress controller's or Gateway proxy's pod CIDR, for example "10.1.42.0/24", and never to a range that covers other workloads: any pod inside it can claim any client IP. Empty (the default since chart 1.11.1) trusts no proxy. The backend then keys rate limits on the TCP peer, so every client behind one proxy pod shares a single API bucket, and accepts `traceparent` from any client. Login limiting does not depend on it: logins are limited per user and IP with a per-user lockout and a global backstop, so an empty list does not let one client lock out other users. Chart 1.9.28 and earlier defaulted to all RFC1918 ranges, which trusts every pod in the cluster. |
 | backend.clientIp.xffTrustedForAuthz | bool | `false` | Rendered as XFF_TRUSTED_FOR_AUTHZ (backend 1.11.1+). When false (the backend default), a request whose TCP peer is a trusted proxy has an unknown client IP for `allowed_cidrs` permission conditions (they do not match, so IP-conditioned grants are denied) and for audit attribution. Set true only when EVERY proxy in trustedProxyCidrs appends the address it received the request from to X-Forwarded-For, all the way to the edge. A proxy that passes a client-supplied header through unchanged makes the client IP forgeable. Behind SNAT or a load balancer that hides the client before the first proxy, no setting recovers the real address. |
-| backend.environmentSecrets | list | `[]` | Extra environment variables sourced from existing Kubernetes Secrets. This is the supported path for every credential the backend reads that the chart does not wire itself: ADMIN_PASSWORD, OIDC_CLIENT_SECRET, LDAP_BIND_PASSWORD, PEER_API_KEY, DEPENDENCY_TRACK_API_KEY, cloud storage keys, OTEL_EXPORTER_OTLP_HEADERS with an auth token, and so on. `backend.env` is rendered in plain text into the pod spec, so the render fails when it carries a credential (see backend.allowCredentialsInEnv). Each entry maps a container env var name to a Secret key reference. An entry wins over the same key in `backend.env` (the default `ADMIN_PASSWORD: ""` placeholder there needs no change). For MIGRATION_ENCRYPTION_KEY and AK_WEBHOOK_SECRET_KEY, also leave the corresponding secrets.* value empty and *Enabled flag false (or the externalSecrets.secrets.* path empty); duplicate definitions fail rendering. Example (create the Secret first, for instance with `kubectl create secret generic ak-admin-credentials  --from-literal=ADMIN_PASSWORD="$(openssl rand -base64 24)"`): environmentSecrets:   - name: ADMIN_PASSWORD     secretKeyRef:       name: ak-admin-credentials       key: ADMIN_PASSWORD   - name: OIDC_CLIENT_SECRET     secretKeyRef:       name: ak-sso       key: client-secret |
+| backend.environmentSecrets | list | `[]` | Extra environment variables sourced from existing Kubernetes Secrets. This is the supported path for every credential the backend reads that the chart does not wire itself: ADMIN_PASSWORD, OIDC_CLIENT_SECRET, LDAP_BIND_PASSWORD, PEER_API_KEY, DEPENDENCY_TRACK_API_KEY, cloud storage keys, OTEL_EXPORTER_OTLP_HEADERS with an auth token, and so on. `backend.env` is rendered in plain text into the pod spec, so the render fails when it carries a credential (see backend.allowCredentialsInEnv). Each entry maps a container env var name to a Secret key reference. An entry wins over the same key in `backend.env` (the default `ADMIN_PASSWORD: ""` placeholder there needs no change). For MIGRATION_ENCRYPTION_KEY, AK_WEBHOOK_SECRET_KEY and SSO_ENCRYPTION_KEY, also leave the corresponding secrets.* value empty and *Enabled flag false (or the externalSecrets.secrets.* path empty); duplicate definitions fail rendering. Example (create the Secret first, for instance with `kubectl create secret generic ak-admin-credentials  --from-literal=ADMIN_PASSWORD="$(openssl rand -base64 24)"`): environmentSecrets:   - name: ADMIN_PASSWORD     secretKeyRef:       name: ak-admin-credentials       key: ADMIN_PASSWORD   - name: OIDC_CLIENT_SECRET     secretKeyRef:       name: ak-sso       key: client-secret |
 | backend.extraEnvFrom | list | `[]` | Additional envFrom sources (Secrets/ConfigMaps) for the backend container, rendered verbatim. Use for credentials that must come from existing Secrets. |
 | backend.extraFormatPaths | list | `[]` | Extra path prefixes routed to the backend, appended to the built-in package-format prefixes on the Ingress, the Gateway API HTTPRoute and the OpenShift Routes alike. Use it for a prefix the built-in list lacks, such as one served by a backend plugin. Each entry is a single path segment: "/" followed by lowercase letters, digits and inner hyphens (the OpenShift Route is named after it), for example "/myformat". Entries that repeat a built-in prefix (see artifact-keeper.backendFormatPaths in _helpers.tpl), /api, /v2, /health, /ready, /metrics, /dtrack or another entry fail the render. |
 | backend.extraVolumeMounts | list | `[]` | Additional Kubernetes volumeMounts appended to the backend container, rendered verbatim. Can reference extraVolumes or existing pod volumes. |
@@ -138,7 +138,7 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | externalDatabase.existingHostKey | string | `""` | Key in existingSecret holding the database host for Dependency-Track's JDBC URL. Only read when postgres.enabled=false, existingSecret is set and externalDatabase.host is empty; a host set in values is used with externalDatabase.port instead. Defaults to POSTGRES_HOST when empty. |
 | externalDatabase.existingPasswordKey | string | `""` | Key in existingSecret holding the database password Dependency-Track uses (ALPINE_DATABASE_PASSWORD). With postgres.enabled=false and existingSecret set, Dependency-Track reads its password from existingSecret when this is set, or when the chart creates its own Secret (neither externalSecrets.enabled nor secrets.existingSecret); the key then defaults to POSTGRES_PASSWORD. Otherwise it keeps reading POSTGRES_PASSWORD from the app Secret, which External Secrets or secrets.existingSecret supply. |
 | externalDatabase.existingPortKey | string | `""` | Key in existingSecret holding the database port for Dependency-Track's JDBC URL, read under the same conditions as existingHostKey. Defaults to POSTGRES_PORT when empty. |
-| externalSecrets | object | `{"enabled":false,"refreshInterval":"1h","secrets":{"dbCredentials":"artifact-keeper/${ENVIRONMENT}/db-credentials","dtAdminPassword":"artifact-keeper/${ENVIRONMENT}/dt-admin-password","jwtSecret":"artifact-keeper/${ENVIRONMENT}/jwt-secret","migrationEncryptionKey":"","opensearchAuth":"artifact-keeper/${ENVIRONMENT}/opensearch-auth","s3Keys":"artifact-keeper/${ENVIRONMENT}/s3-keys","smtpPassword":"artifact-keeper/${ENVIRONMENT}/smtp-password","webhookSecretKey":""},"storeKind":"ClusterSecretStore","storeName":"aws-secrets-manager"}` | External Secrets Operator When enabled, ExternalSecret CRDs replace the static Secret template. Requires External Secrets Operator installed on the cluster and a SecretStore or ClusterSecretStore configured for your provider. |
+| externalSecrets | object | `{"enabled":false,"refreshInterval":"1h","secrets":{"dbCredentials":"artifact-keeper/${ENVIRONMENT}/db-credentials","dtAdminPassword":"artifact-keeper/${ENVIRONMENT}/dt-admin-password","jwtSecret":"artifact-keeper/${ENVIRONMENT}/jwt-secret","migrationEncryptionKey":"","opensearchAuth":"artifact-keeper/${ENVIRONMENT}/opensearch-auth","s3Keys":"artifact-keeper/${ENVIRONMENT}/s3-keys","smtpPassword":"artifact-keeper/${ENVIRONMENT}/smtp-password","ssoEncryptionKey":"","webhookSecretKey":""},"storeKind":"ClusterSecretStore","storeName":"aws-secrets-manager"}` | External Secrets Operator When enabled, ExternalSecret CRDs replace the static Secret template. Requires External Secrets Operator installed on the cluster and a SecretStore or ClusterSecretStore configured for your provider. |
 | extraManifests | list | `[]` | Extra raw Kubernetes manifests to render alongside the chart. Each entry is a YAML string (templated) emitted as its own document. Useful for objects the chart does not natively model (ExternalSecret, SealedSecret, custom CRs, etc.) without forking the chart. extraManifests:   - |     apiVersion: v1     kind: Secret     metadata:       name: otel-collector-auth     type: Opaque     stringData:       otlp-headers: "authorization=Bearer xxxxx" |
 | fleet | object | `{"enabled":false,"externalDatabaseBootstrap":{"adminSecret":"","enabled":true,"existingSecret":"","host":"","passwordKey":"password","podSecurityContext":{},"port":5432},"guardrails":{"databaseNamespace":"","ingressNamespace":"ingress-nginx","limitRange":false,"networkPolicy":false,"quotaOverrides":{},"resourceQuota":false,"scannerNamespace":"","searchNamespace":""},"hibernate":false,"host":"","instanceId":"","preset":"","storage":{"accessKeyIdKey":"S3_ACCESS_KEY_ID","existingSecret":"","secretAccessKeyKey":"S3_SECRET_ACCESS_KEY"}}` | Fleet mode: many instances per cluster sharing external services. Opt-in and off by default. When fleet.enabled is false none of the fleet templates render and backend/web sizing and replica counts come from the per-component values above, so a standard single-instance install is unaffected. When enabled, one release is one instance: sizing comes from a preset, the ingress serves a single host, and the instance uses a shared PostgreSQL server and shared object storage instead of in-release services. See templates/_helpers.tpl for the preset tables. |
 | fleet.enabled | bool | `false` | Enable fleet mode. Master switch for every fleet template and helper. |
@@ -261,9 +261,11 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | scannerAdapter.image.tag | string | `"1.5.2"` | The scanner-adapter is versioned independently of the AK backend/web/edge images (its own `1.x` line; there is no `scanner-adapter:<appVersion>`). Pin the exact adapter release that the pinned backend release ships with, so every node runs the same digest: the floating `1`/`1.5`/`latest` tags move on each adapter release and, combined with pullPolicy IfNotPresent, would leave nodes on whichever build they first cached. Repoint this alongside backend.image.tag. The deployment renders the tag as `tag | default .Chart.AppVersion`, so leaving this empty ("") would fall back to appVersion and pull a non-existent tag — keep it pinned. Backend 1.11.10 ships adapter 1.5.2, whose bundled trivy is 0.76.0 (image 0.76.0-r3, go-jose 4.1.6); when the adapter is pointed at the chart's trivy server (SCANNER_TRIVY_SERVER), trivy.image.tag must be the same trivy release or the adapter refuses to scan. |
 | scannerAdapter.proxy | object | `{"enabled":true,"existingSecret":"","httpProxy":"","httpsProxy":"","noProxy":""}` | Egress proxy for the scanner-adapter: inherits global.proxy field by field (noProxy is appended to the global list). Fetches the Trivy DB, so it usually needs egress; set enabled: false to cut it off. |
 | scannerAdapter.tolerations | list | `[]` | Per-component scheduling (overrides global). Do NOT arch-pin here; the image is multi-arch. |
-| secrets | object | `{"existingSecret":"","jwtSecret":"","migrationEncryptionKey":"","migrationEncryptionKeyEnabled":false,"s3AccessKey":"","s3SecretKey":"","smtpPassword":"","webhookSecretKey":"","webhookSecretKeyEnabled":false}` | Secrets These are development defaults. For production, override via --set or use existingSecret references. Never commit real credentials here. |
+| secrets | object | `{"existingSecret":"","jwtSecret":"","migrationEncryptionKey":"","migrationEncryptionKeyEnabled":false,"s3AccessKey":"","s3SecretKey":"","smtpPassword":"","ssoEncryptionKey":"","ssoEncryptionKeyEnabled":false,"webhookSecretKey":"","webhookSecretKeyEnabled":false}` | Secrets These are development defaults. For production, override via --set or use existingSecret references. Never commit real credentials here. |
 | secrets.existingSecret | string | `""` | Name of an existing Secret that already holds the core application credentials (JWT_SECRET, and DATABASE_URL/POSTGRES_PASSWORD when the chart would otherwise manage them). When set, the chart does not render its own Secret and all workloads read from this Secret instead, so the values under `secrets` and `postgres.auth.password` are not required. Useful for GitOps and secret-manager workflows where the Secret is provisioned out of band. Optional encryption keys are wired separately using the *Enabled flags below, or backend.environmentSecrets for custom Secret/key names. |
 | secrets.migrationEncryptionKeyEnabled | bool | `false` | Inject MIGRATION_ENCRYPTION_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty migrationEncryptionKey. |
+| secrets.ssoEncryptionKey | string | `""` | SSO_ENCRYPTION_KEY: the key the backend encrypts stored SSO provider secrets (OIDC client secrets, LDAP bind passwords) and upstream repository credentials with. Empty (the default) sets nothing, and the backend falls back to JWT_SECRET, so rotating the JWT secret also breaks those stored values. Any non-empty string works; use a random value such as `openssl rand -hex 32`. The chart never generates it. WARNING: setting or changing it on an existing install re-keys: SSO secrets and upstream credentials stored under the previous key (JWT_SECRET when this was unset) can no longer be decrypted. Set it at first install, or re-enter those secrets and credentials after enabling it. With existingSecret, a nonempty value still enables the reference for compatibility; prefer ssoEncryptionKeyEnabled. |
+| secrets.ssoEncryptionKeyEnabled | bool | `false` | Inject SSO_ENCRYPTION_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty ssoEncryptionKey. The re-keying warning on ssoEncryptionKey applies. |
 | secrets.webhookSecretKeyEnabled | bool | `false` | Inject AK_WEBHOOK_SECRET_KEY from secrets.existingSecret without an inline value. Must be a boolean; true requires existingSecret and externalSecrets.enabled=false. The key must exist. False preserves value-based injection; it does not disable a nonempty webhookSecretKey. |
 | serviceMonitor | object | `{"enabled":false,"interval":"30s","labels":{},"scrapeTimeout":"10s"}` | Prometheus ServiceMonitor |
 | serviceMonitor.labels | object | `{}` | Extra labels on the ServiceMonitor, for a Prometheus whose serviceMonitorSelector requires them (kube-prometheus-stack selects `release: <its release name>` by default). |
@@ -414,7 +416,7 @@ or set it to `""` unless you intend to rewrite every image.
 
 ## Encryption Keys in an Existing Secret
 
-If an operator-supplied Secret contains the optional migration and webhook
+If an operator-supplied Secret contains the optional migration, webhook and SSO
 encryption keys, opt into their environment references without putting plaintext
 keys or placeholder credentials in Helm values:
 
@@ -423,20 +425,21 @@ secrets:
   existingSecret: application-credentials
   migrationEncryptionKeyEnabled: true
   webhookSecretKeyEnabled: true
+  ssoEncryptionKeyEnabled: true   # read the re-keying warning below first
 ```
 
-The backend reads `MIGRATION_ENCRYPTION_KEY` and `AK_WEBHOOK_SECRET_KEY` from that
-Secret in the release namespace. The chart does not create a Secret or copy
+The backend reads `MIGRATION_ENCRYPTION_KEY`, `AK_WEBHOOK_SECRET_KEY` and
+`SSO_ENCRYPTION_KEY` from that Secret in the release namespace. The chart does not create a Secret or copy
 credential values into the rendered manifests. These references are required:
 if an enabled key is missing, Kubernetes prevents the backend container from
-starting. Both flags default to `false`, so existing Secrets without these
-optional keys keep working. Enable either flag independently.
+starting. All three flags default to `false`, so existing Secrets without these
+optional keys keep working. Enable each flag independently.
 
 The flags must be YAML booleans, not strings such as `"false"`. Setting a flag to
 `true` requires `secrets.existingSecret` and `externalSecrets.enabled: false`;
 otherwise rendering fails. They only opt into existing-Secret references:
-`false` does not override a nonempty `secrets.migrationEncryptionKey` or
-`secrets.webhookSecretKey`. Chart-managed Secrets still use those inline values,
+`false` does not override a nonempty `secrets.migrationEncryptionKey`,
+`secrets.webhookSecretKey` or `secrets.ssoEncryptionKey`. Chart-managed Secrets still use those inline values,
 and legacy existing-Secret configurations with nonempty placeholder values still
 work. Replace placeholders with the flags above. With External Secrets Operator,
 continue setting the corresponding `externalSecrets.secrets.*` provider paths
@@ -460,12 +463,33 @@ backend:
 ```
 
 Leave the corresponding inline value empty and flag `false` (or the ESO path
-empty) when using `backend.environmentSecrets`. For these two environment
+empty) when using `backend.environmentSecrets`. For these three environment
 variables, multiple definitions across chart secret wiring, `backend.env`, or
 `backend.environmentSecrets` fail rendering; choose one source per variable.
 An `optional: true` reference permits startup without the key but leaves the
 feature unavailable. Helm does not look up the supplied Secret, so these options
 also work with offline `helm template`, ArgoCD, and Flux.
+
+### SSO encryption key
+
+The backend encrypts stored SSO provider secrets (OIDC client secrets and LDAP
+bind passwords) and upstream repository credentials with
+`SSO_ENCRYPTION_KEY`. When it is unset, which is the chart default, the backend
+falls back to `JWT_SECRET`, so rotating the JWT secret also makes those stored
+values undecryptable. To give them their own key, set it from any of the same
+sources as the keys above: `secrets.ssoEncryptionKey` (chart-managed Secret),
+`secrets.ssoEncryptionKeyEnabled: true` (key `SSO_ENCRYPTION_KEY` in
+`secrets.existingSecret`), `externalSecrets.secrets.ssoEncryptionKey`
+(provider property `sso-encryption-key`), or `backend.environmentSecrets`.
+Use a random value such as `openssl rand -hex 32`. The chart does not generate
+one.
+
+> **Setting this on an existing install re-keys.** SSO secrets and upstream
+> credentials already stored were encrypted with `JWT_SECRET` (or the previous
+> `SSO_ENCRYPTION_KEY`), and the backend cannot decrypt them under the new key.
+> Set the key at first install. On an existing install, plan to re-enter every
+> SSO provider secret and upstream repository credential after enabling it, and
+> never change the key afterwards without doing the same.
 
 Run the offline regression tests from the repository root with Helm and the
 Python dependencies in `.github/scripts/requirements.txt` installed:

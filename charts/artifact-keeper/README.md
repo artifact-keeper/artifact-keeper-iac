@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.9.51](https://img.shields.io/badge/Version-1.9.51-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.10](https://img.shields.io/badge/AppVersion-1.11.10-informational?style=flat-square)
+![Version: 1.9.52](https://img.shields.io/badge/Version-1.9.52-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.10](https://img.shields.io/badge/AppVersion-1.11.10-informational?style=flat-square)
 
 ## TL;DR
 
@@ -226,10 +226,11 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | imageBuilder.proxy | object | `{"enabled":true,"existingSecret":"","httpProxy":"","httpsProxy":"","noProxy":""}` | Egress proxy for buildkitd: inherits global.proxy field by field (noProxy is appended to the global list). The daemon pulls base images and packages from outside the cluster, so it usually needs egress; set enabled: false to cut it off. |
 | imageBuilder.runAsUser | int | `1000` | The uid the rootless daemon runs as; must match the image's `user` account (1000 in moby/buildkit rootless images). |
 | imageBuilder.tolerations | list | `[]` | Per-component scheduling (overrides global) |
-| ingress | object | `{"annotations":{},"className":"nginx","dtrack":{"corsAllowOrigin":"*","enabled":false},"enabled":true,"host":"artifacts.example.com","maxBodySize":"1024m","proxyReadTimeoutSeconds":300,"proxySendTimeoutSeconds":300,"tls":{"enabled":true,"secretName":"artifact-keeper-tls"}}` | Ingress configuration |
+| ingress | object | `{"annotations":{},"className":"nginx","dtrack":{"corsAllowOrigin":"*","enabled":false},"enabled":true,"host":"artifacts.example.com","maxBodySize":"1024m","nginxAnnotations":false,"proxyReadTimeoutSeconds":300,"proxySendTimeoutSeconds":300,"tls":{"enabled":true,"secretName":"artifact-keeper-tls"}}` | Ingress configuration |
 | ingress.dtrack | object | `{"corsAllowOrigin":"*","enabled":false}` | Exposure of the bundled Dependency-Track UI/API on the public ingress. Default false: Dependency-Track ships its own admin console and API with separate credentials, so the chart does not route it publicly. The backend reaches it in-cluster, and operators can reach the UI with `kubectl port-forward svc/<release>-dtrack 8092:8080` (see NOTES). Enable only behind authentication you control. |
 | ingress.dtrack.corsAllowOrigin | string | `"*"` | Value for Dependency-Track's ALPINE_CORS_ALLOW_ORIGIN, applied only when ingress.dtrack.enabled is true (otherwise CORS is disabled entirely). "*" preserves the chart's previous behavior; restrict it to the origin(s) that should call the Dependency-Track API cross-origin. |
 | ingress.dtrack.enabled | bool | `false` | Route /<host>/dtrack to the bundled Dependency-Track service. Only has an effect when dependencyTrack.enabled is true. |
+| ingress.nginxAnnotations | bool | `false` | Render the nginx proxy annotations below for a className other than `nginx`, such as an internal ingress-nginx class named `nginx-internal`. className `nginx` always gets them. For any other class they are left out unless this is true, and NOTES.txt warns that the limits are not applied. |
 | nameOverride | string | `""` |  |
 | networkPolicy | object | `{"dnsPorts":[53],"enabled":true,"ingressNamespace":"ingress-nginx","ingressPeers":[],"monitoringNamespace":"monitoring","monitoringPeers":[]}` | Network policies |
 | networkPolicy.dnsPorts | list | `[53]` | Destination ports allowed for DNS egress, each opened for UDP and TCP. OpenShift needs [53, 5353]: its dns-default Service maps port 53 to pod port 5353 and NetworkPolicy matches the pod port. Also used by the fleet guardrail NetworkPolicy. Must not be empty. |
@@ -809,6 +810,16 @@ The keys are `backend.persistence.annotations`, `backend.scanWorkspace.annotatio
 ## Ingress
 
 The chart creates a single Ingress resource that routes traffic to the backend and web frontend. By default it uses the `nginx` IngressClass with a 1024m proxy body size limit (for large artifact uploads) and 300-second timeouts.
+
+The body size and timeouts come from `ingress.maxBodySize`, `ingress.proxyReadTimeoutSeconds` and `ingress.proxySendTimeoutSeconds`, which render as `nginx.ingress.kubernetes.io/*` annotations. They render for `className: nginx`. For any other class they are left out, and the install notes warn about it. If another class name is served by ingress-nginx, opt it in, otherwise uploads hit the controller's default limit:
+
+```yaml
+ingress:
+  className: nginx-internal
+  nginxAnnotations: true
+```
+
+For a controller that isn't ingress-nginx, set the equivalent limits on the controller. A key you set in `ingress.annotations` always wins over the derived value.
 
 To enable TLS with cert-manager:
 

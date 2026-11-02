@@ -14,6 +14,23 @@ security policies, and operational needs before use in production.
   URL: {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
 {{- end }}
 
+{{- if and .Values.ingress.enabled (ne (include "artifact-keeper.ingress.rendersNginxAnnotations" .) "true") }}
+{{- $dropped := list }}
+{{- $ingressAnnotations := default dict .Values.ingress.annotations }}
+{{- range $key, $_ := include "artifact-keeper.ingress.nginxAnnotations" . | fromYaml }}
+{{- if not (hasKey $ingressAnnotations $key) }}{{- $dropped = append $dropped $key }}{{- end }}
+{{- end }}
+{{- if $dropped }}
+
+WARNING: ingress.className is {{ .Values.ingress.className | default "unset" | quote }}, so ingress.maxBodySize,
+  ingress.proxyReadTimeoutSeconds and ingress.proxySendTimeoutSeconds are not applied.
+  Not rendered: {{ sortAlpha $dropped | join ", " }}
+  Uploads are limited by your controller's own body-size and timeout defaults.
+  If this class is served by ingress-nginx, set ingress.nginxAnnotations=true.
+  Otherwise set the equivalent limits on your controller.
+{{- end }}
+{{- end }}
+
 {{- if .Values.httpRoute.enabled }}
 HTTPRoute: {{ include "artifact-keeper.fullname" . }}
   Hostnames: {{ join ", " .Values.httpRoute.hostnames }}

@@ -190,6 +190,32 @@ app.kubernetes.io/component: dependency-track
 {{- end }}
 
 {{/*
+Whether the Ingress gets the nginx proxy annotations: "true" for className
+`nginx`, or for any class when ingress.nginxAnnotations is true.
+*/}}
+{{- define "artifact-keeper.ingress.rendersNginxAnnotations" -}}
+{{- if or (eq (default "" .Values.ingress.className) "nginx") .Values.ingress.nginxAnnotations -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The nginx proxy annotations derived from ingress.maxBodySize,
+proxyReadTimeoutSeconds and proxySendTimeoutSeconds, as YAML.
+*/}}
+{{- define "artifact-keeper.ingress.nginxAnnotations" -}}
+{{- $derived := dict -}}
+{{- with .Values.ingress.maxBodySize -}}
+{{- $_ := set $derived "nginx.ingress.kubernetes.io/proxy-body-size" (toString .) -}}
+{{- end -}}
+{{- if not (kindIs "invalid" .Values.ingress.proxyReadTimeoutSeconds) -}}
+{{- $_ := set $derived "nginx.ingress.kubernetes.io/proxy-read-timeout" (toString .Values.ingress.proxyReadTimeoutSeconds) -}}
+{{- end -}}
+{{- if not (kindIs "invalid" .Values.ingress.proxySendTimeoutSeconds) -}}
+{{- $_ := set $derived "nginx.ingress.kubernetes.io/proxy-send-timeout" (toString .Values.ingress.proxySendTimeoutSeconds) -}}
+{{- end -}}
+{{- toYaml $derived -}}
+{{- end -}}
+
+{{/*
 Database URL helper — returns the full DATABASE_URL string
 */}}
 {{- define "artifact-keeper.databaseUrl" -}}

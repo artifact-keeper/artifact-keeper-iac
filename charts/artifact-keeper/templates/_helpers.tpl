@@ -447,7 +447,8 @@ Validate only these env names; other backend environment wiring is independent.
 {{- $root := . -}}
 {{- range $key := list
     (dict "value" "migrationEncryptionKey" "flag" "migrationEncryptionKeyEnabled" "env" "MIGRATION_ENCRYPTION_KEY")
-    (dict "value" "webhookSecretKey" "flag" "webhookSecretKeyEnabled" "env" "AK_WEBHOOK_SECRET_KEY") -}}
+    (dict "value" "webhookSecretKey" "flag" "webhookSecretKeyEnabled" "env" "AK_WEBHOOK_SECRET_KEY")
+    (dict "value" "ssoEncryptionKey" "flag" "ssoEncryptionKeyEnabled" "env" "SSO_ENCRYPTION_KEY") -}}
 {{- $enabled := get $root.Values.secrets $key.flag -}}
 {{- if not (kindIs "bool" $enabled) -}}
 {{- fail (printf "secrets.%s must be a boolean" $key.flag) -}}
@@ -473,6 +474,90 @@ Validate only these env names; other backend environment wiring is independent.
     secretKeyRef:
       name: {{ include "artifact-keeper.secretName" $root }}
       key: {{ $key.env }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Optional backend tuning variables from backend.logging (LOG_FORMAT, LOG_ANSI,
+#387) and backend.stuckScan (STUCK_SCAN_THRESHOLD_SECS,
+STUCK_SCAN_CHECK_INTERVAL_SECS, #101). Each renders only when its value
+differs from the backend's own default, so an install that leaves them alone
+renders no new variables. Invalid values fail the render.
+
+As with METRICS_PORT (#381), each name is rendered at most once. A
+backend.env entry with the same name wins when the chart value is left at its
+default, and must agree with it otherwise; a backend.environmentSecrets entry
+with the same name conflicts with a non-default chart value.
+*/}}
+{{- define "artifact-keeper.backendTuningEnv" -}}
+{{- $backend := .Values.backend -}}
+{{- $env := $backend.env | default dict -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's
+       defaults, which lack these keys. */ -}}
+{{- $logging := dig "logging" dict $backend -}}
+{{- $stuck := dig "stuckScan" dict $backend -}}
+{{- if kindIs "invalid" $logging -}}{{- $logging = dict -}}{{- end -}}
+{{- if kindIs "invalid" $stuck -}}{{- $stuck = dict -}}{{- end -}}
+{{- if not (kindIs "map" $logging) -}}
+{{- fail "backend.logging must be a map" -}}
+{{- end -}}
+{{- if not (kindIs "map" $stuck) -}}
+{{- fail "backend.stuckScan must be a map" -}}
+{{- end -}}
+{{- $vars := list -}}
+{{- /* hasKey, not `default`: `default` would turn an explicit false into the
+       default and hide a mistyped value. */ -}}
+{{- $format := "text" -}}
+{{- if hasKey $logging "format" -}}{{- $format = get $logging "format" -}}{{- end -}}
+{{- if not (and (kindIs "string" $format) (has $format (list "text" "json"))) -}}
+{{- fail (printf "backend.logging.format must be \"text\" or \"json\"; got %v" $format) -}}
+{{- end -}}
+{{- if ne $format "text" -}}
+{{- $vars = append $vars (dict "name" "LOG_FORMAT" "value" $format "path" "backend.logging.format") -}}
+{{- end -}}
+{{- $ansi := "auto" -}}
+{{- if hasKey $logging "ansi" -}}{{- $ansi = get $logging "ansi" -}}{{- end -}}
+{{- if not (or (kindIs "bool" $ansi) (and (kindIs "string" $ansi) (has $ansi (list "auto" "true" "false")))) -}}
+{{- fail (printf "backend.logging.ansi must be \"auto\", \"true\" or \"false\"; got %v" $ansi) -}}
+{{- end -}}
+{{- $ansi = toString $ansi -}}
+{{- if ne $ansi "auto" -}}
+{{- $vars = append $vars (dict "name" "LOG_ANSI" "value" $ansi "path" "backend.logging.ansi") -}}
+{{- end -}}
+{{- range $item := list
+    (dict "key" "thresholdSecs" "name" "STUCK_SCAN_THRESHOLD_SECS")
+    (dict "key" "checkIntervalSecs" "name" "STUCK_SCAN_CHECK_INTERVAL_SECS") -}}
+{{- $path := printf "backend.stuckScan.%s" $item.key -}}
+{{- if and (hasKey $stuck $item.key) (not (kindIs "invalid" (get $stuck $item.key))) -}}
+{{- $value := get $stuck $item.key -}}
+{{- $valid := false -}}
+{{- if or (kindIs "int" $value) (kindIs "int64" $value) (kindIs "float64" $value) -}}
+{{- $valid = and (gt (float64 $value) 0.0) (eq (float64 (int64 $value)) (float64 $value)) -}}
+{{- else if kindIs "string" $value -}}
+{{- $valid = regexMatch "^[1-9][0-9]{0,9}$" $value -}}
+{{- end -}}
+{{- if not $valid -}}
+{{- fail (printf "%s must be a positive integer number of seconds or null; got %v" $path $value) -}}
+{{- end -}}
+{{- $vars = append $vars (dict "name" $item.name "value" (printf "%d" (int64 $value)) "path" $path) -}}
+{{- end -}}
+{{- end -}}
+{{- $secretEnv := list -}}
+{{- range $backend.environmentSecrets -}}
+{{- $secretEnv = append $secretEnv .name -}}
+{{- end -}}
+{{- range $vars -}}
+{{- if has .name $secretEnv -}}
+{{- fail (printf "%s is set by %s and also by backend.environmentSecrets; remove one" .name .path) -}}
+{{- end -}}
+{{- if hasKey $env .name -}}
+{{- if ne (toString (get $env .name)) .value -}}
+{{- fail (printf "backend.env.%s (%v) conflicts with %s (%s): remove the backend.env entry or set both to the same value" .name (get $env .name) .path .value) -}}
+{{- end -}}
+{{- else }}
+- name: {{ .name }}
+  value: {{ .value | quote }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -816,9 +901,38 @@ Keep this in step with the `format_routes` nests in the backend's
 backend/src/api/routes.rs. /lxc is the incus alias, /general the generic
 format, and /t the rattler/pixi conda-token prefix (/t/<token>/conda/...).
 tests/test_httproute.py holds an independent copy of this inventory.
+
+backend.extraFormatPaths (#359) appends operator-supplied prefixes, for example
+for a backend plugin, after the built-in list so every consumer picks them up.
+Each must be a single path segment ("/" plus lowercase letters, digits and
+inner hyphens): the OpenShift Route for a path is named after it. Built-in
+prefixes, the other backend paths, /metrics (kept private), /dtrack and
+duplicates fail the render.
 */}}
 {{- define "artifact-keeper.backendFormatPaths" -}}
-/general /maven /npm /pypi /nuget /cargo /gems /go /helm /debian /rpm /alpine /pacman /composer /conan /conda /t /swift /terraform /cocoapods /hex /pub /lfs /ivy /chef /puppet /ansible /cran /bazel /huggingface /jetbrains /vscode /proto /incus /lxc /ext
+{{- $builtin := list "/general" "/maven" "/npm" "/pypi" "/nuget" "/cargo" "/gems" "/go" "/helm" "/debian" "/rpm" "/alpine" "/pacman" "/composer" "/conan" "/conda" "/t" "/swift" "/terraform" "/cocoapods" "/hex" "/pub" "/lfs" "/ivy" "/chef" "/puppet" "/ansible" "/cran" "/bazel" "/huggingface" "/jetbrains" "/vscode" "/proto" "/incus" "/lxc" "/ext" -}}
+{{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's
+       defaults, which lack this key. */ -}}
+{{- $extra := dig "extraFormatPaths" list .Values.backend -}}
+{{- if kindIs "invalid" $extra -}}{{- $extra = list -}}{{- end -}}
+{{- if not (kindIs "slice" $extra) -}}
+{{- fail "backend.extraFormatPaths must be a list of path prefixes such as \"/myplugin\"" -}}
+{{- end -}}
+{{- $reserved := concat $builtin (list "/" "/api" "/v2" "/health" "/ready" "/metrics" "/dtrack") -}}
+{{- $paths := $builtin -}}
+{{- range $extra -}}
+{{- if not (and (kindIs "string" .) (regexMatch "^/[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .)) -}}
+{{- fail (printf "backend.extraFormatPaths entry %q must be a single path segment: \"/\" followed by lowercase letters, digits and inner hyphens, with no spaces or further \"/\"" (toString .)) -}}
+{{- end -}}
+{{- if has . $reserved -}}
+{{- fail (printf "backend.extraFormatPaths entry %q is reserved: it is a built-in backend path, /metrics (kept private) or /dtrack; remove it" .) -}}
+{{- end -}}
+{{- if has . $paths -}}
+{{- fail (printf "backend.extraFormatPaths lists %q more than once" .) -}}
+{{- end -}}
+{{- $paths = append $paths . -}}
+{{- end -}}
+{{- join " " $paths -}}
 {{- end -}}
 
 {{/*

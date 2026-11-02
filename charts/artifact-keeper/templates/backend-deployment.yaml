@@ -346,7 +346,7 @@ spec:
             - name: ALLOW_HTTP_INTEGRATIONS
               value: "1"
             {{- end }}
-            {{- if .Values.secrets.smtpPassword }}
+            {{- if eq (include "artifact-keeper.smtpPasswordManaged" .) "true" }}
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:

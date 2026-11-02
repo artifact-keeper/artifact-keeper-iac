@@ -2,13 +2,21 @@
 =============================================================================
 Backend DNS Alias
 =============================================================================
-The Next.js web image bakes BACKEND_URL into its rewrites at build time
-(Dockerfile ARG default: http://backend:8080). This ExternalName service
-creates a "backend" DNS alias in each namespace so the baked-in hostname
-resolves to the Helm-named backend service regardless of the release name.
+Web images before 1.1.0 baked BACKEND_URL into their Next.js rewrites at build
+time (Dockerfile default: http://backend:8080). This ExternalName service
+creates a bare "backend" DNS alias in the release namespace so that baked-in
+hostname resolves to the Helm-named backend service regardless of the release
+name.
+
+Web 1.1.0 and later (artifact-keeper-web #58) proxy the API from middleware
+that reads BACKEND_URL at runtime, and web-deployment.yaml always sets it to
+the release-qualified backend Service, so the chart's default web image does
+not need this alias. It claims the literal name "backend" in the namespace,
+which collides with any other Service of that name (shared namespaces, several
+releases in one namespace). Set web.backendAlias.enabled=false there.
 =============================================================================
 */}}
-{{- if and .Values.backend.enabled .Values.web.enabled }}
+{{- if and .Values.backend.enabled .Values.web.enabled (eq (include "artifact-keeper.backendAlias.enabled" .) "true") }}
 apiVersion: v1
 kind: Service
 metadata:

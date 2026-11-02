@@ -185,7 +185,7 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | global.storageClass | string | `"standard"` |  |
 | global.tolerations | list | `[]` | Scheduling constraints applied to ALL workloads by default. Per-component values (e.g. backend.nodeSelector) override these.  NOTE: Per-component values fully replace global, they do not merge. Setting backend.tolerations means the backend gets only those tolerations, not global + backend combined. There is currently no way to opt a single component out of global scheduling without setting its own values. |
 | global.topologySpreadConstraints | list | `[]` |  |
-| httpRoute | object | `{"annotations":{},"dtrack":{"corsAllowOrigin":"*","enabled":false},"enabled":false,"hostnames":[],"labels":{},"networkPolicy":{"namespace":"","podSelector":{}},"parentRefs":[]}` | Gateway API routing through an existing Gateway. Mutually exclusive with Ingress (ingress.enabled) and OpenShift Routes (route.enabled). |
+| httpRoute | object | `{"annotations":{},"dtrack":{"corsAllowOrigin":"*","enabled":false},"enabled":false,"hostnames":[],"labels":{},"networkPolicy":{"namespace":"","podSelector":{}},"parentRefs":[],"timeouts":{"backendRequest":"","request":""}}` | Gateway API routing through an existing Gateway. Mutually exclusive with Ingress (ingress.enabled) and OpenShift Routes (route.enabled). |
 | httpRoute.annotations | object | `{}` | HTTPRoute annotations (no nginx or cert-manager annotations are added). |
 | httpRoute.dtrack.corsAllowOrigin | string | `"*"` | Dependency-Track ALPINE_CORS_ALLOW_ORIGIN when routed through HTTPRoute. |
 | httpRoute.dtrack.enabled | bool | `false` | Opt in to /dtrack pass-through, matching Ingress; requires dependencyTrack.enabled. Enable only behind authentication you control. |
@@ -196,6 +196,9 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | httpRoute.networkPolicy.namespace | string | `""` | Namespace of the Gateway proxy pods (not necessarily the Gateway object). |
 | httpRoute.networkPolicy.podSelector | object | `{}` | Non-empty map of labels selecting Gateway proxy pods in that namespace. |
 | httpRoute.parentRefs | list | `[]` | Existing Gateway references (name, optional namespace, sectionName and port). The Gateway listener must allow HTTPRoutes from this release's namespace. |
+| httpRoute.timeouts | object | `{"backendRequest":"","request":""}` | Gateway API `timeouts` (HTTPRouteTimeouts) on the rules that route to the backend: /api, /v2, /health, /ready and every package-format path. Large artifact uploads and downloads can outlast a Gateway's default request timeout, which then cuts the transfer off (#358). The web catch-all and /dtrack rules are left without timeouts and keep the Gateway's default. Values are Gateway API duration strings (GEP-2257): one to four <number><unit> groups with h, m, s or ms, such as "300s" or "1h30m"; "0s" disables the timeout. Empty (the default) omits the field. backendRequest may not exceed request unless request is "0s". Requires the HTTPRoute CRD from Gateway API v1.2.0 or later (standard channel): the v1.0 and v1.1 standard CRDs have no `timeouts` field, so the API server drops it and the Gateway default stays in force. Support is "Extended" in Gateway API, so check that your Gateway implementation honours it. |
+| httpRoute.timeouts.backendRequest | string | `""` | Rendered as rules[].timeouts.backendRequest: one request from the Gateway to the backend, including retries. |
+| httpRoute.timeouts.request | string | `""` | Rendered as rules[].timeouts.request: the whole request and response exchange, client to Gateway. |
 | imageBuilder | object | `{"affinity":{},"enabled":false,"gcKeepStorage":20000,"image":{"pullPolicy":"IfNotPresent","repository":"docker.io/moby/buildkit","tag":"v0.33.0-rootless"},"nodeSelector":{},"persistence":{"enabled":true,"size":"40Gi","storageClass":""},"policy":{"adminOnly":true,"allowDockerfile":false,"allowRun":false,"baseAllowlist":"","maxConcurrent":2,"pipIndexUrl":"","timeoutSecs":1800},"proxy":{"enabled":true,"existingSecret":"","httpProxy":"","httpsProxy":"","noProxy":""},"replicaCount":1,"resources":{"limits":{"cpu":"4","memory":"8Gi"},"requests":{"cpu":"500m","memory":"1Gi"}},"runAsUser":1000,"service":{"port":1234},"tolerations":[],"topologySpreadConstraints":[]}` | Image builder: a rootless BuildKit daemon the backend drives to build container images from a spec and push them back into this registry (backend feature #4034, off by default). The daemon is its OWN Deployment, not a sidecar: the backend ships only the `buildctl` client and reaches the daemon over TCP, so the daemon's relaxed security profile (seccomp and AppArmor unconfined, needed for rootless user namespaces; still no privileged flag) never applies to the registry's pod. Enabling this wires AK_BUILDKIT_ADDR and AK_IMAGE_BUILD_PUSH_REGISTRY into the backend and adds the network-policy rules both directions of the build need. |
 | imageBuilder.gcKeepStorage | int | `20000` | Storage buildkitd keeps under its state directory before garbage collecting (bytes, buildkitd --oci-worker-gc-keepstorage). |
 | imageBuilder.persistence | object | `{"enabled":true,"size":"40Gi","storageClass":""}` | Cache volume for pulled layers and build state. Without persistence the daemon starts cold after every restart and re-pulls every base image. |
@@ -766,16 +769,35 @@ Helm rendering deliberately does not require live cluster discovery.
 TLS termination and `certificateRefs` belong to the existing Gateway listener.
 `ingress.tls` and Ingress annotations do not apply to HTTPRoute.
 
-> **Upload size and timeouts have no HTTPRoute equivalent.** On Ingress the
-> chart derives `nginx.ingress.kubernetes.io/proxy-body-size`,
+> **Upload size has no HTTPRoute equivalent, and timeouts are opt-in.** On
+> Ingress the chart derives `nginx.ingress.kubernetes.io/proxy-body-size`,
 > `proxy-read-timeout` and `proxy-send-timeout` from `ingress.maxBodySize`,
 > `ingress.proxyReadTimeoutSeconds` and `ingress.proxySendTimeoutSeconds`.
-> The HTTPRoute sets none of these, so large artifact uploads and long OCI
-> pushes are bound by your Gateway implementation's own request-size and
-> timeout defaults, which are often far lower. Configure them on the Gateway or
-> controller (for example an Envoy Gateway `ClientTrafficPolicy`/
-> `BackendTrafficPolicy`, or the equivalent policy of your implementation),
-> together with any redirects and other controller-specific policies.
+> The HTTPRoute sets no request-size limit, and by default no timeouts, so
+> large artifact uploads and long OCI pushes are bound by your Gateway
+> implementation's own defaults, which are often far lower. Configure request
+> size on the Gateway or controller (for example an Envoy Gateway
+> `ClientTrafficPolicy`/`BackendTrafficPolicy`, or the equivalent policy of
+> your implementation), together with any redirects and other
+> controller-specific policies.
+
+To lift the timeout for the backend routes, set `httpRoute.timeouts`. Both
+fields take Gateway API duration strings and render as `timeouts` on every rule
+that targets the backend (`/api`, `/v2`, `/health`, `/ready` and the package
+prefixes); the web `/` and `/dtrack` rules keep the Gateway default:
+
+```yaml
+httpRoute:
+  timeouts:
+    request: 0s          # no limit on the whole client exchange
+    backendRequest: 1h   # per request to the backend
+```
+
+`0s` disables a timeout. `backendRequest` may not exceed `request` unless
+`request` is `0s`, and malformed durations fail the render. The `timeouts`
+field needs the Gateway API v1.2.0 or later HTTPRoute CRD (standard channel);
+the v1.0 and v1.1 CRDs do not define it, so the API server drops it. Gateway API
+marks it Extended support, so confirm that your implementation honours it.
 
 Both exposure modes are optional, but enabling them simultaneously fails the
 render. HTTPRoute is likewise mutually exclusive with the OpenShift Routes

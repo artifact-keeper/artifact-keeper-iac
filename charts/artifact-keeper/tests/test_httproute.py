@@ -371,6 +371,17 @@ class HTTPRouteTests(unittest.TestCase):
             result = subprocess.run(command, input=yaml.safe_dump(route), text=True, capture_output=True, check=False)
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn(str(max_matches), result.stdout)
+            # httpRoute.timeouts (#358): HTTPRouteTimeouts reached the standard
+            # channel in Gateway API v1.2.0, the minimum values.yaml documents.
+            # Newer CRDs must accept the rendered field. The v1.0 and v1.1 CRDs
+            # do not define it (the API server prunes it), so there is nothing
+            # to validate against.
+            if "timeouts" in rules_schema["items"]["properties"]:
+                timed = only(self.enabled({"httpRoute": {"timeouts": {"request": "0s", "backendRequest": "300s"}}}), "HTTPRoute")
+                self.assertIn("timeouts", timed["spec"]["rules"][0])
+                result = subprocess.run(command, input=yaml.safe_dump(timed), text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("Valid: 1", result.stdout)
 
 
 if __name__ == "__main__":

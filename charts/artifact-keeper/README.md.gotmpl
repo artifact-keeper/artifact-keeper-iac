@@ -565,16 +565,35 @@ Helm rendering deliberately does not require live cluster discovery.
 TLS termination and `certificateRefs` belong to the existing Gateway listener.
 `ingress.tls` and Ingress annotations do not apply to HTTPRoute.
 
-> **Upload size and timeouts have no HTTPRoute equivalent.** On Ingress the
-> chart derives `nginx.ingress.kubernetes.io/proxy-body-size`,
+> **Upload size has no HTTPRoute equivalent, and timeouts are opt-in.** On
+> Ingress the chart derives `nginx.ingress.kubernetes.io/proxy-body-size`,
 > `proxy-read-timeout` and `proxy-send-timeout` from `ingress.maxBodySize`,
 > `ingress.proxyReadTimeoutSeconds` and `ingress.proxySendTimeoutSeconds`.
-> The HTTPRoute sets none of these, so large artifact uploads and long OCI
-> pushes are bound by your Gateway implementation's own request-size and
-> timeout defaults, which are often far lower. Configure them on the Gateway or
-> controller (for example an Envoy Gateway `ClientTrafficPolicy`/
-> `BackendTrafficPolicy`, or the equivalent policy of your implementation),
-> together with any redirects and other controller-specific policies.
+> The HTTPRoute sets no request-size limit, and by default no timeouts, so
+> large artifact uploads and long OCI pushes are bound by your Gateway
+> implementation's own defaults, which are often far lower. Configure request
+> size on the Gateway or controller (for example an Envoy Gateway
+> `ClientTrafficPolicy`/`BackendTrafficPolicy`, or the equivalent policy of
+> your implementation), together with any redirects and other
+> controller-specific policies.
+
+To lift the timeout for the backend routes, set `httpRoute.timeouts`. Both
+fields take Gateway API duration strings and render as `timeouts` on every rule
+that targets the backend (`/api`, `/v2`, `/health`, `/ready` and the package
+prefixes); the web `/` and `/dtrack` rules keep the Gateway default:
+
+```yaml
+httpRoute:
+  timeouts:
+    request: 0s          # no limit on the whole client exchange
+    backendRequest: 1h   # per request to the backend
+```
+
+`0s` disables a timeout. `backendRequest` may not exceed `request` unless
+`request` is `0s`, and malformed durations fail the render. The `timeouts`
+field needs the Gateway API v1.2.0 or later HTTPRoute CRD (standard channel);
+the v1.0 and v1.1 CRDs do not define it, so the API server drops it. Gateway API
+marks it Extended support, so confirm that your implementation honours it.
 
 Both exposure modes are optional, but enabling them simultaneously fails the
 render. HTTPRoute is likewise mutually exclusive with the OpenShift Routes

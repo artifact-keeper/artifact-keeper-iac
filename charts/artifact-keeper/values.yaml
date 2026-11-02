@@ -1567,6 +1567,26 @@ httpRoute:
     enabled: false
     # -- Dependency-Track ALPINE_CORS_ALLOW_ORIGIN when routed through HTTPRoute.
     corsAllowOrigin: "*"
+  # -- Gateway API `timeouts` (HTTPRouteTimeouts) on the rules that route to the
+  # backend: /api, /v2, /health, /ready and every package-format path. Large
+  # artifact uploads and downloads can outlast a Gateway's default request
+  # timeout, which then cuts the transfer off (#358). The web catch-all and
+  # /dtrack rules are left without timeouts and keep the Gateway's default.
+  # Values are Gateway API duration strings (GEP-2257): one to four
+  # <number><unit> groups with h, m, s or ms, such as "300s" or "1h30m"; "0s"
+  # disables the timeout. Empty (the default) omits the field. backendRequest
+  # may not exceed request unless request is "0s". Requires the HTTPRoute CRD
+  # from Gateway API v1.2.0 or later (standard channel): the v1.0 and v1.1
+  # standard CRDs have no `timeouts` field, so the API server drops it and the
+  # Gateway default stays in force. Support is "Extended" in Gateway API, so
+  # check that your Gateway implementation honours it.
+  timeouts:
+    # -- Rendered as rules[].timeouts.request: the whole request and response
+    # exchange, client to Gateway.
+    request: ""
+    # -- Rendered as rules[].timeouts.backendRequest: one request from the
+    # Gateway to the backend, including retries.
+    backendRequest: ""
   # -- Narrow additive access for Gateway data-plane pods when networkPolicy.enabled
   # or fleet.guardrails.networkPolicy is enabled. Both fields are then required.
   # Existing Ingress policies are unchanged; this does not resolve issue #306.

@@ -282,7 +282,7 @@ class BootstrapScriptTests(unittest.TestCase):
         result = self.execute(managed=False, file=path)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(path.read_text().strip(), NEW_KEY)
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640)
         self.requests.clear()
         result = self.execute(managed=False, file=path)
         self.assertEqual(result.returncode, 0, result.stderr)

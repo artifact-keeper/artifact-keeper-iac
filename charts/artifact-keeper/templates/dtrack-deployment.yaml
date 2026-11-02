@@ -151,10 +151,13 @@ spec:
             - name: ALPINE_ENFORCE_AUTHENTICATION
               value: "true"
             # CORS is only relevant when the Dependency-Track UI/API is exposed
-            # publicly (ingress.dtrack.enabled, or httpRoute.dtrack.enabled when
-            # routing through a Gateway). In-cluster access (backend -> service,
+            # publicly (ingress.dtrack.enabled, httpRoute.dtrack.enabled when
+            # routing through a Gateway, or route.dtrack.enabled for the
+            # OpenShift Route). In-cluster access (backend -> service,
             # kubectl port-forward) is same-origin and needs no CORS, so it
-            # stays disabled otherwise.
+            # stays disabled otherwise. httpRoute excludes both Ingress and
+            # Route, so it wins outright; Ingress is checked before Route.
+            {{- $routeDtrack := and .Values.route.enabled (dig "dtrack" "enabled" false .Values.route) }}
             {{- if and .Values.httpRoute.enabled .Values.httpRoute.dtrack.enabled }}
             - name: ALPINE_CORS_ENABLED
               value: "true"
@@ -165,6 +168,19 @@ spec:
               value: "true"
             - name: ALPINE_CORS_ALLOW_ORIGIN
               value: {{ .Values.ingress.dtrack.corsAllowOrigin | quote }}
+            {{- else if and (not .Values.httpRoute.enabled) $routeDtrack }}
+            {{- /* Default origin: the shared route.host (fleet.host fallback,
+                   as in route.yaml), https when the Routes terminate TLS. */}}
+            {{- $routeOrigin := dig "dtrack" "corsAllowOrigin" "" .Values.route }}
+            {{- if not $routeOrigin }}
+            {{- $routeHost := .Values.route.host | default (dig "host" "" (.Values.fleet | default dict)) }}
+            {{- $routeHost = required "route.host must be set when route.enabled is true (the external hostname shared by every Route, e.g. artifacts.apps.<cluster-domain>)" $routeHost }}
+            {{- $routeOrigin = printf "%s://%s" (ternary "https" "http" (dig "tls" "enabled" false .Values.route)) $routeHost }}
+            {{- end }}
+            - name: ALPINE_CORS_ENABLED
+              value: "true"
+            - name: ALPINE_CORS_ALLOW_ORIGIN
+              value: {{ $routeOrigin | quote }}
             {{- else }}
             - name: ALPINE_CORS_ENABLED
               value: "false"

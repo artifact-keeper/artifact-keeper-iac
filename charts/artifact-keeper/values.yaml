@@ -1531,8 +1531,14 @@ route:
   dtrack:
     # -- Publish a /dtrack Route to the bundled Dependency-Track service.
     # Mirrors ingress.dtrack.enabled; only has effect when
-    # dependencyTrack.enabled is true.
+    # dependencyTrack.enabled is true. Also enables Dependency-Track's CORS
+    # settings (ALPINE_CORS_*), as ingress.dtrack and httpRoute.dtrack do.
     enabled: false
+    # -- Dependency-Track ALPINE_CORS_ALLOW_ORIGIN when exposed through the
+    # /dtrack Route. Empty derives the origin from route.host: https://<host>
+    # when route.tls.enabled, otherwise http://<host>. Set "*" or another
+    # origin to override.
+    corsAllowOrigin: ""
 
 # -- Gateway API routing through an existing Gateway. Mutually exclusive with
 # Ingress (ingress.enabled) and OpenShift Routes (route.enabled).

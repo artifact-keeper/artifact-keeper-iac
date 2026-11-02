@@ -68,6 +68,9 @@ spec:
           # server container and is not sensitive to per-subcommand flag differences.
           args: ["image", "--download-db-only", "--cache-dir", "/home/trivy/.cache"]
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.trivy.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
             - name: HOME
               value: /home/trivy
             - name: TMPDIR

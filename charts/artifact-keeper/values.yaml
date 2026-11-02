@@ -82,13 +82,25 @@ global:
   imagePullSecrets: []
 
   # -- Cluster-wide egress proxy. Set httpProxy/httpsProxy to route every
-  # component's outbound traffic through it. NO_PROXY is built for you (cluster
-  # DNS + all in-chart Services), so noProxy only needs your extra external
-  # hosts. Override or switch off a single component under <component>.proxy.
+  # component's outbound traffic through it. NO_PROXY is built for you (loopback,
+  # cluster DNS suffixes and every in-chart Service name), so noProxy only needs
+  # your extra hosts. Each field can be overridden per component under
+  # <component>.proxy (field by field; proxy.enabled: false opts that component
+  # out). See "Egress Proxy" in the README.
   proxy:
+    # -- Proxy URL for plain-HTTP egress, rendered as HTTP_PROXY and http_proxy.
     httpProxy: ""
+    # -- Proxy URL for HTTPS egress, rendered as HTTPS_PROXY and https_proxy.
     httpsProxy: ""
+    # -- Comma-separated extra NO_PROXY entries, appended to the generated
+    # in-cluster defaults. In-cluster S3 endpoints such as MinIO are NOT
+    # detected and must be listed here, as must fleet-shared Services.
     noProxy: ""
+    # -- Name of an existing Secret in the release namespace whose HTTP_PROXY
+    # and HTTPS_PROXY keys hold the proxy URLs (for proxies with credentials
+    # in the URL). Each is rendered as a secretKeyRef unless the literal
+    # httpProxy/httpsProxy field above is set, which wins for that variable.
+    existingSecret: ""
 
   # -- Scheduling constraints applied to ALL workloads by default.
   # Per-component values (e.g. backend.nodeSelector) override these.
@@ -122,8 +134,17 @@ cosign:
 # and artifact storage. It runs as a single Rust binary (Axum).
 backend:
   enabled: true
-  # Egress: inherits global.proxy. Override with proxy.httpProxy/httpsProxy/noProxy,
-  # or set proxy.enabled: false to cut this component off from egress.
+  # -- Egress proxy for the backend: inherits global.proxy field by field. Set a
+  # field here to override it for the backend only; noProxy is appended to the
+  # global list. enabled: false keeps the backend (and its cosign init
+  # container) off the proxy entirely. The backend's S3 endpoint is not
+  # auto-detected: add an in-cluster MinIO host to noProxy yourself.
+  proxy:
+    enabled: true
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+    existingSecret: ""
   # -- Additional envFrom sources (Secrets/ConfigMaps) for the backend container,
   # rendered verbatim. Use for credentials that must come from existing Secrets.
   extraEnvFrom: []
@@ -642,9 +663,14 @@ backend:
 web:
   enabled: true
   # -- No egress proxy: the web UI only talks to the backend in-cluster, so it
-  # needs no outbound access. Set enabled: true to route it via global.proxy.
+  # needs no outbound access. Set enabled: true to route it via global.proxy;
+  # the other fields then override global.proxy field by field.
   proxy:
     enabled: false
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+    existingSecret: ""
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-web  # Docker Hub: artifactkeeper/web
@@ -705,7 +731,14 @@ web:
 # until the edge image ships. Tracking: issue #56.
 edge:
   enabled: false
-  # Egress: inherits global.proxy. Set proxy.enabled: false to cut off its egress.
+  # -- Egress proxy for the edge: inherits global.proxy field by field (noProxy is
+  # appended to the global list). Set enabled: false to cut off its egress.
+  proxy:
+    enabled: true
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+    existingSecret: ""
   replicaCount: 1
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-edge
@@ -852,9 +885,14 @@ externalDatabase:
 opensearch:
   enabled: true
   # -- No egress proxy: OpenSearch only serves the backend in-cluster and never
-  # calls out. Set enabled: true to route it via global.proxy.
+  # calls out. Set enabled: true to route it via global.proxy; the other fields
+  # then override global.proxy field by field.
   proxy:
     enabled: false
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+    existingSecret: ""
   # -- Seconds the backend's wait-for-opensearch init container waits for
   # OpenSearch to reach green/yellow before proceeding on the Postgres-native
   # search fallback. OpenSearch is an optional accelerator (the backend boots
@@ -974,8 +1012,16 @@ opensearch:
 # prevents concurrent access from two pods.
 trivy:
   enabled: true
-  # Egress: inherits global.proxy. trivy fetches its vuln DB, so it usually needs
-  # egress; set proxy.enabled: false only if the DB is mirrored in-cluster.
+  # -- Egress proxy for Trivy (server and the trivy-db-init container): inherits
+  # global.proxy field by field (noProxy is appended to the global list). Trivy
+  # fetches its vuln DB, so it usually needs egress; set enabled: false only if
+  # the DB is mirrored in-cluster.
+  proxy:
+    enabled: true
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+    existingSecret: ""
   image:
     repository: ghcr.io/artifact-keeper/trivy
     # -- Trivy server image: the project's rebuild of upstream Trivy v0.76.0
@@ -1069,8 +1115,15 @@ trivy:
 # which stays on TRIVY_URL for the fs/incus scan path.
 scannerAdapter:
   enabled: true
-  # Egress: inherits global.proxy. Fetches the Trivy DB, so it usually needs
-  # egress; set proxy.enabled: false to cut it off.
+  # -- Egress proxy for the scanner-adapter: inherits global.proxy field by field
+  # (noProxy is appended to the global list). Fetches the Trivy DB, so it
+  # usually needs egress; set enabled: false to cut it off.
+  proxy:
+    enabled: true
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+    existingSecret: ""
   image:
     repository: ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter
     # -- The scanner-adapter is versioned independently of the AK
@@ -1131,8 +1184,17 @@ scannerAdapter:
 # admin user and API key for backend integration.
 dependencyTrack:
   enabled: true
-  # Egress: inherits global.proxy. Pulls vuln-intel feeds, so it usually needs
-  # egress; set proxy.enabled: false to cut it off.
+  # -- Egress proxy for the Dependency-Track API server: inherits global.proxy
+  # field by field (noProxy is appended to the global list). Pulls vuln-intel
+  # feeds, so it usually needs egress; set enabled: false to cut it off.
+  # Dependency-Track reads the lowercase http_proxy/https_proxy/no_proxy forms
+  # itself, which the chart emits alongside the uppercase ones.
+  proxy:
+    enabled: true
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+    existingSecret: ""
   # -- Name of an existing Secret holding a Dependency-Track API key. When set,
   # the backend reads DEPENDENCY_TRACK_API_KEY from it and the shared-config
   # volume, its mount, DEPENDENCY_TRACK_API_KEY_FILE and the shared-config PVC
@@ -1251,6 +1313,16 @@ dependencyTrack:
 # the network-policy rules both directions of the build need.
 imageBuilder:
   enabled: false
+  # -- Egress proxy for buildkitd: inherits global.proxy field by field (noProxy
+  # is appended to the global list). The daemon pulls base images and packages
+  # from outside the cluster, so it usually needs egress; set enabled: false to
+  # cut it off.
+  proxy:
+    enabled: true
+    httpProxy: ""
+    httpsProxy: ""
+    noProxy: ""
+    existingSecret: ""
   image:
     repository: docker.io/moby/buildkit
     tag: "v0.33.0-rootless"

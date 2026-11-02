@@ -74,6 +74,12 @@ spec:
             - --oci-worker-no-process-sandbox
             - --oci-worker-gc-keepstorage
             - {{ $ib.gcKeepStorage | quote }}
+          {{- /* buildkitd pulls base images and packages from outside the
+                 cluster, so it takes the proxy like the other egress components. */}}
+          {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" $ib.proxy "ctx" $)) }}
+          env:
+            {{- . | trim | nindent 12 }}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             privileged: false

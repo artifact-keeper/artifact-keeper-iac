@@ -79,9 +79,14 @@ spec:
             # probes get connection-refused and the pod crash-loops).
             - name: SCANNER_ADAPTER_ADDR
               value: ":8090"
+            {{- /* The proxy helper owns HTTP_PROXY/HTTPS_PROXY/NO_PROXY (and
+                   lowercase) when it emits them; skip copies left in .env. */}}
+            {{- $proxyEnv := splitList " " (include "artifact-keeper.proxyEnvNames" (dict "proxy" .Values.scannerAdapter.proxy "ctx" $)) }}
             {{- range $key, $value := .Values.scannerAdapter.env }}
+            {{- if not (has $key $proxyEnv) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
+            {{- end }}
             {{- end }}
           ports:
             - name: http

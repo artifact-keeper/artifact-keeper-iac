@@ -901,58 +901,104 @@ Egress proxy helpers
 NO_PROXY defaults: loopback, in-cluster DNS suffixes, and the short Service name
 of every enabled component. The bare names matter — a ".svc"/".cluster.local"
 suffix match misses "artifact-keeper-backend", which is how components call each
-other, so those hops would otherwise take the proxy. Fleet mode: the shared
-search/scan/DB Services live outside the release; add them via a noProxy.
+other, so those hops would otherwise take the proxy. The bare "backend" entry is
+the ExternalName alias from backend-alias-service.yaml (the web image bakes
+http://backend:8080 into its rewrites), rendered under the same condition.
+Fleet mode: the shared search/scan/DB Services live outside the release; add
+them via noProxy, as you must any in-cluster S3 endpoint (e.g. MinIO).
 */}}
 {{- define "artifact-keeper.noProxyDefaults" -}}
 {{- $full := include "artifact-keeper.fullname" . -}}
 {{- $n := list "localhost" "127.0.0.1" ".svc" ".svc.cluster.local" ".cluster.local" -}}
 {{- $n = append $n (printf "%s-backend" $full) -}}
+{{- if and .Values.backend.enabled .Values.web.enabled -}}{{- $n = append $n "backend" -}}{{- end -}}
 {{- $n = append $n (printf "%s-web" $full) -}}
 {{- if .Values.edge.enabled -}}{{- $n = append $n (printf "%s-edge" $full) -}}{{- end -}}
 {{- if .Values.opensearch.enabled -}}{{- $n = append $n (printf "%s-opensearch" $full) -}}{{- end -}}
 {{- if .Values.trivy.enabled -}}{{- $n = append $n (printf "%s-trivy" $full) -}}{{- end -}}
 {{- if .Values.scannerAdapter.enabled -}}{{- $n = append $n (printf "%s-scanner-adapter" $full) -}}{{- end -}}
 {{- if .Values.dependencyTrack.enabled -}}{{- $n = append $n (printf "%s-dtrack" $full) -}}{{- end -}}
+{{- if .Values.imageBuilder.enabled -}}{{- $n = append $n (printf "%s-buildkitd" $full) -}}{{- end -}}
 {{- if .Values.postgres.enabled -}}{{- $n = append $n (printf "%s-postgres" $full) -}}{{- else if .Values.externalDatabase.host -}}{{- $n = append $n .Values.externalDatabase.host -}}{{- end -}}
 {{- join "," $n -}}
 {{- end -}}
 
 {{/*
-Proxy env for a container. Effective proxy = component .proxy over global.proxy;
-emits nothing unless an http/https proxy resolves. proxy.enabled: false opts a
-component out even when global.proxy is set: with proxy-only egress that leaves
-it no route out of the cluster (in-cluster + DNS still work via NO_PROXY). Emits
-upper- and lower-case forms. NO_PROXY = noProxyDefaults + resolved noProxy.
-Call: include "artifact-keeper.proxyEnv" (dict "proxy" .Values.<component>.proxy "ctx" $)
+Effective proxy settings for one component, resolved field by field: a value
+under <component>.proxy wins over the same field of global.proxy. Returns YAML:
+  enabled        false when the component opted out (proxy.enabled: false) or
+                 nothing resolves (no literal URL and no existingSecret)
+  httpProxy      literal HTTP_PROXY URL, "" when unset
+  httpsProxy     literal HTTPS_PROXY URL, "" when unset
+  existingSecret Secret whose HTTP_PROXY / HTTPS_PROXY keys supply whichever
+                 of the two has no literal URL, "" when unset
+  noProxy        noProxyDefaults + global.proxy.noProxy + <component>.proxy.noProxy
+                 (the component list extends the global one, it does not replace it)
+Call: include "artifact-keeper.proxyConfig" (dict "proxy" .Values.<component>.proxy "ctx" $) | fromYaml
 */}}
-{{- define "artifact-keeper.proxyEnv" -}}
+{{- define "artifact-keeper.proxyConfig" -}}
 {{- $svc := .proxy | default dict -}}
 {{- $global := dict -}}
 {{- if .ctx.Values.global -}}{{- $global = .ctx.Values.global.proxy | default dict -}}{{- end -}}
-{{- if ne (toString $svc.enabled) "false" -}}
-{{- $httpProxy := or $svc.httpProxy $global.httpProxy -}}
-{{- $httpsProxy := or $svc.httpsProxy $global.httpsProxy -}}
-{{- if or $httpProxy $httpsProxy -}}
-{{- if $httpProxy }}
-- name: HTTP_PROXY
-  value: {{ $httpProxy | quote }}
-- name: http_proxy
-  value: {{ $httpProxy | quote }}
-{{- end }}
-{{- if $httpsProxy }}
-- name: HTTPS_PROXY
-  value: {{ $httpsProxy | quote }}
-- name: https_proxy
-  value: {{ $httpsProxy | quote }}
-{{- end }}
-{{- $noProxy := include "artifact-keeper.noProxyDefaults" .ctx -}}
-{{- $extra := or $svc.noProxy $global.noProxy -}}
-{{- with $extra }}{{- $noProxy = printf "%s,%s" $noProxy . -}}{{- end }}
-- name: NO_PROXY
-  value: {{ $noProxy | quote }}
-- name: no_proxy
-  value: {{ $noProxy | quote }}
+{{- $httpProxy := or $svc.httpProxy $global.httpProxy "" -}}
+{{- $httpsProxy := or $svc.httpsProxy $global.httpsProxy "" -}}
+{{- $secret := or $svc.existingSecret $global.existingSecret "" -}}
+{{- $enabled := and (ne (toString $svc.enabled) "false") (or $httpProxy $httpsProxy $secret) -}}
+{{- $noProxy := list (include "artifact-keeper.noProxyDefaults" .ctx) -}}
+{{- with $global.noProxy -}}{{- $noProxy = append $noProxy . -}}{{- end -}}
+{{- with $svc.noProxy -}}{{- $noProxy = append $noProxy . -}}{{- end -}}
+{{- dict "enabled" (not (empty $enabled)) "httpProxy" $httpProxy "httpsProxy" $httpsProxy "existingSecret" $secret "noProxy" (join "," $noProxy) | toYaml -}}
 {{- end -}}
+
+{{/*
+The env var names artifact-keeper.proxyEnv emits for a component, space
+separated ("" when it emits nothing). Templates that also render a free-form
+<component>.env map skip these keys so the variable is not defined twice.
+Call: splitList " " (include "artifact-keeper.proxyEnvNames" (dict "proxy" .Values.<component>.proxy "ctx" $))
+*/}}
+{{- define "artifact-keeper.proxyEnvNames" -}}
+{{- $p := include "artifact-keeper.proxyConfig" . | fromYaml -}}
+{{- if $p.enabled -}}
+{{- $names := list -}}
+{{- if or $p.httpProxy $p.existingSecret -}}{{- $names = concat $names (list "HTTP_PROXY" "http_proxy") -}}{{- end -}}
+{{- if or $p.httpsProxy $p.existingSecret -}}{{- $names = concat $names (list "HTTPS_PROXY" "https_proxy") -}}{{- end -}}
+{{- $names = concat $names (list "NO_PROXY" "no_proxy") -}}
+{{- join " " $names -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Proxy env for a container, from artifact-keeper.proxyConfig. Emits nothing
+unless the component resolves to a proxy; proxy.enabled: false opts a component
+out even when global.proxy is set (with proxy-only egress that leaves it no
+route out of the cluster; in-cluster + DNS still work via NO_PROXY). Emits
+upper- and lower-case forms. A literal URL renders as `value`; a field that
+only existingSecret supplies renders as a secretKeyRef to that key.
+Call: include "artifact-keeper.proxyEnv" (dict "proxy" .Values.<component>.proxy "ctx" $)
+*/}}
+{{- define "artifact-keeper.proxyEnv" -}}
+{{- $p := include "artifact-keeper.proxyConfig" . | fromYaml -}}
+{{- if $p.enabled -}}
+{{- range $pair := list (list "HTTP_PROXY" $p.httpProxy) (list "HTTPS_PROXY" $p.httpsProxy) -}}
+{{- $key := index $pair 0 -}}
+{{- $literal := index $pair 1 -}}
+{{- if or $literal $p.existingSecret -}}
+{{- range $name := list $key (lower $key) }}
+- name: {{ $name }}
+{{- if $literal }}
+  value: {{ $literal | quote }}
+{{- else }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $p.existingSecret }}
+      key: {{ $key }}
+{{- end }}
+{{- end }}
+{{- end -}}
+{{- end }}
+- name: NO_PROXY
+  value: {{ $p.noProxy | quote }}
+- name: no_proxy
+  value: {{ $p.noProxy | quote }}
 {{- end -}}
 {{- end -}}

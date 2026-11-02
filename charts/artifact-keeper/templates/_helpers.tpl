@@ -275,6 +275,28 @@ passed to forceChangePassword; Dependency-Track rejects an empty password with
 {{- end -}}
 
 {{/*
+Space-separated Dependency-Track permission names the bootstrap Job grants to
+the Automation team (dependencyTrack.bootstrap.automationPermissions). Each
+entry must be an uppercase permission identifier such as BOM_UPLOAD; anything
+else fails the render, because the names are interpolated into the bootstrap
+script and a request path. `dig` falls back to the chart default for
+`helm upgrade --reuse-values` from a chart that predates the key.
+*/}}
+{{- define "artifact-keeper.dtrackAutomationPermissions" -}}
+{{- $default := list "BOM_UPLOAD" "PROJECT_CREATION_UPLOAD" "PORTFOLIO_MANAGEMENT" "VIEW_PORTFOLIO" "VIEW_VULNERABILITY" "VULNERABILITY_ANALYSIS" -}}
+{{- $perms := dig "bootstrap" "automationPermissions" $default .Values.dependencyTrack -}}
+{{- if not (kindIs "slice" $perms) -}}
+{{- fail "dependencyTrack.bootstrap.automationPermissions must be a list of Dependency-Track permission names, e.g. [BOM_UPLOAD, VIEW_PORTFOLIO]" -}}
+{{- end -}}
+{{- range $perms -}}
+{{- if not (and (kindIs "string" .) (regexMatch "^[A-Z][A-Z0-9_]*$" .)) -}}
+{{- fail (printf "dependencyTrack.bootstrap.automationPermissions entry %q is not a Dependency-Track permission name (uppercase letters, digits and underscores, e.g. BOM_UPLOAD)" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- join " " (uniq $perms) -}}
+{{- end -}}
+
+{{/*
 Whether the Dependency-Track API key travels through the shared-config volume.
 False when dependencyTrack.existingApiKeySecret supplies it instead: the volume,
 its mount, DEPENDENCY_TRACK_API_KEY_FILE and the claim are all skipped, and the
@@ -402,6 +424,21 @@ backend.allowCredentialsInEnv acknowledges it (NOTES.txt then warns).
 {{- end -}}
 
 {{/*
+Returns "true" when the chart Secret carries SMTP_PASSWORD, so the backend
+should reference it. Mirrors the encryption-key wiring below: with
+externalSecrets.enabled the ExternalSecret maps the key whenever
+externalSecrets.secrets.smtpPassword is set, so secrets.smtpPassword (which
+then has nowhere to go) is not consulted; otherwise a nonempty
+secrets.smtpPassword enables the reference (into the chart-rendered Secret, or
+into secrets.existingSecret for compatibility).
+*/}}
+{{- define "artifact-keeper.smtpPasswordManaged" -}}
+{{- if .Values.externalSecrets.enabled -}}
+{{- if .Values.externalSecrets.secrets.smtpPassword -}}true{{- end -}}
+{{- else if .Values.secrets.smtpPassword -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Optional backend encryption keys. Flags opt into conventional keys in an
 operator-managed Secret without putting credential-shaped placeholders in values.
 Validate only these env names; other backend environment wiring is independent.
@@ -508,6 +545,12 @@ Preset sizing table keyed on fleet.preset (small|medium|large). Returns YAML
 for the selected preset with backend/web replica counts and resource blocks.
 Presets are chart-owned so an instance spec only carries the preset name.
 An empty preset falls back to small; any other value fails the render.
+
+Every preset gives the backend a 16Gi ephemeral-storage limit, matching the
+non-fleet backend.resources default raised in #116: with persistence off the
+backend's scratch volumes can grow to about 12Gi, and a smaller limit gets the
+pod evicted mid-operation (#350). Requests stay small so scheduling is not
+affected; the web limits are unchanged.
 */}}
 {{- define "artifact-keeper.fleet.presetSpec" -}}
 {{- $preset := default "small" .Values.fleet.preset -}}
@@ -517,7 +560,7 @@ An empty preset falls back to small; any other value fails the render.
     "webReplicas" 1
     "backend" (dict
       "requests" (dict "cpu" "250m" "memory" "512Mi" "ephemeral-storage" "256Mi")
-      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "1Gi"))
+      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "16Gi"))
     "web" (dict
       "requests" (dict "cpu" "100m" "memory" "128Mi" "ephemeral-storage" "128Mi")
       "limits" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "1Gi")))
@@ -526,7 +569,7 @@ An empty preset falls back to small; any other value fails the render.
     "webReplicas" 2
     "backend" (dict
       "requests" (dict "cpu" "500m" "memory" "1Gi" "ephemeral-storage" "512Mi")
-      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi"))
+      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "16Gi"))
     "web" (dict
       "requests" (dict "cpu" "250m" "memory" "256Mi" "ephemeral-storage" "256Mi")
       "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "2Gi")))
@@ -535,7 +578,7 @@ An empty preset falls back to small; any other value fails the render.
     "webReplicas" 2
     "backend" (dict
       "requests" (dict "cpu" "1" "memory" "2Gi" "ephemeral-storage" "1Gi")
-      "limits" (dict "cpu" "4" "memory" "4Gi" "ephemeral-storage" "4Gi"))
+      "limits" (dict "cpu" "4" "memory" "4Gi" "ephemeral-storage" "16Gi"))
     "web" (dict
       "requests" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "512Mi")
       "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi")))
@@ -898,12 +941,26 @@ Egress proxy helpers
 */}}
 
 {{/*
+Returns "true" when the bare "backend" ExternalName alias
+(backend-alias-service.yaml) renders: backend and web enabled and
+web.backendAlias.enabled not false. `dig` keeps the alias for
+`helm upgrade --reuse-values` from a chart that predates the knob.
+*/}}
+{{- define "artifact-keeper.backendAlias.enabled" -}}
+{{- $enabled := dig "backendAlias" "enabled" true .Values.web -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "web.backendAlias.enabled must be a boolean" -}}
+{{- end -}}
+{{- if and .Values.backend.enabled .Values.web.enabled $enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 NO_PROXY defaults: loopback, in-cluster DNS suffixes, and the short Service name
 of every enabled component. The bare names matter — a ".svc"/".cluster.local"
 suffix match misses "artifact-keeper-backend", which is how components call each
 other, so those hops would otherwise take the proxy. The bare "backend" entry is
-the ExternalName alias from backend-alias-service.yaml (the web image bakes
-http://backend:8080 into its rewrites), rendered under the same condition.
+the ExternalName alias from backend-alias-service.yaml (web images before 1.1.0
+bake http://backend:8080 into their rewrites), rendered under the same condition.
 Fleet mode: the shared search/scan/DB Services live outside the release; add
 them via noProxy, as you must any in-cluster S3 endpoint (e.g. MinIO).
 */}}
@@ -911,7 +968,7 @@ them via noProxy, as you must any in-cluster S3 endpoint (e.g. MinIO).
 {{- $full := include "artifact-keeper.fullname" . -}}
 {{- $n := list "localhost" "127.0.0.1" ".svc" ".svc.cluster.local" ".cluster.local" -}}
 {{- $n = append $n (printf "%s-backend" $full) -}}
-{{- if and .Values.backend.enabled .Values.web.enabled -}}{{- $n = append $n "backend" -}}{{- end -}}
+{{- if eq (include "artifact-keeper.backendAlias.enabled" .) "true" -}}{{- $n = append $n "backend" -}}{{- end -}}
 {{- $n = append $n (printf "%s-web" $full) -}}
 {{- if .Values.edge.enabled -}}{{- $n = append $n (printf "%s-edge" $full) -}}{{- end -}}
 {{- if .Values.opensearch.enabled -}}{{- $n = append $n (printf "%s-opensearch" $full) -}}{{- end -}}

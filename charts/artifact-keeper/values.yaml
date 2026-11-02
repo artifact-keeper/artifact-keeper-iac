@@ -232,7 +232,13 @@ backend:
     capabilities:
       drop:
         - ALL
-  # -- wait-for-opensearch init container image. Override for airgapped mirrors.
+  # -- wait-for-opensearch init container image (only that container uses
+  # it). Override for airgapped mirrors. A replacement must provide /bin/sh
+  # and wget (the readiness check is a shell loop of `wget -qO-` against
+  # OpenSearch's _cluster/health, over HTTPS unless
+  # opensearch.disableSecurityPlugin), plus grep, date and sleep: any
+  # busybox- or alpine-compatible image works; distroless or scratch images
+  # do not. Runs with backend.initContainerSecurityContext.
   waitForOpenSearch:
     image:
       repository: alpine
@@ -732,6 +738,18 @@ web:
   env:
     NEXT_PUBLIC_API_URL: ""
     NODE_ENV: "production"
+  backendAlias:
+    # -- Render a Service literally named `backend` (type ExternalName,
+    # pointing at this release's backend Service) in the release namespace.
+    # It exists for web images before 1.1.0, which baked
+    # http://backend:8080 into their rewrites at build time. Web 1.1.0 and
+    # later read BACKEND_URL at runtime, and the chart always sets it to the
+    # release-qualified backend Service, so the default web image does not
+    # need the alias. The alias claims the bare `backend` name in the
+    # namespace: disable it in shared namespaces or when several releases
+    # share one namespace, where that name collides. Disabling also drops
+    # `backend` from the generated NO_PROXY list.
+    enabled: true
   resources:
     requests:
       cpu: 250m
@@ -965,7 +983,15 @@ opensearch:
     capabilities:
       drop:
         - ALL
-  # -- fix-ownership and sysctl-check init container image. Override for airgapped mirrors.
+  # -- Image shared by both OpenSearch init containers, fix-ownership and
+  # sysctl-check (the backend's wait-for-opensearch uses
+  # backend.waitForOpenSearch.image instead). Override for airgapped
+  # mirrors. A replacement must provide `sh` and `chown` (fix-ownership runs
+  # `chown -R` on the data volume) and `cat` (sysctl-check reads
+  # /proc/sys/vm/max_map_count): any busybox- or alpine-compatible image
+  # works; distroless or scratch images do not. Security contexts are
+  # separate: opensearch.initContainerSecurityContext applies only to
+  # sysctl-check, and fix-ownership uses opensearch.fixOwnership.securityContext.
   initContainers:
     image:
       repository: busybox
@@ -1345,6 +1371,24 @@ dependencyTrack:
     # including existing installs; setting it back to false leaves the
     # property as it is rather than turning mirroring off.
     nvdApiEnabled: false
+    # -- Dependency-Track permissions the bootstrap Job grants to the
+    # Automation team, whose API key the backend uses. Dependency-Track
+    # creates that team with BOM_UPLOAD and VIEW_PORTFOLIO only, which makes
+    # the backend's project creation fail with 403 and no SBOM reach
+    # Dependency-Track. Granted on every Job run (install and upgrade, also
+    # when the key already exists) in the shared-volume and
+    # manageApiKeySecret modes; not with an operator-supplied
+    # existingApiKeySecret, whose team the operator manages. Grants are
+    # additive: removing an entry does not revoke it. Entries must be
+    # uppercase permission names; an unknown name fails the Job. Set to []
+    # to skip the grants.
+    automationPermissions:
+      - BOM_UPLOAD
+      - PROJECT_CREATION_UPLOAD
+      - PORTFOLIO_MANAGEMENT
+      - VIEW_PORTFOLIO
+      - VIEW_VULNERABILITY
+      - VULNERABILITY_ANALYSIS
   # -- Per-component scheduling (overrides global)
   tolerations: []
   affinity: {}
@@ -1513,8 +1557,14 @@ route:
   dtrack:
     # -- Publish a /dtrack Route to the bundled Dependency-Track service.
     # Mirrors ingress.dtrack.enabled; only has effect when
-    # dependencyTrack.enabled is true.
+    # dependencyTrack.enabled is true. Also enables Dependency-Track's CORS
+    # settings (ALPINE_CORS_*), as ingress.dtrack and httpRoute.dtrack do.
     enabled: false
+    # -- Dependency-Track ALPINE_CORS_ALLOW_ORIGIN when exposed through the
+    # /dtrack Route. Empty derives the origin from route.host: https://<host>
+    # when route.tls.enabled, otherwise http://<host>. Set "*" or another
+    # origin to override.
+    corsAllowOrigin: ""
 
 # -- Gateway API routing through an existing Gateway. Mutually exclusive with
 # Ingress (ingress.enabled) and OpenShift Routes (route.enabled).
@@ -1572,7 +1622,9 @@ secrets:
   # filesystem storage or when using IAM roles (IRSA) for credentials.
   s3AccessKey: ""
   s3SecretKey: ""
-  # SMTP password (only used when backend.env.SMTP_HOST is set)
+  # SMTP password (only used when backend.env.SMTP_HOST is set). Ignored when
+  # externalSecrets.enabled: SMTP_PASSWORD is then injected whenever
+  # externalSecrets.secrets.smtpPassword is set, so leave this empty.
   smtpPassword: ""
   # Migration encryption key — required at runtime by the backend to
   # encrypt source-connection credentials in the migration_jobs table.
@@ -1601,6 +1653,11 @@ secrets:
 # SecretStore or ClusterSecretStore configured for your provider.
 externalSecrets:
   enabled: false
+  # -- API version for the rendered ExternalSecret. The default,
+  # `external-secrets.io/v1`, needs an External Secrets Operator release that
+  # serves the v1 API; set `external-secrets.io/v1beta1` for older operators
+  # that serve only v1beta1. Must have the form external-secrets.io/<version>.
+  apiVersion: external-secrets.io/v1
   # Name of the SecretStore or ClusterSecretStore to reference.
   # If storeKind is ClusterSecretStore, the store must already exist.
   storeName: aws-secrets-manager
@@ -1615,6 +1672,9 @@ externalSecrets:
     s3Keys: artifact-keeper/${ENVIRONMENT}/s3-keys
     opensearchAuth: artifact-keeper/${ENVIRONMENT}/opensearch-auth
     dtAdminPassword: artifact-keeper/${ENVIRONMENT}/dt-admin-password
+    # SMTP_PASSWORD (property `smtp-password`). When set, the backend gets
+    # SMTP_PASSWORD from the synced Secret; secrets.smtpPassword is not needed.
+    # Set to "" if email delivery is not configured.
     smtpPassword: artifact-keeper/${ENVIRONMENT}/smtp-password
     # MIGRATION_ENCRYPTION_KEY — required at runtime to encrypt
     # source-connection credentials in the migration_jobs table. The

@@ -487,7 +487,7 @@ jobs:
           # so the step needs no sudo.
           K3D_VERSION=v5.7.5
           mkdir -p "$HOME/.local/bin"
-          curl -sL "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \
+          curl -sL --proto =https "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \
             -o "$HOME/.local/bin/k3d"
           chmod +x "$HOME/.local/bin/k3d"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"

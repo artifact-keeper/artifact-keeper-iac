@@ -545,6 +545,12 @@ Preset sizing table keyed on fleet.preset (small|medium|large). Returns YAML
 for the selected preset with backend/web replica counts and resource blocks.
 Presets are chart-owned so an instance spec only carries the preset name.
 An empty preset falls back to small; any other value fails the render.
+
+Every preset gives the backend a 16Gi ephemeral-storage limit, matching the
+non-fleet backend.resources default raised in #116: with persistence off the
+backend's scratch volumes can grow to about 12Gi, and a smaller limit gets the
+pod evicted mid-operation (#350). Requests stay small so scheduling is not
+affected; the web limits are unchanged.
 */}}
 {{- define "artifact-keeper.fleet.presetSpec" -}}
 {{- $preset := default "small" .Values.fleet.preset -}}
@@ -554,7 +560,7 @@ An empty preset falls back to small; any other value fails the render.
     "webReplicas" 1
     "backend" (dict
       "requests" (dict "cpu" "250m" "memory" "512Mi" "ephemeral-storage" "256Mi")
-      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "1Gi"))
+      "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "16Gi"))
     "web" (dict
       "requests" (dict "cpu" "100m" "memory" "128Mi" "ephemeral-storage" "128Mi")
       "limits" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "1Gi")))
@@ -563,7 +569,7 @@ An empty preset falls back to small; any other value fails the render.
     "webReplicas" 2
     "backend" (dict
       "requests" (dict "cpu" "500m" "memory" "1Gi" "ephemeral-storage" "512Mi")
-      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi"))
+      "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "16Gi"))
     "web" (dict
       "requests" (dict "cpu" "250m" "memory" "256Mi" "ephemeral-storage" "256Mi")
       "limits" (dict "cpu" "1" "memory" "1Gi" "ephemeral-storage" "2Gi")))
@@ -572,7 +578,7 @@ An empty preset falls back to small; any other value fails the render.
     "webReplicas" 2
     "backend" (dict
       "requests" (dict "cpu" "1" "memory" "2Gi" "ephemeral-storage" "1Gi")
-      "limits" (dict "cpu" "4" "memory" "4Gi" "ephemeral-storage" "4Gi"))
+      "limits" (dict "cpu" "4" "memory" "4Gi" "ephemeral-storage" "16Gi"))
     "web" (dict
       "requests" (dict "cpu" "500m" "memory" "512Mi" "ephemeral-storage" "512Mi")
       "limits" (dict "cpu" "2" "memory" "2Gi" "ephemeral-storage" "2Gi")))

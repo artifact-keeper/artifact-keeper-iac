@@ -3,6 +3,26 @@ entries:
   artifact-keeper:
   - apiVersion: v2
     appVersion: 1.11.10
+    created: "2026-11-02T22:22:47.825878976Z"
+    description: Enterprise artifact registry supporting 45+ package formats
+    digest: 8f2fa7fa665ce9123f24b1e5c2e38a4340215b2dc81b9b9c163ea408cac69ed9
+    home: https://artifactkeeper.com
+    keywords:
+    - artifact-registry
+    - package-manager
+    - devops
+    - security-scanning
+    maintainers:
+    - name: brandonrc
+    name: artifact-keeper
+    sources:
+    - https://github.com/artifact-keeper/artifact-keeper
+    type: application
+    urls:
+    - https://github.com/artifact-keeper/artifact-keeper-iac/releases/download/artifact-keeper-1.9.52/artifact-keeper-1.9.52.tgz
+    version: 1.9.52
+  - apiVersion: v2
+    appVersion: 1.11.10
     created: "2026-11-02T14:36:19.9226793Z"
     description: Enterprise artifact registry supporting 45+ package formats
     digest: 8835432f1bfd209ec1cabfe64a2667925b7e608c8f65dead8d0490ee368ba48d
@@ -1441,4 +1461,4 @@ entries:
     urls:
     - https://github.com/artifact-keeper/artifact-keeper-iac/releases/download/artifact-keeper-0.1.0/artifact-keeper-0.1.0.tgz
     version: 0.1.0
-generated: "2026-11-02T14:36:19.922793663Z"
+generated: "2026-11-02T22:22:47.826043874Z"

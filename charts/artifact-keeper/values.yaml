@@ -283,6 +283,36 @@ backend:
     # makes the client IP forgeable. Behind SNAT or a load balancer that hides
     # the client before the first proxy, no setting recovers the real address.
     xffTrustedForAuthz: false
+  # -- Diagnostics log settings (backend 1.11.2+). Field reference:
+  # docs/operations/logging.md in the artifact-keeper backend repository. Each
+  # value is rendered as its environment variable only when it differs from
+  # the backend default, so the defaults add nothing to the pod spec. A
+  # backend.env entry with the same name wins while the value here is left at
+  # its default, and must match it otherwise.
+  logging:
+    # -- Rendered as LOG_FORMAT. `text` (the default) is the human-readable
+    # line format; `json` writes one flat JSON object per line with `method`,
+    # `uri`, `correlation_id`, `status`, `user`, `ip`, `latency_ms` and
+    # `http.route` as top-level keys, for Loki or SIEM rules. Any other value
+    # fails the render.
+    format: text
+    # -- Rendered as LOG_ANSI: ANSI colour in the `text` format. `auto` (the
+    # default) colours only when stdout is a terminal, which a pod's stdout is
+    # not; `true` or `false` forces it, for example for `kubectl logs` against
+    # a TTY-attached debug container. Any other value fails the render.
+    ansi: auto
+  # -- Stuck-scan janitor, which reaps security scans left in `running` (for
+  # example by a backend pod that died mid-scan). Both values are null by default, which renders nothing and keeps the
+  # backend defaults. When set, each must be a positive integer; the backend
+  # clamps values below its floors (60 and 30 seconds). A backend.env entry
+  # with the same name must match the value here.
+  stuckScan:
+    # -- (int) Rendered as STUCK_SCAN_THRESHOLD_SECS: seconds a scan may stay
+    # `running` before the janitor reaps it (backend default 1800).
+    thresholdSecs: null
+    # -- (int) Rendered as STUCK_SCAN_CHECK_INTERVAL_SECS: seconds between janitor
+    # sweeps (backend default 600).
+    checkIntervalSecs: null
   env:
     RUST_LOG: "info,artifact_keeper=debug"
     HOST: "0.0.0.0"

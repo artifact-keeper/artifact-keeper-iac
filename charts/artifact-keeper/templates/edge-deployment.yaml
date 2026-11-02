@@ -59,9 +59,17 @@ spec:
               containerPort: 8081
               protocol: TCP
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.edge.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
+            {{- /* The proxy helper owns HTTP_PROXY/HTTPS_PROXY/NO_PROXY (and
+                   lowercase) when it emits them; skip copies left in .env. */}}
+            {{- $proxyEnv := splitList " " (include "artifact-keeper.proxyEnvNames" (dict "proxy" .Values.edge.proxy "ctx" $)) }}
             {{- range $key, $value := .Values.edge.env }}
+            {{- if not (has $key $proxyEnv) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
+            {{- end }}
             {{- end }}
             - name: PRIMARY_URL
               value: "http://{{ include "artifact-keeper.fullname" . }}-backend:{{ .Values.backend.service.httpPort }}"

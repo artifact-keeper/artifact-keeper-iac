@@ -71,6 +71,12 @@ spec:
             "--certificate-oidc-issuer={{ .Values.cosign.certificateOidcIssuer }}",
             "--certificate-identity-regexp={{ .Values.cosign.certificateIdentityRegexp }}",
             {{ include "artifact-keeper.image" (dict "image" .Values.backend.image "defaultTag" .Chart.AppVersion "context" .) | quote }}]
+          {{- /* cosign reaches Rekor/Fulcio and the registry, so behind a
+                 proxy-only egress it needs the backend's proxy settings. */}}
+          {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.backend.proxy "ctx" $)) }}
+          env:
+            {{- . | trim | nindent 12 }}
+          {{- end }}
           {{- with .Values.backend.initContainerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -189,6 +195,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.backend.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
             {{- if eq (include "artifact-keeper.dtrackApiKeyFile" .) "true" }}
             # The backend reads the Dependency-Track API key from this file
             # (see resolve_api_key in dependency_track_service.rs). This replaces
@@ -214,8 +223,12 @@ spec:
             {{- range .Values.backend.environmentSecrets }}
             {{- $secretEnv = append $secretEnv .name }}
             {{- end }}
+            {{- /* Likewise the proxy helper above owns HTTP_PROXY/HTTPS_PROXY/
+                   NO_PROXY (and lowercase) whenever it emits them, so a copy
+                   left in backend.env does not define the variable twice. */}}
+            {{- $proxyEnv := splitList " " (include "artifact-keeper.proxyEnvNames" (dict "proxy" .Values.backend.proxy "ctx" $)) }}
             {{- range $key, $value := .Values.backend.env }}
-            {{- if not (has $key $secretEnv) }}
+            {{- if not (or (has $key $secretEnv) (has $key $proxyEnv)) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}

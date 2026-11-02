@@ -96,6 +96,9 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.dependencyTrack.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
             {{- $dbHostFromSecret := eq (include "artifact-keeper.dtrackDbHostFromExistingSecret" .) "true" }}
             {{- if $dbHostFromSecret }}
             # Project host/port out of the operator-provided Secret so the JDBC

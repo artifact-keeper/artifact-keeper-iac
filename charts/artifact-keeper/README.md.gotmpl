@@ -269,6 +269,69 @@ Python dependencies in `.github/scripts/requirements.txt` installed:
 python3 .github/scripts/test-encryption-secret-refs.py
 ```
 
+## Egress Proxy
+
+Clusters that only allow outbound traffic through an HTTP(S) proxy set it once
+under `global.proxy`; the chart renders `HTTP_PROXY`, `HTTPS_PROXY` and
+`NO_PROXY` (plus the lowercase forms) into every component that reaches outside
+the cluster: backend (including its cosign `verify-image-signature` init
+container), edge, Trivy (server and `trivy-db-init`), scanner-adapter,
+Dependency-Track and the buildkitd image builder. The web UI and OpenSearch
+never call out and default to `proxy.enabled: false`.
+
+```yaml
+global:
+  proxy:
+    httpProxy: http://proxy.corp.example:3128
+    httpsProxy: http://proxy.corp.example:3128
+    noProxy: .corp.example,minio.storage.svc
+```
+
+`NO_PROXY` is generated: loopback, the cluster DNS suffixes (`.svc`,
+`.svc.cluster.local`, `.cluster.local`), the short Service name of every enabled
+in-chart component (including the bare `backend` alias the web image is built
+against), and the Postgres Service or `externalDatabase.host`. `noProxy` only
+needs to add hosts the chart cannot know about. In particular an in-cluster S3
+endpoint such as MinIO is **not** detected: add its hostname to `noProxy`, or
+the backend's storage traffic takes the proxy. The same goes for the shared
+Services of a fleet-mode install.
+
+Each component carries a `<component>.proxy` block with the same fields. They
+override `global.proxy` **field by field**: a component that only sets
+`httpsProxy` still inherits the global `httpProxy`, and a component `noProxy`
+is appended to the global list rather than replacing it. `proxy.enabled: false`
+takes a component off the proxy entirely; with a proxy-only egress policy that
+leaves it no route out of the cluster, so use it for components that must not
+call out (the default for web and OpenSearch).
+
+```yaml
+global:
+  proxy:
+    httpProxy: http://proxy.corp.example:3128
+    httpsProxy: http://proxy.corp.example:3128
+trivy:
+  proxy:
+    httpsProxy: http://scanner-proxy.corp.example:3128   # overrides only HTTPS_PROXY
+    noProxy: mirror.corp.example                         # global list + this
+dependencyTrack:
+  proxy:
+    enabled: false                                        # vuln feeds mirrored in-cluster
+```
+
+Proxies that need credentials in the URL can come from a Secret instead of the
+values file: point `global.proxy.existingSecret` (or `<component>.proxy.existingSecret`)
+at a Secret in the release namespace with `HTTP_PROXY` and `HTTPS_PROXY` keys and
+the chart renders `secretKeyRef`s. A literal `httpProxy`/`httpsProxy` still wins
+for its own variable, so the two forms can be mixed. Helm does not look the Secret
+up, so offline `helm template`, ArgoCD and Flux all work.
+
+The helper also owns these variable names: a leftover `HTTP_PROXY`, `HTTPS_PROXY`
+or `NO_PROXY` (either case) in `backend.env`, `edge.env` or `scannerAdapter.env`
+is skipped while the proxy is active, so the container never defines the
+variable twice. Dependency-Track reads the lowercase `http_proxy`/`https_proxy`/
+`no_proxy` forms itself; the chart emits both cases for every component so that
+Java, Go, Rust and Node runtimes all pick the proxy up.
+
 ## Deployment Profiles
 
 The chart ships with several values overlay files for common deployment scenarios.

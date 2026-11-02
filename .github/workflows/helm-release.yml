@@ -138,9 +138,12 @@ jobs:
           version=$(grep '^version:' charts/artifact-keeper/Chart.yaml | awk '{print $2}')
           url="https://artifact-keeper.github.io/artifact-keeper-iac/index.yaml"
           deadline=$((SECONDS + 900))
+          index="$RUNNER_TEMP/index.yaml"
           while :; do
-            if curl -fsSL --proto =https --max-time 30 "${url}?nocache=$(date +%s)" \
-                 | grep -Eq "^\s*version: ${version}\$"; then
+            # Download first, then grep the file: piping into `grep -q` makes grep close the
+            # pipe on the first match, curl then exits 23 and pipefail reports a miss.
+            if curl -fsSL --proto =https --max-time 30 -o "$index" "${url}?nocache=$(date +%s)" \
+                 && grep -E "^[[:space:]]*version: ${version}\$" "$index" > /dev/null; then
               echo "index.yaml lists artifact-keeper ${version}"
               exit 0
             fi

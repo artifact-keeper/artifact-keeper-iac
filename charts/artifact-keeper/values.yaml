@@ -1639,6 +1639,11 @@ secrets:
 # SecretStore or ClusterSecretStore configured for your provider.
 externalSecrets:
   enabled: false
+  # -- API version for the rendered ExternalSecret. The default,
+  # `external-secrets.io/v1`, needs an External Secrets Operator release that
+  # serves the v1 API; set `external-secrets.io/v1beta1` for older operators
+  # that serve only v1beta1. Must have the form external-secrets.io/<version>.
+  apiVersion: external-secrets.io/v1
   # Name of the SecretStore or ClusterSecretStore to reference.
   # If storeKind is ClusterSecretStore, the store must already exist.
   storeName: aws-secrets-manager

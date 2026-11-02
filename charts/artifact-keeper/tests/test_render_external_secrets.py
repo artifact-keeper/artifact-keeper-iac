@@ -76,5 +76,29 @@ class SmtpPasswordTests(unittest.TestCase):
         self.assertNotIn("SMTP_PASSWORD", backend_env(docs))
 
 
+
+class ApiVersionTests(unittest.TestCase):
+    """#271: the ExternalSecret apiVersion is configurable."""
+
+    def test_default_is_v1(self):
+        self.assertEqual(external_secret(render(ESO))["apiVersion"], "external-secrets.io/v1")
+
+    def test_older_operator_version(self):
+        docs = render(merge(ESO, {"externalSecrets": {"apiVersion": "external-secrets.io/v1beta1"}}))
+        self.assertEqual(external_secret(docs)["apiVersion"], "external-secrets.io/v1beta1")
+
+    def test_empty_falls_back_to_v1(self):
+        docs = render(merge(ESO, {"externalSecrets": {"apiVersion": ""}}))
+        self.assertEqual(external_secret(docs)["apiVersion"], "external-secrets.io/v1")
+
+    def test_other_groups_fail_the_render(self):
+        result = subprocess.run(
+            [os.environ.get("HELM", "helm"), "template", "ak", str(CHART), "-f", "-"],
+            input=yaml.safe_dump(merge(ESO, {"externalSecrets": {"apiVersion": "v1"}})),
+            capture_output=True, text=True, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not an External Secrets Operator API version", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

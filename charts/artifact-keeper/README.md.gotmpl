@@ -763,7 +763,8 @@ named Secret is absent. An existing nonempty `API_KEY` is preserved; an empty
 or incorrectly populated Secret fails explicitly. A concurrent creator wins
 without its value being overwritten. The Job installs no packages and does not
 need jq or kubectl. Bootstrap must retain access to the Dependency-Track API;
-with NetworkPolicy enabled, apply the TCP 8080 egress fix tracked in #304.
+with NetworkPolicy enabled, bootstrap needs the scoped TCP 8080 egress rule
+provided by prerequisite #397. Release this feature after that networking fix.
 Kubernetes API HTTPS access must also be allowed by the cluster's policies.
 
 The backend consumes `DEPENDENCY_TRACK_API_KEY` from this Secret. The bootstrap
@@ -828,6 +829,18 @@ The bootstrap Job then fails with `forceChangePassword failed` (it assumes the c
 - **Reconcile by hand**: log into the Dependency-Track UI with the password it actually has, change it to the Secret's current value, and re-run the Job (`kubectl delete job <release>-dtrack-init`, then sync/upgrade).
 
 GitOps note: engines that render with `helm template` (ArgoCD, Flux) never see the stored Secret value, so they would regenerate the password on every sync. The ApplicationSet shipped in this repo pins the live value with `ignoreDifferences` on `DEPENDENCY_TRACK_ADMIN_PASSWORD` plus the `RespectIgnoreDifferences=true` sync option. Replicate that if you deploy this chart with your own GitOps tooling and leave `adminPassword` unset.
+
+### Concurrent Dependency-Track API-key Secret creation
+
+In managed-Secret mode, an HTTP 409 from Secret creation means another bootstrap
+Job created the Secret first. The losing Job preserves the winner's key and
+waits up to 120 seconds for the kubelet to project it into its optional Secret
+volume. Projection latency depends on the kubelet sync period and Secret cache
+TTL; this concurrent-creation path has not been validated on a real cluster.
+If the Job times out, verify that the named Secret contains a nonempty `API_KEY`
+and that Secret projection is working, then retry bootstrap after the volume
+has refreshed. Preserve the existing key; do not delete a Secret used by the
+backend just to retry bootstrap.
 
 ### Backend PVC Permissions
 

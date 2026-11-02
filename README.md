@@ -1,5 +1,9 @@
 # Artifact Keeper IaC
 
+<p align="center">
+  <img alt="Artifact Keeper" src="https://raw.githubusercontent.com/artifact-keeper/.github/main/brand/banners/github-readme_1600x600.png" width="100%">
+</p>
+
 Infrastructure as Code for [Artifact Keeper](https://github.com/artifact-keeper/artifact-keeper) — production-grade Helm charts, Terraform modules, ArgoCD GitOps, and monitoring stack.
 
 > **Note:** All files in this repository are **example configurations** provided as getting-started templates. Review and modify them to match your specific infrastructure requirements, security policies, and operational needs before use in production.

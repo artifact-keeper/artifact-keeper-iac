@@ -63,6 +63,9 @@ ingress:
     enabled: true
 
 secrets:
+  # Staging deploys through Argo CD, where generated values would rotate on every
+  # sync (see the README), so fail the render on a missing value instead.
+  generate: false
   jwtSecret: ""  # Override via --set or external secret
 
 networkPolicy:

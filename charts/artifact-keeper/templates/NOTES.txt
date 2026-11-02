@@ -43,6 +43,20 @@ HTTPRoute: {{ include "artifact-keeper.fullname" . }}
   {{- end }}
 {{- end }}
 
+{{- with include "artifact-keeper.generatedSecretNames" . }}
+Generated credentials: {{ . }}
+  These are unset, so the chart generated them and stored them in the Secret
+  {{ include "artifact-keeper.secretName" $ }}. helm upgrade keeps the stored values.
+
+  - GitOps (Argo CD, Flux, plain "helm template"): these tools can't read the
+    Secret, so each render generates new values, and a new Postgres password
+    stops matching the existing database. Set these values or use
+    secrets.existingSecret instead.
+  - helm uninstall deletes the Secret but keeps the Postgres PVC, so a new
+    install generates a password the database won't accept. See "Recovering a
+    PostgreSQL password mismatch" in the chart README.
+
+{{ end -}}
 Backend API:
   kubectl port-forward svc/{{ include "artifact-keeper.fullname" . }}-backend {{ .Values.backend.service.httpPort }}:{{ .Values.backend.service.httpPort }}
 

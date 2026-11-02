@@ -944,6 +944,13 @@ postgres:
         - ALL
   auth:
     username: registry
+    # -- Empty generates one and keeps it across upgrades (see secrets.generate).
+    # Postgres only applies the password when it first initializes its data
+    # directory, so changing it here later doesn't change the database's
+    # password, and a new install over a retained PVC needs the old one. Under
+    # Argo CD, Flux or plain `helm template`, set it or use
+    # secrets.existingSecret. If you supply your own, it goes into DATABASE_URL
+    # unencoded, so avoid URL-reserved characters.
     password: ""
     database: artifact_registry
   persistence:
@@ -1767,8 +1774,20 @@ secrets:
   # Optional encryption keys are wired separately using the *Enabled flags
   # below, or backend.environmentSecrets for custom Secret/key names.
   existingSecret: ""
-  # JWT signing secret. Generate it with `openssl rand -base64 48`: the backend
-  # refuses to start on a secret shorter than 32 characters, a known
+  # -- Generate secrets.jwtSecret and postgres.auth.password when they are left
+  # empty, and keep them across upgrades by reading them back from the chart's
+  # Secret. A value you supply always wins, and this doesn't apply with
+  # existingSecret or External Secrets. Reading the Secret needs a live cluster:
+  # Argo CD, Flux and plain `helm template` generate new values on every render,
+  # and a new Postgres password stops matching the existing database, so with
+  # those tools set both values or use existingSecret. Set false to fail the
+  # render when a value is missing, as values-production.yaml and
+  # values-staging.yaml do. See "Generated credentials" in the README.
+  generate: true
+  # JWT signing secret. Empty generates one (see secrets.generate). Rotating it
+  # ends every session, and stored SSO secrets and upstream credentials too
+  # unless ssoEncryptionKey is set. To supply your own, use
+  # `openssl rand -base64 48`: the backend refuses to start on a secret shorter than 32 characters, a known
   # placeholder, or one it judges low-entropy. Backends before 1.11.0 can also
   # reject a strong hex secret that happens to use fewer than 16 distinct
   # characters (about 1 in 4 from `openssl rand -hex 32`, artifact-keeper#4211),

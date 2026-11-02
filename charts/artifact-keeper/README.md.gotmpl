@@ -4,17 +4,17 @@
 
 ## TL;DR
 
-Install from a cloned checkout:
-
 ```bash
-git clone https://github.com/artifact-keeper/artifact-keeper-iac.git
-cd artifact-keeper-iac
-helm install ak charts/artifact-keeper/ \
+helm repo add artifact-keeper https://artifact-keeper.github.io/artifact-keeper-iac/
+helm repo update
+helm install ak artifact-keeper/artifact-keeper \
   --namespace artifact-keeper \
   --create-namespace
 ```
 
-A published Helm repository at `https://artifact-keeper.github.io/artifact-keeper-iac/` is planned but not yet live. See [issue #51](https://github.com/artifact-keeper/artifact-keeper-iac/issues/51) for tracking.
+To install from a cloned checkout instead, use `helm install ak charts/artifact-keeper/` in place of `artifact-keeper/artifact-keeper`.
+
+No values are required: the chart generates the JWT secret and the Postgres password. If you deploy with Argo CD, Flux or plain `helm template`, read [Generated credentials](#generated-credentials) first.
 
 ## Introduction
 
@@ -33,7 +33,7 @@ The chart and backend versions must match. The current chart on `main` deploys O
 
 For deployments running backend v1.1.x, pin the chart to a tag matching that line. Mixing chart `main` with backend `:1.1-dev` will fail at startup because the backend will not find an OpenSearch endpoint.
 
-Tracking issues: chart release tags are coordinated in [#74](https://github.com/artifact-keeper/artifact-keeper-iac/issues/74), and a published Helm repository is tracked in [#51](https://github.com/artifact-keeper/artifact-keeper-iac/issues/51).
+Tracking issues: chart release tags are coordinated in [#74](https://github.com/artifact-keeper/artifact-keeper-iac/issues/74).
 
 ## Prerequisites
 
@@ -61,7 +61,15 @@ helm install ak charts/artifact-keeper/ \
   --create-namespace
 ```
 
-A published Helm repository at `https://artifact-keeper.github.io/artifact-keeper-iac/` is planned but not yet live (see [issue #51](https://github.com/artifact-keeper/artifact-keeper-iac/issues/51)). Once published, the equivalent install command will be `helm install ak artifact-keeper/artifact-keeper`.
+The chart is also published to a Helm repository:
+
+```bash
+helm repo add artifact-keeper https://artifact-keeper.github.io/artifact-keeper-iac/
+helm repo update
+helm install ak artifact-keeper/artifact-keeper \
+  --namespace artifact-keeper \
+  --create-namespace
+```
 
 If you are running backend v1.1.x, do not install from `main`. See the [Compatibility Matrix](#compatibility-matrix) above for chart/backend version pairing.
 
@@ -750,10 +758,23 @@ When `networkPolicy.enabled` is set to `true`, the chart creates NetworkPolicy r
 
 ### Secrets Management
 
-For development, secrets are stored directly in the chart's Secret template. For production, two options exist:
+For development, the chart generates what it needs and stores it in its own Secret (see [Generated credentials](#generated-credentials)). For production, two options exist:
 
 1. **External overrides**: Pass secrets via `--set` flags or external values files that are not committed to version control.
 2. **External Secrets Operator**: Set `externalSecrets.enabled: true` to pull secrets from AWS Secrets Manager (or another provider) using ExternalSecret CRDs.
+
+#### Generated credentials
+
+When `secrets.jwtSecret` or `postgres.auth.password` is empty, the chart generates it and stores it in the `<fullname>-secrets` Secret. On later upgrades it reads the stored value back with `lookup`, so upgrades, including `--reuse-values`, never rotate it.
+
+- A value you supply always wins. Supplying a new `postgres.auth.password` later doesn't change the password inside an initialized database; see [Recovering a PostgreSQL password mismatch](#recovering-a-postgresql-password-mismatch).
+- Nothing is generated with `secrets.existingSecret` or `externalSecrets.enabled`, or for an external database.
+- `secrets.generate: false` turns generation off, so a missing value fails the render. `values-production.yaml` and `values-staging.yaml` set this.
+- Moving from `secrets.existingSecret` back to the chart's Secret generates new values, because the chart's Secret doesn't exist yet. Copy the values across first.
+
+> **Argo CD, Flux and plain `helm template`: set the values or use `secrets.existingSecret`.** `lookup` needs a live cluster. These tools render without one, so every render generates new values. Each sync would then rotate the JWT secret, ending every session and, unless `secrets.ssoEncryptionKey` is set, breaking stored SSO secrets and upstream credentials. It would also change the Postgres password in the Secret, which stops matching the existing database, so the backend can't connect. These tools don't show `NOTES.txt` either, so nothing warns you at deploy time.
+>
+> The dev profile in this repo's `argocd/applicationset.yaml` leaves these values to the chart and pins them with `ignoreDifferences` plus `RespectIgnoreDifferences=true`, so the live values are kept after first creation. That is only suitable for throwaway environments: if the Secret is ever recreated, the values change.
 
 **Backend credentials go in `backend.environmentSecrets`, never in `backend.env`.** `backend.env` is copied into the backend Deployment as plain `value:` entries. Anyone who can `get` the Deployment or its pods, or read the Helm release Secret, can read it. The render fails when `backend.env` sets a non-empty credential: `ADMIN_PASSWORD`, `INITIAL_ADMIN_PASSWORD`, `JWT_SECRET`, `S3_SECRET_ACCESS_KEY` (or `S3_SECRET_KEY`), a `DATABASE_URL` with a password, `DEPENDENCY_TRACK_API_KEY`, `OPENSEARCH_PASSWORD`, `OIDC_CLIENT_SECRET`, `LDAP_BIND_PASSWORD`, `SMTP_PASSWORD`, `PEER_API_KEY`, `EDGE_API_KEY`, `GITHUB_TOKEN`, an Azure, GCS or CloudFront key, or an encryption key. Put a Secret reference in `backend.environmentSecrets` instead. An entry there wins over the same key in `backend.env`.
 
@@ -1018,6 +1039,27 @@ When `replicaCount >= 2`, the chart renders a StatefulSet with `cluster.initial_
 ### DependencyTrack Slow Startup
 
 DependencyTrack loads its vulnerability database on first boot, which requires 4Gi+ of memory and can take several minutes. The readiness probe is configured with a generous initial delay. If the pod is killed before initialization completes, increase `dependencyTrack.resources.limits.memory`.
+
+### Recovering a PostgreSQL password mismatch
+
+Postgres applies its password only when it first initializes its data directory. When `postgres.auth.password` is unset, the chart generates a password on first install and keeps it stable by reading it back from the Secret on later renders. These situations break the pairing between the Secret and the password the database actually has:
+
+1. `helm uninstall` followed by `helm install`. Uninstall deletes the Secret, but the Postgres PVC survives (StatefulSet PVCs are never removed by Helm), so the new install generates a fresh password while the database still has the old one.
+2. A new `postgres.auth.password` on an existing release, or the Secret edited or replaced out of band.
+3. Rendering with Argo CD, Flux or plain `helm template` (see [Generated credentials](#generated-credentials)).
+
+The backend's `wait-for-postgres` init container only checks that Postgres is up, so the backend then starts, logs `password authentication failed` and restarts in a loop, and `helm install --wait` times out. To recover, pick one (`<fullname>` is usually `<release>-artifact-keeper`):
+
+- **Restore the old password**: if you still have it (a Secret backup, a values file), set it as `postgres.auth.password` and run the upgrade again.
+- **Change the database to match the Secret**: the local socket in the Postgres image doesn't ask for a password, so you can apply the Secret's value directly:
+
+  ```bash
+  kubectl exec <fullname>-postgres-0 -n <namespace> -- sh -c \
+    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER USER \"$POSTGRES_USER\" PASSWORD '"'"'$POSTGRES_PASSWORD'"'"'"'
+  kubectl rollout restart deployment/<fullname>-backend -n <namespace>
+  ```
+
+- **Start over**: delete the claim (`kubectl delete pvc postgres-data-<fullname>-postgres-0`) and the Postgres pod, which initializes an empty database with the Secret's password. This loses all data in the database.
 
 ### Recovering a Dependency-Track password mismatch
 

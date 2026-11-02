@@ -80,10 +80,18 @@ spec:
       # the password Dependency-Track actually has. Ignoring that one field
       # (together with RespectIgnoreDifferences below) makes ArgoCD keep the
       # live value after the initial creation.
+      #
+      # The same applies to JWT_SECRET and POSTGRES_PASSWORD on the dev profile,
+      # which leaves secrets.jwtSecret and postgres.auth.password to the chart: a
+      # new Postgres password every sync would stop matching the database.
+      # DATABASE_URL embeds that password, so it is pinned with it.
       ignoreDifferences:
         - kind: Secret
           jsonPointers:
             - /data/DEPENDENCY_TRACK_ADMIN_PASSWORD
+            - /data/JWT_SECRET
+            - /data/POSTGRES_PASSWORD
+            - /data/DATABASE_URL
       syncPolicy:
         {{- if eq .autoSync "true" }}
         automated:

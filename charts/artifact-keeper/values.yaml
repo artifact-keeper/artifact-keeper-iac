@@ -1572,7 +1572,9 @@ secrets:
   # filesystem storage or when using IAM roles (IRSA) for credentials.
   s3AccessKey: ""
   s3SecretKey: ""
-  # SMTP password (only used when backend.env.SMTP_HOST is set)
+  # SMTP password (only used when backend.env.SMTP_HOST is set). Ignored when
+  # externalSecrets.enabled: SMTP_PASSWORD is then injected whenever
+  # externalSecrets.secrets.smtpPassword is set, so leave this empty.
   smtpPassword: ""
   # Migration encryption key — required at runtime by the backend to
   # encrypt source-connection credentials in the migration_jobs table.
@@ -1615,6 +1617,9 @@ externalSecrets:
     s3Keys: artifact-keeper/${ENVIRONMENT}/s3-keys
     opensearchAuth: artifact-keeper/${ENVIRONMENT}/opensearch-auth
     dtAdminPassword: artifact-keeper/${ENVIRONMENT}/dt-admin-password
+    # SMTP_PASSWORD (property `smtp-password`). When set, the backend gets
+    # SMTP_PASSWORD from the synced Secret; secrets.smtpPassword is not needed.
+    # Set to "" if email delivery is not configured.
     smtpPassword: artifact-keeper/${ENVIRONMENT}/smtp-password
     # MIGRATION_ENCRYPTION_KEY — required at runtime to encrypt
     # source-connection credentials in the migration_jobs table. The

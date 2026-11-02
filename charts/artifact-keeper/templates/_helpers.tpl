@@ -402,6 +402,21 @@ backend.allowCredentialsInEnv acknowledges it (NOTES.txt then warns).
 {{- end -}}
 
 {{/*
+Returns "true" when the chart Secret carries SMTP_PASSWORD, so the backend
+should reference it. Mirrors the encryption-key wiring below: with
+externalSecrets.enabled the ExternalSecret maps the key whenever
+externalSecrets.secrets.smtpPassword is set, so secrets.smtpPassword (which
+then has nowhere to go) is not consulted; otherwise a nonempty
+secrets.smtpPassword enables the reference (into the chart-rendered Secret, or
+into secrets.existingSecret for compatibility).
+*/}}
+{{- define "artifact-keeper.smtpPasswordManaged" -}}
+{{- if .Values.externalSecrets.enabled -}}
+{{- if .Values.externalSecrets.secrets.smtpPassword -}}true{{- end -}}
+{{- else if .Values.secrets.smtpPassword -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Optional backend encryption keys. Flags opt into conventional keys in an
 operator-managed Secret without putting credential-shaped placeholders in values.
 Validate only these env names; other backend environment wiring is independent.

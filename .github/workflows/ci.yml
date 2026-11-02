@@ -81,11 +81,15 @@ jobs:
   sonarcloud:
     name: SonarCloud Scan
     runs-on: ubuntu-24.04
-    # Skip on dependabot PRs: GitHub withholds secrets from dependabot
-    # runs for security reasons, so SONAR_TOKEN is empty and the scan
-    # always fails. SonarCloud provides no useful signal on dependency
-    # bumps anyway. Push events to main and human PRs still run it.
-    if: github.actor != 'dependabot[bot]'
+    # Skip on dependabot and fork PRs: GitHub withholds repository secrets
+    # from both, so SONAR_TOKEN is empty and the scanner exits 3 with "Not
+    # authorized or organization not found" (#293). Push events to main and
+    # same-repo PRs still run it, and a fork's changes are scanned once the
+    # merge commit lands on main.
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     # SonarCloud Automatic Analysis may be enabled at the org level.
     # Until it is disabled in the SonarCloud UI (Administration > Analysis Method),
     # CI-based analysis will conflict and fail. Allow this job to fail gracefully

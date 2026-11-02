@@ -15,6 +15,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: dependency-track
+  {{- with .Values.dependencyTrack.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: 1
   strategy:
@@ -26,6 +30,10 @@ spec:
     metadata:
       labels:
         {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 8 }}
+      {{- with .Values.dependencyTrack.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       {{- with (.Values.dependencyTrack.tolerations | default .Values.global.tolerations) }}
       tolerations:

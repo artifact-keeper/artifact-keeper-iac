@@ -75,8 +75,10 @@ def notes(values=None, files=()):
 def render_with_stored_secret(stored, values=None):
     """Render as if lookup found `stored`, which `helm template` can't do.
 
-    The real lookup is covered by the chart-testing install and upgrade in CI;
-    this pins the order the chart resolves values in.
+    This pins the order the chart resolves values in. CI doesn't prove the real
+    lookup keeps values: `ct install --upgrade` only upgrades when the chart
+    version was bumped, and it never compares the Secret, so a rotated JWT secret
+    would go unnoticed. That needs a live check on a cluster.
     """
     with tempfile.TemporaryDirectory() as tmp:
         chart = chart_copy(tmp)
@@ -227,8 +229,59 @@ class FailFastTests(unittest.TestCase):
         )
 
 
+class ResourcePolicyTests(unittest.TestCase):
+    KEEP = "helm.sh/resource-policy"
+
+    def policy(self, values=None):
+        return (chart_secret(render(values))["metadata"].get("annotations") or {}).get(self.KEEP)
+
+    def test_kept_while_it_holds_a_generated_value(self):
+        self.assertEqual(self.policy(), "keep")
+        self.assertEqual(self.policy({"secrets": {"jwtSecret": JWT}}), "keep")
+        self.assertEqual(self.policy({"postgres": {"auth": {"password": "supplied"}}}), "keep")
+
+    def test_not_kept_when_every_value_is_supplied(self):
+        self.assertIsNone(
+            self.policy({"secrets": {"jwtSecret": JWT}, "postgres": {"auth": {"password": "supplied"}}})
+        )
+
+
+class DevProfileTests(unittest.TestCase):
+    """Argo CD renders the dev element without lookup, so it must not generate."""
+
+    def dev_values(self):
+        return yaml.safe_load((CHART / "values-dev.yaml").read_text())
+
+    def test_renders_no_secret_and_is_stable(self):
+        first = render(self.dev_values())
+        second = render(self.dev_values())
+        self.assertEqual([d for d in first if d["kind"] == "Secret"], [])
+        self.assertEqual(first, second)
+
+    def test_applicationset_uses_it_for_dev_and_has_no_pin(self):
+        text = (CHART.parents[1] / "argocd/applicationset.yaml").read_text()
+        self.assertRegex(text, r"env: dev\s+namespace: artifact-keeper-dev\s+valuesFile: values-dev\.yaml")
+        self.assertNotIn("ignoreDifferences", text)
+
+
 class NotesTests(unittest.TestCase):
     HEADING = "Generated credentials:"
+
+    def test_postgres_warnings_only_when_its_password_is_generated(self):
+        for values in (
+            {"postgres": {"auth": {"password": "supplied"}}},
+            {
+                "postgres": {"enabled": False},
+                "externalDatabase": {"host": "db", "username": "u", "password": "p"},
+            },
+        ):
+            text = notes(values)
+            self.assertIn(f"{self.HEADING} secrets.jwtSecret\n", text)
+            self.assertNotIn("Postgres password", text)
+            self.assertNotIn("PostgreSQL password mismatch", text)
+
+    def test_flux_is_not_listed_as_lacking_lookup(self):
+        self.assertNotIn("Flux", notes())
 
     def test_default_install_names_both_and_warns_about_gitops(self):
         text = notes()

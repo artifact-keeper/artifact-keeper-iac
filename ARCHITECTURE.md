@@ -177,7 +177,7 @@ Sync policy is deliberately not uniform:
 
 | Env | targetRevision | Values file | Auto-sync | Image strategy |
 |-----|----------------|-------------|-----------|----------------|
-| dev | `main` | `values.yaml` | yes (selfHeal + prune) | digest |
+| dev | `main` | `values-dev.yaml` | yes (selfHeal + prune) | digest |
 | staging | `main` | `values-staging.yaml` | yes (selfHeal + prune) | digest |
 | production | a chart tag (e.g. `artifact-keeper-1.9.1`) | `values-production.yaml` | no (manual) | semver `^1` |
 

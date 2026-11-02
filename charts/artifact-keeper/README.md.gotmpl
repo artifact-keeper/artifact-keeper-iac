@@ -14,7 +14,7 @@ helm install ak artifact-keeper/artifact-keeper \
 
 To install from a cloned checkout instead, use `helm install ak charts/artifact-keeper/` in place of `artifact-keeper/artifact-keeper`.
 
-No values are required: the chart generates the JWT secret and the Postgres password. If you deploy with Argo CD, Flux or plain `helm template`, read [Generated credentials](#generated-credentials) first.
+No values are required: the chart generates the JWT secret and the Postgres password. If you deploy with Argo CD or plain `helm template`, read [Generated credentials](#generated-credentials) first.
 
 ## Introduction
 
@@ -767,14 +767,18 @@ For development, the chart generates what it needs and stores it in its own Secr
 
 When `secrets.jwtSecret` or `postgres.auth.password` is empty, the chart generates it and stores it in the `<fullname>-secrets` Secret. On later upgrades it reads the stored value back with `lookup`, so upgrades, including `--reuse-values`, never rotate it.
 
+While the Secret holds a generated value it has `helm.sh/resource-policy: keep`, because it holds the only copy and the Postgres PVC outlives the release. `helm uninstall`, or the rollback after a failed `--atomic` first install, leaves it in place, and the next install of the same release in that namespace reads the same values back. Helm lists it as kept when you uninstall. Delete it yourself when you no longer want it, along with the PVCs if you want a clean start.
+
 - A value you supply always wins. Supplying a new `postgres.auth.password` later doesn't change the password inside an initialized database; see [Recovering a PostgreSQL password mismatch](#recovering-a-postgresql-password-mismatch).
 - Nothing is generated with `secrets.existingSecret` or `externalSecrets.enabled`, or for an external database.
 - `secrets.generate: false` turns generation off, so a missing value fails the render. `values-production.yaml` and `values-staging.yaml` set this.
 - Moving from `secrets.existingSecret` back to the chart's Secret generates new values, because the chart's Secret doesn't exist yet. Copy the values across first.
 
-> **Argo CD, Flux and plain `helm template`: set the values or use `secrets.existingSecret`.** `lookup` needs a live cluster. These tools render without one, so every render generates new values. Each sync would then rotate the JWT secret, ending every session and, unless `secrets.ssoEncryptionKey` is set, breaking stored SSO secrets and upstream credentials. It would also change the Postgres password in the Secret, which stops matching the existing database, so the backend can't connect. These tools don't show `NOTES.txt` either, so nothing warns you at deploy time.
+> **Argo CD and plain `helm template`: set the values or use `secrets.existingSecret`.** `lookup` needs a live cluster. These tools render without one, so every render generates new values. Each sync would then rotate the JWT secret, ending every session and, unless `secrets.ssoEncryptionKey` is set, breaking stored SSO secrets and upstream credentials. It would also change the Postgres password in the Secret, which stops matching the existing database, so the backend can't connect. These tools don't show `NOTES.txt` either, so nothing warns you at deploy time.
 >
-> The dev profile in this repo's `argocd/applicationset.yaml` leaves these values to the chart and pins them with `ignoreDifferences` plus `RespectIgnoreDifferences=true`, so the live values are kept after first creation. That is only suitable for throwaway environments: if the Secret is ever recreated, the values change.
+> Don't rely on `ignoreDifferences` to keep generated values: the chart renders this Secret under `stringData`, which the API server applies over `data`, so ignoring `/data/...` fields isn't a safe way to protect them. The dev element in this repo's `argocd/applicationset.yaml` uses `values-dev.yaml`, which reads a Secret you create first.
+>
+> Flux's helm-controller installs through the Helm SDK against the live cluster, so `lookup` should work there and generated values should stay stable. That comes from reading its code; it hasn't been tested on Flux.
 
 **Backend credentials go in `backend.environmentSecrets`, never in `backend.env`.** `backend.env` is copied into the backend Deployment as plain `value:` entries. Anyone who can `get` the Deployment or its pods, or read the Helm release Secret, can read it. The render fails when `backend.env` sets a non-empty credential: `ADMIN_PASSWORD`, `INITIAL_ADMIN_PASSWORD`, `JWT_SECRET`, `S3_SECRET_ACCESS_KEY` (or `S3_SECRET_KEY`), a `DATABASE_URL` with a password, `DEPENDENCY_TRACK_API_KEY`, `OPENSEARCH_PASSWORD`, `OIDC_CLIENT_SECRET`, `LDAP_BIND_PASSWORD`, `SMTP_PASSWORD`, `PEER_API_KEY`, `EDGE_API_KEY`, `GITHUB_TOKEN`, an Azure, GCS or CloudFront key, or an encryption key. Put a Secret reference in `backend.environmentSecrets` instead. An entry there wins over the same key in `backend.env`.
 
@@ -1044,9 +1048,9 @@ DependencyTrack loads its vulnerability database on first boot, which requires 4
 
 Postgres applies its password only when it first initializes its data directory. When `postgres.auth.password` is unset, the chart generates a password on first install and keeps it stable by reading it back from the Secret on later renders. These situations break the pairing between the Secret and the password the database actually has:
 
-1. `helm uninstall` followed by `helm install`. Uninstall deletes the Secret, but the Postgres PVC survives (StatefulSet PVCs are never removed by Helm), so the new install generates a fresh password while the database still has the old one.
+1. The Secret is deleted while the Postgres PVC survives (StatefulSet PVCs are never removed by Helm), so the next install generates a fresh password while the database still has the old one. `helm uninstall` no longer deletes a Secret holding a generated value, but a release that was uninstalled while on chart 1.9.53 did lose it.
 2. A new `postgres.auth.password` on an existing release, or the Secret edited or replaced out of band.
-3. Rendering with Argo CD, Flux or plain `helm template` (see [Generated credentials](#generated-credentials)).
+3. Rendering with Argo CD or plain `helm template` (see [Generated credentials](#generated-credentials)).
 
 The backend's `wait-for-postgres` init container only checks that Postgres is up, so the backend then starts, logs `password authentication failed` and restarts in a loop, and `helm install --wait` times out. To recover, pick one (`<fullname>` is usually `<release>-artifact-keeper`):
 
@@ -1074,7 +1078,7 @@ The bootstrap Job then fails with `forceChangePassword failed` (it assumes the c
 - **Reset Dependency-Track**: delete the Dependency-Track PVC (`kubectl delete pvc <release>-dtrack-data`) and its pod. Dependency-Track reinitializes from scratch with the default password and the next bootstrap run completes the pairing again. This loses Dependency-Track's local state (projects, findings history); SBOMs are re-ingested by the backend on the next scan cycle.
 - **Reconcile by hand**: log into the Dependency-Track UI with the password it actually has, change it to the Secret's current value, and re-run the Job (`kubectl delete job <release>-dtrack-init`, then sync/upgrade).
 
-GitOps note: engines that render with `helm template` (ArgoCD, Flux) never see the stored Secret value, so they would regenerate the password on every sync. The ApplicationSet shipped in this repo pins the live value with `ignoreDifferences` on `DEPENDENCY_TRACK_ADMIN_PASSWORD` plus the `RespectIgnoreDifferences=true` sync option. Replicate that if you deploy this chart with your own GitOps tooling and leave `adminPassword` unset.
+GitOps note: engines that render with `helm template` (Argo CD) never see the stored Secret value, so they would regenerate the password on every sync. Set `adminPassword` or use `secrets.existingSecret` with those engines.
 
 ### Concurrent Dependency-Track API-key Secret creation
 

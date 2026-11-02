@@ -19,6 +19,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: web
+  {{- with .Values.web.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ include "artifact-keeper.web.replicaCount" . }}
   selector:
@@ -31,6 +35,10 @@ spec:
         {{- range $key, $value := .Values.web.podLabels }}
         {{ $key }}: {{ $value | quote }}
         {{- end }}
+      {{- with .Values.web.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       {{- with (.Values.web.tolerations | default .Values.global.tolerations) }}
       tolerations:

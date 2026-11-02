@@ -16,6 +16,10 @@ metadata:
   labels:
     {{- include "artifact-keeper.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
+  {{- with .Values.backend.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- if not .Values.backend.autoscaling.enabled }}
   replicas: {{ include "artifact-keeper.backend.replicaCount" . }}
@@ -32,6 +36,10 @@ spec:
         {{- range $key, $value := .Values.backend.podLabels }}
         {{ $key }}: {{ $value | quote }}
         {{- end }}
+      {{- with .Values.backend.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       {{- with (.Values.backend.tolerations | default .Values.global.tolerations) }}
       tolerations:
@@ -333,8 +341,22 @@ spec:
                   key: SMTP_PASSWORD
             {{- end }}
             {{- if .Values.backend.metricsListener.enabled }}
+            {{- /*
+            METRICS_PORT is rendered once. A backend.env entry with the same
+            key used to render a second copy, which Kubernetes accepts on
+            create but a later strategic-merge patch then drops both (#381).
+            An explicit backend.env entry wins, as with METRICS_BIND_IP below,
+            but it must agree with metricsListener.port: the metrics Service,
+            NetworkPolicy and ServiceMonitor all use that value.
+            */}}
+            {{- if hasKey .Values.backend.env "METRICS_PORT" }}
+            {{- if ne (toString (index .Values.backend.env "METRICS_PORT")) (toString .Values.backend.metricsListener.port) }}
+            {{- fail (printf "backend.env.METRICS_PORT (%v) conflicts with backend.metricsListener.port (%v): remove the backend.env entry or set both to the same port" (index .Values.backend.env "METRICS_PORT") .Values.backend.metricsListener.port) }}
+            {{- end }}
+            {{- else }}
             - name: METRICS_PORT
               value: {{ .Values.backend.metricsListener.port | quote }}
+            {{- end }}
             {{- /*
             METRICS_BIND_IP (backend 1.11.0+). An explicit entry in backend.env
             wins, as with the image-builder variables above.
@@ -470,11 +492,26 @@ spec:
             sizeLimit: 256Mi
         - name: storage
           {{- if .Values.backend.persistence.enabled }}
+          {{- if .Values.backend.persistence.ephemeral.enabled }}
+          {{- fail "backend.persistence.enabled and backend.persistence.ephemeral.enabled cannot both be true" }}
+          {{- end }}
           persistentVolumeClaim:
             claimName: {{ include "artifact-keeper.fullname" . }}-storage
+          {{- else if .Values.backend.persistence.ephemeral.enabled }}
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  {{- toYaml .Values.backend.persistence.ephemeral.accessModes | nindent 18 }}
+                resources:
+                  requests:
+                    storage: {{ .Values.backend.persistence.ephemeral.size }}
+                {{- with .Values.backend.persistence.ephemeral.storageClass }}
+                storageClassName: {{ . | quote }}
+                {{- end }}
           {{- else }}
           emptyDir:
-            sizeLimit: 10Gi
+            sizeLimit: {{ .Values.backend.persistence.emptyDir.sizeLimit }}
           {{- end }}
         {{- if or .Values.backend.scanWorkspace.enabled .Values.trivy.enabled }}
         - name: scan-workspace

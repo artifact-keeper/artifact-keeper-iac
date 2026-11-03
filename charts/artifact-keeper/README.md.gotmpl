@@ -401,6 +401,22 @@ helm install ak charts/artifact-keeper/ \
   --set secrets.jwtSecret=$(openssl rand 64 | openssl base64 -A)
 ```
 
+### CloudNativePG (dedicated database per service)
+
+`values-cnpg.yaml` gives the backend and Dependency-Track each their own PostgreSQL, read from their own existing Secret, such as the `<cluster>-app` Secret CloudNativePG generates. The chart creates no CloudNativePG resources: install the operator and the two `Cluster` resources first (the profile has an example). The mode is active when `postgres.enabled=false` and `externalDatabase.enabled=false`.
+
+```bash
+helm install ak charts/artifact-keeper/ \
+  -f charts/artifact-keeper/values-cnpg.yaml
+```
+
+- The Secrets are named by `backend.dedicatedDatabase.existingSecret` and `dependencyTrack.dedicatedDatabase.existingSecret`. The render fails if a required one is missing, in every Secret mode. Key names default to the CloudNativePG layout and can be remapped under `secretKeys`.
+- The chart's own Secret, or the ExternalSecret, no longer carries `DATABASE_URL` or `POSTGRES_PASSWORD`. Any `externalDatabase.*` values left in place are ignored.
+- `secrets.jwtSecret` is generated if unset, as described in [Generated credentials](#generated-credentials). No database password is generated.
+- Fleet mode cannot be combined with it: the render fails.
+- For clusters in another namespace, mirror the Secrets into the release namespace. See the notes in `values-cnpg.yaml`.
+- The `wait-for-postgres` init containers still use `postgres.image`, so keep that image on air-gapped pre-pull lists.
+
 ### Smoke / Release-Gate Testing
 
 `values-smoke.yaml` is the canonical overlay for smoke installs and the release-gate test suites in [artifact-keeper-test](https://github.com/artifact-keeper/artifact-keeper-test). It pins resource requests to fit a 4 CPU / 8 Gi namespace, sets a non-default admin password, exempts the `admin` user from rate limiting, and disables every external dependency the smoke can't satisfy (Trivy, DependencyTrack, ingress, ServiceMonitor, NetworkPolicy, External Secrets, edge replication, cosign verification).
@@ -770,7 +786,7 @@ When `secrets.jwtSecret` or `postgres.auth.password` is empty, the chart generat
 While the Secret holds a generated value it has `helm.sh/resource-policy: keep`, because it holds the only copy and the Postgres PVC outlives the release. `helm uninstall`, or the rollback after a failed `--atomic` first install, leaves it in place, and the next install of the same release in that namespace reads the same values back. Helm lists it as kept when you uninstall. Delete it yourself when you no longer want it, along with the PVCs if you want a clean start.
 
 - A value you supply always wins. Supplying a new `postgres.auth.password` later doesn't change the password inside an initialized database; see [Recovering a PostgreSQL password mismatch](#recovering-a-postgresql-password-mismatch).
-- Nothing is generated with `secrets.existingSecret` or `externalSecrets.enabled`, or for an external database.
+- Nothing is generated with `secrets.existingSecret` or `externalSecrets.enabled`, or for an external or dedicated database.
 - `secrets.generate: false` turns generation off, so a missing value fails the render. `values-production.yaml` and `values-staging.yaml` set this.
 - Moving from `secrets.existingSecret` back to the chart's Secret generates new values, because the chart's Secret doesn't exist yet. Copy the values across first.
 

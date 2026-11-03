@@ -14,6 +14,52 @@
         "generate": {"type": "boolean"}
       }
     },
+    "externalDatabase": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "backend": {
+      "properties": {
+        "dedicatedDatabase": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "secretKeys": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "uri": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "dependencyTrack": {
+      "properties": {
+        "database": {"type": ["string", "null"]},
+        "dedicatedDatabase": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "secretKeys": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "jdbcUri": {"type": "string"},
+                "username": {"type": "string"},
+                "password": {"type": "string"},
+                "uri": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
     "httpRoute": {
       "type": "object",
       "additionalProperties": false,

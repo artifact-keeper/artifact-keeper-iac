@@ -24,7 +24,7 @@ install instructions, see `README.md`.
 | `e2e/` | In-cluster manifests for mesh tests (mesh Job + RBAC). | Changing the in-cluster test harness. |
 | `aws-scripts/` | Single-node EC2 deployment: Docker install, a `docker-compose.yml`, an Nginx host config, and a first-boot secret-generation script. | Changing the all-in-one VM install path. |
 | `packer/` | A Packer template that bakes the single-node compose stack into an AMI. | Cutting a new prebuilt AMI. |
-| `demo/` | The `demo.artifactkeeper.com` compose file, reset script, and seed SQL. | Changing the public demo. |
+| `demo/` | A pointer to `artifact-keeper/artifact-keeper-demo`, which holds the `demo.artifactkeeper.com` deployment. | Finding where the public demo lives. |
 | `.github/` | Workflows (`helm-ci`, `helm-release`, `helm-docs`, `ci`, `require-linked-issue`), the PR template, CODEOWNERS, Dependabot. | Changing CI or contribution rules. |
 
 There is no top-level git repo across the workspace; this directory is its own

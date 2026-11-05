@@ -632,6 +632,11 @@ backend:
     # above this value with enough headroom for logs and the writable layer.
     emptyDir:
       sizeLimit: 10Gi
+
+    # -- Configuration for the backend tmp directory used
+    tmp:
+      sizeLimit: 256Mi
+
     # -- Per-pod generic ephemeral volume used when persistence is disabled.
     # This creates one PVC from volumeClaimTemplate for each backend pod and
     # deletes it with the pod. It is suitable for upload scratch space in

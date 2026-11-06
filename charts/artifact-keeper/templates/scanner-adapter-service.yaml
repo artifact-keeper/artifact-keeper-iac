@@ -17,6 +17,8 @@ metadata:
     app.kubernetes.io/component: scanner-adapter
 spec:
   type: ClusterIP
+  # Scan jobs live in adapter memory: a status poll that lands on another replica gets "unknown scan id".
+  sessionAffinity: ClientIP
   ports:
     - name: http
       port: 8090

@@ -803,7 +803,7 @@
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNonNull"], "fields": "", "values": false },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto",
         "colorMode": "value"
       }
@@ -839,7 +839,7 @@
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNonNull"], "fields": "", "values": false },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto",
         "colorMode": "value"
       }
@@ -875,7 +875,7 @@
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNonNull"], "fields": "", "values": false },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto",
         "colorMode": "value"
       }
@@ -911,7 +911,7 @@
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNonNull"], "fields": "", "values": false },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto",
         "colorMode": "value"
       }

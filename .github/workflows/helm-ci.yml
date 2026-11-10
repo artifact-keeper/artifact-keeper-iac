@@ -204,6 +204,8 @@ jobs:
             values_args: "-f charts/artifact-keeper/values-mesh-peer.yaml"
           - variant: openshift
             values_args: "-f charts/artifact-keeper/values-openshift.yaml --set route.host=artifacts.apps.ci.example.com --set secrets.jwtSecret=$(openssl rand -hex 32) --set postgres.auth.password=$(openssl rand -hex 16)"
+          - variant: scan-worker
+            values_args: "-f charts/artifact-keeper/values-scan-worker.yaml"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

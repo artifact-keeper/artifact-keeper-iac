@@ -1286,6 +1286,64 @@ trivy:
   nodeSelector: {}
   topologySpreadConstraints: []
 
+# -- Dedicated scan-worker Deployment, so grype never execs on a pod serving
+# requests. Enabling it sets SCAN_QUEUE_ENABLED=true on the backend and the
+# worker, and SCAN_WORKER_ENABLED=false on the backend.
+# Needs object storage, RWX or colocateWithBackend, the render says which
+scanWorker:
+  enabled: false
+  # Egress: inherits global.proxy, same as the backend, it is the same image
+  # running the same code. Set proxy.enabled: false to cut off its egress.
+  replicaCount: 2
+  # -- Pin workers to the backend's node to share a ReadWriteOnce PVC (RWO scopes
+  # to a node, not a pod). UNSAFE on multi-node zone-scoped storage: nothing pins
+  # the backend, so a rescheduled one hangs. Pin both, or use RWX.
+  colocateWithBackend: false
+  # -- Scan jobs per pod. Keep at or below MAX_CONCURRENT_SCAN_EXTRACTIONS: a
+  # claimed job is invisible to other replicas, so over-claiming parks work.
+  concurrency: 8
+  # -- Scratch for archive extraction and OCI reassembly. emptyDir, since the
+  # workspace is per-scan and the backend already cleans it up.
+  scanWorkspaceSizeLimit: 20Gi
+  # -- Files the inherited backend env expects. The worker shares backend.env, so
+  # a path-valued var with no volume behind it CrashLoops the pod at startup.
+  extraVolumes: []
+  #   - name: custom-ca
+  #     secret: { secretName: my-ca-bundle }
+  extraVolumeMounts: []
+  #   - name: custom-ca
+  #     mountPath: /app/ca.crt
+  #     subPath: ca-bundle.crt
+  env:
+    # -- The default 4 is sized for pods that also serve traffic, this one does not
+    MAX_CONCURRENT_SCAN_EXTRACTIONS: "8"
+  # -- The CPU limit caps scan throughput: a busy worker uses every core it gets,
+  # and at the limit it scans at a flat rate while the queue grows. Raise it with
+  # concurrency, or leave it out where nodes have spare CPU
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  podSecurityContext:
+    # -- MUST be 1001: the image bakes the Grype vulnerability DB owned by
+    # 1001:0, and grype hits EACCES on it under any other UID.
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 0
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  tolerations: []
+  affinity: {}
+  nodeSelector: {}
+  topologySpreadConstraints: []
+
 # -- In-house Trivy scanner-adapter
 # Stateless Harbor-protocol scanner-adapter (image
 # artifact-keeper-scanner-adapter) that the backend calls over HTTP via

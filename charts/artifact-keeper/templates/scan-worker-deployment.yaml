@@ -1,0 +1,157 @@
+{{/* Backend image running only the queue worker, so grype never execs on a pod
+that serves requests. Shares backend.env so the two cannot drift. */}}
+{{- if .Values.scanWorker.enabled }}
+{{/* Jobs carry a storage reference, so a worker must be able to read what an
+API pod wrote, or every job dies as "cached bytes are not readable". */}}
+{{- $storageBackend := lower (.Values.backend.env.STORAGE_BACKEND | default "filesystem") }}
+{{- $objectStore := has $storageBackend (list "s3" "gcs" "azure") }}
+{{- $accessModes := .Values.backend.persistence.accessModes | default (list "ReadWriteOnce") }}
+{{- $sharedFilesystem := and .Values.backend.persistence.enabled (has "ReadWriteMany" $accessModes) }}
+{{- $colocated := and .Values.backend.persistence.enabled .Values.scanWorker.colocateWithBackend }}
+{{- if and $colocated (has "ReadWriteOncePod" $accessModes) }}
+{{- fail "scanWorker.colocateWithBackend cannot share a ReadWriteOncePod volume: that access mode allows exactly ONE pod, not one node, so the worker would never mount it. Use ReadWriteOnce (which co-location can share), ReadWriteMany, or an object-store backend." }}
+{{- end }}
+{{- if not (or $objectStore $sharedFilesystem $colocated) }}
+{{- fail (printf "scanWorker.enabled needs the worker pods to be able to read the objects the API pods wrote, and none of the three ways holds: backend.env.STORAGE_BACKEND is %q (object storage would be s3/gcs/azure), backend.persistence.accessModes is %v (a shared filesystem would include ReadWriteMany), and scanWorker.colocateWithBackend is false (which would pin workers to the backend's node so a ReadWriteOnce volume can be shared). Pick one, or leave scanWorker disabled, and the backend scans in-process as before." $storageBackend $accessModes) }}
+{{- end }}
+{{- if and $colocated .Values.scanWorker.affinity }}
+{{- fail "scanWorker.colocateWithBackend and scanWorker.affinity both set: this chart's per-component scheduling values replace rather than merge, so one would be silently dropped. Either drop scanWorker.affinity and let co-location generate the podAffinity, or express the co-location yourself inside scanWorker.affinity and turn colocateWithBackend off." }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-scan-worker
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scan-worker
+spec:
+  replicas: {{ .Values.scanWorker.replicaCount }}
+  # RollingUpdate: an evicted worker's jobs return to the queue when its claim lapses.
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "artifact-keeper.scanWorker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "artifact-keeper.scanWorker.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with (.Values.scanWorker.tolerations | default .Values.global.tolerations) }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $colocated }}
+      # Required, not preferred: a soft rule yields ContainerCreating, not Pending.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "artifact-keeper.backend.selectorLabels" . | nindent 18 }}
+              topologyKey: kubernetes.io/hostname
+      {{- else }}
+      {{- with (.Values.scanWorker.affinity | default .Values.global.affinity) }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with (.Values.scanWorker.nodeSelector | default .Values.global.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if not $colocated }}
+      {{- with (.Values.scanWorker.topologySpreadConstraints | default .Values.global.topologySpreadConstraints) }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- else }}
+      # Spreading contradicts pinning, so it is suppressed while co-located.
+      {{- end }}
+      serviceAccountName: {{ include "artifact-keeper.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.scanWorker.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: scan-worker
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          {{- with .Values.scanWorker.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # Serves no client traffic, the port is here for the probes
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.service.httpPort }}
+              protocol: TCP
+            {{- if .Values.backend.metricsListener.enabled }}
+            # Only the worker publishes the ak_scan_queue_* gauges.
+            - name: metrics
+              containerPort: {{ .Values.backend.metricsListener.port }}
+              protocol: TCP
+            {{- end }}
+          {{- with .Values.backend.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:{{- include "artifact-keeper.backend.env" . }}
+            - name: SCAN_QUEUE_ENABLED
+              value: "true"
+            - name: SCAN_WORKER_ENABLED
+              value: "true"
+            - name: SCAN_WORKER_CONCURRENCY
+              value: {{ .Values.scanWorker.concurrency | quote }}
+            {{- range $k, $v := .Values.scanWorker.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.scanWorker.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            # A worker busy on several large scans can take over a second to answer
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Per-scan scratch the backend already cleans up, so emptyDir.
+            - name: scan-workspace
+              mountPath: /scan-workspace
+            {{- if or $sharedFilesystem $colocated }}
+            # Same subPath as the backend, or storage keys resolve to nothing.
+            - name: storage
+              mountPath: /data/storage
+              subPath: storage
+            {{- end }}
+            {{- with .Values.scanWorker.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: scan-workspace
+          emptyDir:
+            sizeLimit: {{ .Values.scanWorker.scanWorkspaceSizeLimit }}
+        {{- if or $sharedFilesystem $colocated }}
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ include "artifact-keeper.fullname" . }}-storage
+        {{- end }}
+        {{- with .Values.scanWorker.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

@@ -112,6 +112,14 @@ app.kubernetes.io/component: backend
 {{- end }}
 
 {{/*
+Scan-worker selector labels
+*/}}
+{{- define "artifact-keeper.scanWorker.selectorLabels" -}}
+{{ include "artifact-keeper.selectorLabels" . }}
+app.kubernetes.io/component: scan-worker
+{{- end }}
+
+{{/*
 Web selector labels
 */}}
 {{- define "artifact-keeper.web.selectorLabels" -}}
@@ -1317,3 +1325,283 @@ Call: include "artifact-keeper.proxyEnv" (dict "proxy" .Values.<component>.proxy
   value: {{ $p.noProxy | quote }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Backend container environment, shared by the backend and scan-worker
+Deployments so the two cannot drift: same image, same database, storage,
+scanner and upstream config. Each appends its own SCAN_QUEUE_ENABLED and
+SCAN_WORKER_ENABLED.
+
+Called with the root context, so the `.Values` references below are unchanged
+from when this lived inline.
+*/}}
+{{- define "artifact-keeper.backend.env" }}
+            {{- with (include "artifact-keeper.proxyEnv" (dict "proxy" .Values.backend.proxy "ctx" $)) }}
+            {{- . | trim | nindent 12 }}
+            {{- end }}
+            {{- if eq (include "artifact-keeper.dtrackApiKeyFile" .) "true" }}
+            # The backend reads the Dependency-Track API key from this file
+            # (see resolve_api_key in dependency_track_service.rs). This replaces
+            # the previous `sh -c "export ...; exec"` command wrapper, which the
+            # shell-less distroless (ubi-micro) backend image cannot run
+            # (CreateContainerError: exec /bin/sh: no such file — iac#199).
+            - name: DEPENDENCY_TRACK_API_KEY_FILE
+              value: /shared/dtrack-api-key
+            {{- else if .Values.dependencyTrack.enabled }}
+            # resolve_api_key gives the direct value precedence over the file, so
+            # supplying it from a Secret is what lets the shared-config volume
+            # stay unmounted and the backend replicas spread across nodes.
+            - name: DEPENDENCY_TRACK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dependencyTrack.existingApiKeySecret }}
+                  key: {{ .Values.dependencyTrack.existingApiKeySecretKey }}
+            {{- end }}
+            {{- /* A name defined in backend.environmentSecrets wins over the
+                   same key in backend.env, so moving a credential there does
+                   not need the backend.env entry removed (#375). */}}
+            {{- $secretEnv := list }}
+            {{- range .Values.backend.environmentSecrets }}
+            {{- $secretEnv = append $secretEnv .name }}
+            {{- end }}
+            {{- /* Likewise the proxy helper above owns HTTP_PROXY/HTTPS_PROXY/
+                   NO_PROXY (and lowercase) whenever it emits them, so a copy
+                   left in backend.env does not define the variable twice. */}}
+            {{- $proxyEnv := splitList " " (include "artifact-keeper.proxyEnvNames" (dict "proxy" .Values.backend.proxy "ctx" $)) }}
+            {{- /* The scan flags, and on the worker every scanWorker.env key,
+                   are set by the Deployment after this helper, so a copy in
+                   backend.env would define the variable twice. */}}
+            {{- $deploymentEnv := list }}
+            {{- if .Values.scanWorker.enabled }}
+            {{- $deploymentEnv = list "SCAN_QUEUE_ENABLED" "SCAN_WORKER_ENABLED" }}
+            {{- if hasSuffix "scan-worker-deployment.yaml" .Template.Name }}
+            {{- $deploymentEnv = concat $deploymentEnv (list "SCAN_WORKER_CONCURRENCY") (keys .Values.scanWorker.env) }}
+            {{- end }}
+            {{- end }}
+            {{- range $key, $value := .Values.backend.env }}
+            {{- if not (or (has $key $secretEnv) (has $key $proxyEnv) (has $key $deploymentEnv)) }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            - name: DATABASE_URL
+              {{- if and (not .Values.postgres.enabled) .Values.externalDatabase.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalDatabase.existingSecret }}
+                  key: {{ .Values.externalDatabase.existingSecretKey }}
+              {{- else }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.secretName" . }}
+                  key: DATABASE_URL
+              {{- end }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.secretName" . }}
+                  key: JWT_SECRET
+            {{- with include "artifact-keeper.encryptionKeyEnv" . }}{{ . | trim | nindent 12 }}{{- end }}
+            {{- if .Values.opensearch.enabled }}
+            - name: OPENSEARCH_URL
+              value: "{{ if .Values.opensearch.disableSecurityPlugin }}http{{ else }}https{{ end }}://{{ include "artifact-keeper.fullname" . }}-opensearch:9200"
+            {{- if not .Values.opensearch.disableSecurityPlugin }}
+            - name: OPENSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.secretName" . }}
+                  key: OPENSEARCH_USERNAME
+            - name: OPENSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.secretName" . }}
+                  key: OPENSEARCH_PASSWORD
+            - name: OPENSEARCH_ALLOW_INVALID_CERTS
+              value: {{ .Values.opensearch.allowInvalidCerts | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.trivy.enabled }}
+            - name: TRIVY_URL
+              value: "http://{{ include "artifact-keeper.fullname" . }}-trivy:8090"
+            - name: SCAN_WORKSPACE_PATH
+              value: "/scan-workspace"
+            {{- end }}
+            {{- if .Values.scannerAdapter.enabled }}
+            # In-house Harbor scanner-adapter for container-image Trivy scans
+            # (artifact-keeper#2091). Host must match the scanner-adapter Service
+            # name. Leaves TRIVY_URL (fs/incus path) above untouched.
+            - name: TRIVY_ADAPTER_URL
+              value: "http://{{ include "artifact-keeper.fullname" . }}-scanner-adapter:8090"
+            {{- end }}
+            {{- if .Values.imageBuilder.enabled }}
+            {{- /*
+            Image builder: where the buildkitd daemon listens and how IT
+            reaches this registry to push (in-cluster, plain HTTP). Values
+            given in backend.env win over these, so an operator can point the
+            backend at a daemon this chart did not deploy.
+            */}}
+            {{- $ib := .Values.imageBuilder }}
+            {{- $env := .Values.backend.env }}
+            {{- if not (hasKey $env "AK_BUILDKIT_ADDR") }}
+            - name: AK_BUILDKIT_ADDR
+              value: "tcp://{{ include "artifact-keeper.fullname" . }}-buildkitd:{{ $ib.service.port }}"
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_PUSH_REGISTRY") }}
+            - name: AK_IMAGE_BUILD_PUSH_REGISTRY
+              value: "{{ include "artifact-keeper.fullname" . }}-backend:{{ .Values.backend.service.httpPort }}"
+            - name: AK_IMAGE_BUILD_REGISTRY_INSECURE
+              value: "true"
+            {{- end }}
+            {{- if and $ib.policy.baseAllowlist (not (hasKey $env "AK_IMAGE_BUILD_BASE_ALLOWLIST")) }}
+            - name: AK_IMAGE_BUILD_BASE_ALLOWLIST
+              value: {{ $ib.policy.baseAllowlist | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_ADMIN_ONLY") }}
+            - name: AK_IMAGE_BUILD_ADMIN_ONLY
+              value: {{ $ib.policy.adminOnly | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_ALLOW_RUN") }}
+            - name: AK_IMAGE_BUILD_ALLOW_RUN
+              value: {{ $ib.policy.allowRun | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_ALLOW_DOCKERFILE") }}
+            - name: AK_IMAGE_BUILD_ALLOW_DOCKERFILE
+              value: {{ $ib.policy.allowDockerfile | quote }}
+            {{- end }}
+            {{- if and $ib.policy.pipIndexUrl (not (hasKey $env "AK_IMAGE_BUILD_PIP_INDEX_URL")) }}
+            - name: AK_IMAGE_BUILD_PIP_INDEX_URL
+              value: {{ $ib.policy.pipIndexUrl | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_TIMEOUT_SECS") }}
+            - name: AK_IMAGE_BUILD_TIMEOUT_SECS
+              value: {{ $ib.policy.timeoutSecs | quote }}
+            {{- end }}
+            {{- if not (hasKey $env "AK_IMAGE_BUILD_MAX_CONCURRENT") }}
+            - name: AK_IMAGE_BUILD_MAX_CONCURRENT
+              value: {{ $ib.policy.maxConcurrent | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.dependencyTrack.enabled }}
+            - name: DEPENDENCY_TRACK_URL
+              value: "http://{{ include "artifact-keeper.fullname" . }}-dtrack:8080"
+            - name: DEPENDENCY_TRACK_ENABLED
+              value: "true"
+            {{- end }}
+            {{- /*
+            ALLOW_HTTP_INTEGRATIONS relaxes outbound TLS verification for all
+            backend integrations. Injected only per backend.allowHttpIntegrations
+            (auto/true/false); an explicit entry in backend.env overrides this.
+            See values.yaml for the security trade-off.
+            */}}
+            {{- if eq (include "artifact-keeper.allowHttpIntegrations" .) "true" }}
+            - name: ALLOW_HTTP_INTEGRATIONS
+              value: "1"
+            {{- end }}
+            {{- if eq (include "artifact-keeper.smtpPasswordManaged" .) "true" }}
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.secretName" . }}
+                  key: SMTP_PASSWORD
+            {{- end }}
+            {{- if .Values.backend.metricsListener.enabled }}
+            {{- /*
+            METRICS_PORT is rendered once. A backend.env entry with the same
+            key used to render a second copy, which Kubernetes accepts on
+            create but a later strategic-merge patch then drops both (#381).
+            An explicit backend.env entry wins, as with METRICS_BIND_IP below,
+            but it must agree with metricsListener.port: the metrics Service,
+            NetworkPolicy and ServiceMonitor all use that value.
+            */}}
+            {{- if hasKey .Values.backend.env "METRICS_PORT" }}
+            {{- if ne (toString (index .Values.backend.env "METRICS_PORT")) (toString .Values.backend.metricsListener.port) }}
+            {{- fail (printf "backend.env.METRICS_PORT (%v) conflicts with backend.metricsListener.port (%v): remove the backend.env entry or set both to the same port" (index .Values.backend.env "METRICS_PORT") .Values.backend.metricsListener.port) }}
+            {{- end }}
+            {{- else }}
+            - name: METRICS_PORT
+              value: {{ .Values.backend.metricsListener.port | quote }}
+            {{- end }}
+            {{- /*
+            METRICS_BIND_IP (backend 1.11.0+). An explicit entry in backend.env
+            wins, as with the image-builder variables above.
+            */}}
+            {{- if and .Values.backend.metricsListener.bindIP (not (hasKey .Values.backend.env "METRICS_BIND_IP")) }}
+            - name: METRICS_BIND_IP
+              value: {{ .Values.backend.metricsListener.bindIP | quote }}
+            {{- end }}
+            {{- end }}
+            {{- /*
+            Client-IP resolution behind a proxy (backend.clientIp). Explicit
+            backend.env entries win, as with METRICS_BIND_IP above.
+            */}}
+            {{- $clientIp := .Values.backend.clientIp | default dict }}
+            {{- if and $clientIp.trustedProxyCidrs (not (hasKey .Values.backend.env "RATE_LIMIT_TRUSTED_PROXY_CIDRS")) }}
+            - name: RATE_LIMIT_TRUSTED_PROXY_CIDRS
+              value: {{ $clientIp.trustedProxyCidrs | quote }}
+            {{- end }}
+            {{- if not (hasKey .Values.backend.env "XFF_TRUSTED_FOR_AUTHZ") }}
+            {{- if not (kindIs "bool" (dig "xffTrustedForAuthz" false $clientIp)) }}
+            {{- fail "backend.clientIp.xffTrustedForAuthz must be a boolean" }}
+            {{- end }}
+            - name: XFF_TRUSTED_FOR_AUTHZ
+              value: {{ dig "xffTrustedForAuthz" false $clientIp | quote }}
+            {{- end }}
+            {{- with include "artifact-keeper.backendTuningEnv" . }}{{ . | trim | nindent 12 }}{{- end }}
+            {{- if eq (include "artifact-keeper.fleet.enabled" .) "true" }}
+            # Object storage for this instance. Artifacts share one bucket with
+            # a per-instance key prefix; the non-secret settings (STORAGE_BACKEND,
+            # S3_BUCKET, S3_ENDPOINT, S3_REGION and any redirect flags) come from
+            # backend.env, and the prefix and access keys are injected here.
+            - name: S3_PREFIX
+              value: {{ .Values.fleet.instanceId | quote }}
+            {{- if .Values.fleet.storage.existingSecret }}
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.fleet.storage.existingSecret }}
+                  key: {{ .Values.fleet.storage.accessKeyIdKey }}
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.fleet.storage.existingSecret }}
+                  key: {{ .Values.fleet.storage.secretAccessKeyKey }}
+            {{- end }}
+            {{- end }}
+            {{- /*
+            S3 credentials for a standard (non-fleet) install. The backend reads
+            S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY; these come from the
+            chart-managed Secret (secrets.s3AccessKey / secrets.s3SecretKey) or
+            the ExternalSecret. Skipped when the fleet object-storage Secret
+            supplies them (that path takes precedence, injected above) and when
+            secrets.existingSecret is in use, since a user-managed Secret may
+            store the keys under different names.
+            */}}
+            {{- $fleetManagedS3 := false }}
+            {{- if eq (include "artifact-keeper.fleet.enabled" .) "true" }}
+            {{- $fleetManagedS3 = .Values.fleet.storage.existingSecret }}
+            {{- end }}
+            {{- if and (not $fleetManagedS3) (eq (lower (.Values.backend.env.STORAGE_BACKEND | default "")) "s3") }}
+            {{- if or .Values.externalSecrets.enabled (and (not .Values.secrets.existingSecret) .Values.secrets.s3AccessKey) }}
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.secretName" . }}
+                  key: S3_ACCESS_KEY_ID
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artifact-keeper.secretName" . }}
+                  key: S3_SECRET_ACCESS_KEY
+            {{- end }}
+            {{- end }}
+            {{- range .Values.backend.environmentSecrets }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretKeyRef.name }}
+                  key: {{ .secretKeyRef.key }}
+                  {{- if hasKey .secretKeyRef "optional" }}
+                  optional: {{ .secretKeyRef.optional }}
+                  {{- end }}
+            {{- end }}
+{{- end }}

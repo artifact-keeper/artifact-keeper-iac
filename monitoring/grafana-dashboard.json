@@ -577,6 +577,344 @@
         "tooltip": { "mode": "multi" },
         "legend": { "displayMode": "list", "placement": "bottom" }
       }
+    },
+    {
+      "id": 104,
+      "title": "Scanner Queue",
+      "type": "row",
+      "description": "The durable scan queue. Empty unless the backend runs with SCAN_QUEUE_ENABLED=true (scanWorker.enabled in the chart).",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "panels": []
+    },
+    {
+      "id": 13,
+      "title": "Queue Depth by State",
+      "type": "timeseries",
+      "description": "Jobs in the queue. Every replica reports the same table, so it takes max() across pods, never sum(). A rising pending line with a flat running line means the workers cannot keep up; both flat and non-zero means throughput matches arrival.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 37 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "gradientMode": "scheme" },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (state) (max by (kind, state) (ak_scan_queue_depth{namespace=~\"$namespace\"}))",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Queue Wait (p50 / p95 / p99)",
+      "type": "timeseries",
+      "description": "How long a job actually waited before a worker picked it up. A distribution, unlike Backlog Age which is a max: one poison job stuck behind its backoff pins the max high while p50 stays healthy.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 37 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "gradientMode": "scheme" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(ak_scan_queue_wait_seconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(ak_scan_queue_wait_seconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(ak_scan_queue_wait_seconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 15,
+      "title": "Backlog Age (oldest pending)",
+      "type": "timeseries",
+      "description": "Age of the oldest DUE pending job, per kind. The worst case rather than the distribution; read it alongside Queue Wait.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 37 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "gradientMode": "scheme" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "max by (kind) (ak_scan_queue_oldest_pending_seconds{namespace=~\"$namespace\"})",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 16,
+      "title": "Worker Slot Saturation",
+      "type": "timeseries",
+      "description": "Extraction slots busy vs total across all worker replicas (MAX_CONCURRENT_SCAN_EXTRACTIONS x replicas). In flight sitting at capacity while the queue grows is the signal to scale the scan-worker out.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 45 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 20, "gradientMode": "scheme" },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(ak_scan_worker_slots_in_flight{namespace=~\"$namespace\"})",
+          "legendFormat": "in flight",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(ak_scan_worker_slots_capacity{namespace=~\"$namespace\"})",
+          "legendFormat": "capacity",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 17,
+      "title": "Scan Throughput by Outcome",
+      "type": "timeseries",
+      "description": "Jobs drained per second. A failure rate that tracks the success rate usually means a sick scanner rather than sick content.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 45 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "gradientMode": "scheme" },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (outcome) (rate(ak_scan_jobs_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Scan Duration p95 by Kind",
+      "type": "timeseries",
+      "description": "Time to run one scan once started. Tells slow scans apart from long waits in the queue, which need different fixes.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 45 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "gradientMode": "scheme" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(ak_scan_job_duration_seconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 19,
+      "title": "Live Consumers",
+      "type": "stat",
+      "description": "Distinct workers holding an unexpired claim, cluster-wide. Every replica publishes the same number, so this uses max() and NOT sum(). Zero while the queue is non-empty means nothing is consuming: check the scan-worker Deployment.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 53 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "max(ak_scan_queue_consumers{namespace=~\"$namespace\"})",
+          "legendFormat": "consumers",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 20,
+      "title": "Pending Jobs",
+      "type": "stat",
+      "description": "Total jobs waiting to be claimed.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 53 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 100 },
+            { "color": "red", "value": 1000 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(max by (kind) (ak_scan_queue_depth{namespace=~\"$namespace\", state=\"pending\"}))",
+          "legendFormat": "pending",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 21,
+      "title": "Failed Jobs (terminal)",
+      "type": "stat",
+      "description": "Jobs that exhausted max_attempts. Retained for operators and purged on a schedule, so a non-zero value is a backlog to read rather than necessarily a live incident.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 53 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "red", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(max by (kind) (ak_scan_queue_depth{namespace=~\"$namespace\", state=\"failed\"}))",
+          "legendFormat": "failed",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 22,
+      "title": "Slot Utilisation",
+      "type": "stat",
+      "description": "In-flight slots as a percentage of capacity. clamp_min guards the divide-by-zero before any worker has reported.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 53 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 70 },
+            { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "100 * sum(ak_scan_worker_slots_in_flight{namespace=~\"$namespace\"}) / clamp_min(sum(ak_scan_worker_slots_capacity{namespace=~\"$namespace\"}), 1)",
+          "legendFormat": "utilisation",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "colorMode": "value"
+      }
     }
   ]
 }

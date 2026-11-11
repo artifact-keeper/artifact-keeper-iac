@@ -202,7 +202,7 @@ backend:
     # tagged chart release to drive the image tag. ArgoCD Image Updater pins
     # tags to a digest automatically. For a floating tag such as "dev", set
     # pullPolicy: Always so restarts pick up new builds.
-    tag: "1.11.10"
+    tag: "1.12.4"
     pullPolicy: Always
   # -- Pod-level securityContext. Defaults are image-native: the backend
   # image bakes the Grype vulnerability DB at /home/artifact/.cache/grype
@@ -790,12 +790,12 @@ web:
     # empty ("") to fall back to the chart's appVersion (see backend.image.tag).
     # Note the appVersion tracks the backend generation, so an empty web tag can
     # resolve to a version the web image has not published; pin it here instead.
-    # Concretely: appVersion is currently 1.11.10 while the web frontend's latest
-    # release is 1.11.2, so an empty tag here would resolve to a web image that
+    # Concretely: appVersion is currently 1.12.4 while the web frontend's latest
+    # release is 1.12.1, so an empty tag here would resolve to a web image that
     # does not exist -- keep this pinned rather than empty.
     # Because the two components version independently, expect the appVersion
     # fallback to be unusable for web most of the time -- keep this pinned.
-    tag: "1.11.2"
+    tag: "1.12.1"
     pullPolicy: Always
   podSecurityContext:
     runAsNonRoot: true
@@ -1202,10 +1202,10 @@ trivy:
     # (same release, patched Go dependencies), pinned by digest. Move it
     # together with scannerAdapter.image.tag: with SCANNER_TRIVY_SERVER set,
     # the adapter refuses a server whose trivy release differs from its bundled
-    # client (0.76.0 for adapter 1.5.2, the pair backend 1.11.10 ships), its
+    # client (0.76.0 for adapter 1.7.2, the pair backend 1.12.4 ships), its
     # /probe/ready stays 503 and scans fail closed with "client/server mode
     # needs matching releases".
-    tag: "0.76.0-r3@sha256:e324a1cc4ad525ed0a39d623a277a12cd138fd8ee2a88f60f776ae5a40b5b0ce"
+    tag: "0.76.0-r6@sha256:7fedaaffb5d8702d312f3361707b2528004c33ae6dc57fc5c96d06492ac32bd8"
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 10000
@@ -1318,11 +1318,11 @@ scannerAdapter:
     # build they first cached. Repoint this alongside backend.image.tag. The
     # deployment renders the tag as `tag | default .Chart.AppVersion`, so
     # leaving this empty ("") would fall back to appVersion and pull a
-    # non-existent tag — keep it pinned. Backend 1.11.10 ships adapter 1.5.2,
-    # whose bundled trivy is 0.76.0 (image 0.76.0-r3, go-jose 4.1.6); when the adapter is pointed at the chart's
+    # non-existent tag — keep it pinned. Backend 1.12.4 ships adapter 1.7.2,
+    # whose bundled trivy is 0.76.0 (image 0.76.0-r6, go-jose 4.1.6, x/net 0.62.0, containerd 2.4.2, Go 1.27.4); when the adapter is pointed at the chart's
     # trivy server (SCANNER_TRIVY_SERVER), trivy.image.tag must be the same
     # trivy release or the adapter refuses to scan.
-    tag: "1.5.2"
+    tag: "1.7.2"
     pullPolicy: IfNotPresent
   # -- Extra environment for the adapter. SCANNER_TRIVY_INSECURE defaults to
   # "true" because the adapter reaches the AK registry over the plain-HTTP
@@ -1341,9 +1341,16 @@ scannerAdapter:
       drop:
         - ALL
   # -- Writable scratch for image-layer extraction and the Trivy DB cache.
-  # emptyDir (no PVC) because the adapter is stateless.
-  cacheSizeLimit: 2Gi
-  tmpSizeLimit: 1Gi
+  # emptyDir (no PVC) because the adapter is stateless. From adapter 1.7.1 it
+  # also holds trivy's Java DB (about 1.5 GiB unpacked), and a refresh keeps
+  # two copies until the swap, so 6Gi fits both next to the vulnerability DB
+  # (about 1 GiB) with room for the layer cache. Keep
+  # resources.limits.ephemeral-storage above cacheSizeLimit plus tmpSizeLimit
+  cacheSizeLimit: 6Gi
+  # -- Writable /tmp (TMPDIR) for scan scratch. trivy downloads the Java DB
+  # here (about 0.93 GiB compressed) before unpacking it into the cache, so
+  # 2Gi leaves room for that next to running scans
+  tmpSizeLimit: 2Gi
   resources:
     requests:
       cpu: 100m
@@ -1352,7 +1359,7 @@ scannerAdapter:
     limits:
       cpu: "1"
       memory: 1Gi
-      ephemeral-storage: 2Gi
+      ephemeral-storage: 10Gi
   # -- Per-component scheduling (overrides global). Do NOT arch-pin here; the
   # image is multi-arch.
   tolerations: []

@@ -455,27 +455,21 @@ spec:
             {{- end }}
           resources:
             {{- include "artifact-keeper.backend.resources" . | nindent 12 }}
+          {{- $startupProbeDefault := dict "httpGet" (dict "path" "/readyz" "port" "http") "periodSeconds" 5 "timeoutSeconds" 5 "failureThreshold" 30 }}
+          {{- with (include "artifact-keeper.backend.probe" (dict "context" . "name" "startupProbe" "default" $startupProbeDefault)) }}
           startupProbe:
-            httpGet:
-              path: /readyz
-              port: http
-            periodSeconds: 5
-            timeoutSeconds: 5
-            failureThreshold: 30
+            {{- . | nindent 12 }}
+          {{- end }}
+          {{- $livenessProbeDefault := dict "httpGet" (dict "path" "/livez" "port" "http") "periodSeconds" 15 "timeoutSeconds" 5 "failureThreshold" 5 }}
+          {{- with (include "artifact-keeper.backend.probe" (dict "context" . "name" "livenessProbe" "default" $livenessProbeDefault)) }}
           livenessProbe:
-            httpGet:
-              path: /livez
-              port: http
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 5
+            {{- . | nindent 12 }}
+          {{- end }}
+          {{- $readinessProbeDefault := dict "httpGet" (dict "path" "/readyz" "port" "http") "periodSeconds" 10 "timeoutSeconds" 5 "failureThreshold" 5 }}
+          {{- with (include "artifact-keeper.backend.probe" (dict "context" . "name" "readinessProbe" "default" $readinessProbeDefault)) }}
           readinessProbe:
-            httpGet:
-              path: /readyz
-              port: http
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 5
+            {{- . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp

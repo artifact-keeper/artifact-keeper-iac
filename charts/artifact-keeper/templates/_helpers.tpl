@@ -1054,7 +1054,7 @@ prefixes, the other backend paths, /metrics (kept private), /dtrack and
 duplicates fail the render.
 */}}
 {{- define "artifact-keeper.backendFormatPaths" -}}
-{{- $builtin := list "/general" "/maven" "/npm" "/pypi" "/nuget" "/cargo" "/gems" "/go" "/helm" "/debian" "/rpm" "/alpine" "/pacman" "/composer" "/conan" "/conda" "/t" "/swift" "/terraform" "/cocoapods" "/hex" "/pub" "/lfs" "/ivy" "/chef" "/puppet" "/ansible" "/cran" "/bazel" "/huggingface" "/jetbrains" "/vscode" "/proto" "/incus" "/lxc" "/ext" -}}
+{{- $builtin := list "/general" "/maven" "/npm" "/pypi" "/nuget" "/cargo" "/gems" "/go" "/helm" "/debian" "/rpm" "/alpine" "/pacman" "/composer" "/conan" "/conda" "/t" "/swift" "/terraform" "/cocoapods" "/hex" "/pub" "/lfs" "/ivy" "/chef" "/puppet" "/ansible" "/cran" "/bazel" "/huggingface" "/jetbrains" "/agentplugins" "/mcp" "/vscode" "/proto" "/incus" "/lxc" "/ext" -}}
 {{- /* dig: `helm upgrade --reuse-values` keeps the previous chart's
        defaults, which lack this key. */ -}}
 {{- $extra := dig "extraFormatPaths" list .Values.backend -}}

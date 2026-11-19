@@ -39,7 +39,7 @@ PACKAGE_PREFIXES = {
     "/conan", "/conda", "/t", "/swift", "/terraform", "/cocoapods", "/hex",
     "/pub", "/lfs", "/ivy", "/chef", "/puppet", "/ansible", "/cran",
     "/bazel", "/huggingface", "/jetbrains", "/vscode", "/proto", "/incus",
-    "/lxc", "/ext",
+    "/lxc", "/ext", "/agentplugins", "/mcp",
 }
 
 
@@ -145,7 +145,7 @@ class HTTPRouteTests(unittest.TestCase):
             self.assertTrue(backend["name"].endswith("-web" if path == "/" else "-backend"))
         self.assertNotIn("tls", route["spec"])
         self.assertNotIn("annotations", route["metadata"])
-        self.assertEqual([len(rule["matches"]) for rule in route["spec"]["rules"]], [8, 8, 8, 8, 8, 1])
+        self.assertEqual([len(rule["matches"]) for rule in route["spec"]["rules"]], [8, 8, 8, 8, 8, 2, 1])
 
     def test_ingress_and_openshift_routes_carry_every_package_prefix(self):
         backend = PACKAGE_PREFIXES | {"/api", "/v2", "/health", "/ready"}
@@ -265,7 +265,7 @@ class HTTPRouteTests(unittest.TestCase):
         values["networkPolicy"] = {"enabled": False}
         docs = resources(render(values))
         self.assertFalse(gateway_policies(docs))
-        self.assertEqual(len(route_paths(only(docs, "HTTPRoute"))), 41)
+        self.assertEqual(len(route_paths(only(docs, "HTTPRoute"))), 43)
         values["fleet"] = {
             "enabled": True,
             "guardrails": {"networkPolicy": True},

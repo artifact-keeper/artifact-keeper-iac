@@ -148,19 +148,19 @@ class ExtraFormatPathTests(unittest.TestCase):
                 self.assert_fails(["/maven"], "is reserved", overrides)
 
     def test_httproute_rule_limit(self):
-        # 40 built-in backend matches plus N extras, eight per rule, plus the
+        # 42 built-in backend matches plus N extras, eight per rule, plus the
         # web rule must stay within the CRD's 16 rules.
-        fits = [f"/p{i}" for i in range(80)]
+        fits = [f"/p{i}" for i in range(78)]
         route, _ = httproute_paths(fits)
         self.assertEqual(len(route["spec"]["rules"]), 16)
-        self.assert_fails(fits + ["/p80"], "more than the Gateway API limit of 16", HTTPROUTE)
+        self.assert_fails(fits + ["/p78"], "more than the Gateway API limit of 16", HTTPROUTE)
         dtrack = {
             "dependencyTrack": {"enabled": True},
             "httpRoute": {**HTTPROUTE["httpRoute"], "dtrack": {"enabled": True}},
         }
-        route, _ = httproute_paths(fits[:72], dtrack)
+        route, _ = httproute_paths(fits[:70], dtrack)
         self.assertEqual(len(route["spec"]["rules"]), 16)
-        self.assert_fails(fits[:73], "more than the Gateway API limit of 16", {**HTTPROUTE, **dtrack})
+        self.assert_fails(fits[:71], "more than the Gateway API limit of 16", {**HTTPROUTE, **dtrack})
 
 
 if __name__ == "__main__":

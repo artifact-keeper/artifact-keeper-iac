@@ -767,6 +767,7 @@ backend:
   # -- Startup probe for the backend container. Set `enabled: false` to omit.
   # Raise `failureThreshold` or `periodSeconds` when upgrading large catalogs
   # whose database migrations exceed the default 150s budget (#448).
+  # To switch handler type, set `httpGet: null` alongside `tcpSocket`, `exec` or `grpc`.
   startupProbe:
     enabled: true
     httpGet:

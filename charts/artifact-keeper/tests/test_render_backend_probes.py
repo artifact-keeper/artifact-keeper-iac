@@ -2,7 +2,9 @@
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 import yaml
@@ -13,16 +15,16 @@ HELM = os.environ.get("HELM", "helm")
 PROBES = ("startupProbe", "livenessProbe", "readinessProbe")
 
 
-def run(values, *args):
+def run(values, *args, chart=CHART):
     values = {"secrets": {"existingSecret": "probe-render-test"}, **values}
     return subprocess.run(
-        [HELM, "template", "ak", str(CHART), "-f", "-", *args],
+        [HELM, "template", "ak", str(chart), "-f", "-", *args],
         input=yaml.safe_dump(values), capture_output=True, text=True,
     )
 
 
-def backend_container(values, *args):
-    result = run(values, *args)
+def backend_container(values, *args, chart=CHART):
+    result = run(values, *args, chart=chart)
     if result.returncode:
         raise AssertionError(result.stderr)
     deployment = next(
@@ -83,6 +85,26 @@ class BackendProbeRenderTests(unittest.TestCase):
         self.assertEqual(c["startupProbe"]["failureThreshold"], 30)
         self.assertEqual(c["livenessProbe"]["httpGet"]["path"], "/livez")
         self.assertEqual(c["readinessProbe"]["httpGet"]["path"], "/readyz")
+
+    def test_reuse_values_partial_override_without_default_probe_keeps_handler(self):
+        # --reuse-values renders with the old release's values.yaml, which has no probe keys
+        with tempfile.TemporaryDirectory() as tmp:
+            chart = Path(tmp) / "chart"
+            shutil.copytree(CHART, chart, ignore=shutil.ignore_patterns("tests"))
+            values = yaml.safe_load((chart / "values.yaml").read_text())
+            for name in PROBES:
+                del values["backend"][name]
+            (chart / "values.yaml").write_text(yaml.safe_dump(values))
+            c = backend_container(
+                {"backend": {"startupProbe": {"failureThreshold": 360}}}, chart=chart,
+            )
+        self.assertEqual(c["startupProbe"], {
+            "httpGet": {"path": "/readyz", "port": "http"},
+            "periodSeconds": 5,
+            "timeoutSeconds": 5,
+            "failureThreshold": 360,
+        })
+        self.assertEqual(c["livenessProbe"]["httpGet"]["path"], "/livez")
 
     def test_disabled_probe_is_omitted(self):
         c = backend_container({"backend": {"startupProbe": {"enabled": False}}})

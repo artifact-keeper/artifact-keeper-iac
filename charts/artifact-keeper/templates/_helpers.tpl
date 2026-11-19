@@ -1317,3 +1317,20 @@ Call: include "artifact-keeper.proxyEnv" (dict "proxy" .Values.<component>.proxy
   value: {{ $p.noProxy | quote }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+The backend's DATABASE_URL env entry, shared by the Deployment and the
+migration Job.
+*/}}
+{{- define "artifact-keeper.backend.databaseUrlEnv" -}}
+- name: DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      {{- if and (not .Values.postgres.enabled) .Values.externalDatabase.existingSecret }}
+      name: {{ .Values.externalDatabase.existingSecret }}
+      key: {{ .Values.externalDatabase.existingSecretKey }}
+      {{- else }}
+      name: {{ include "artifact-keeper.secretName" . }}
+      key: DATABASE_URL
+      {{- end }}
+{{- end }}

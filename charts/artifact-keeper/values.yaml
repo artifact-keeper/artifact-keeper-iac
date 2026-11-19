@@ -764,6 +764,36 @@ backend:
     create: true
     annotations: {}
     name: ""
+  # -- Startup probe for the backend container. Set `enabled: false` to omit.
+  # Raise `failureThreshold` or `periodSeconds` when upgrading large catalogs
+  # whose database migrations exceed the default 150s budget (#448).
+  # To switch handler type, set `httpGet: null` alongside `tcpSocket`, `exec` or `grpc`.
+  startupProbe:
+    enabled: true
+    httpGet:
+      path: /readyz
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30
+  # -- Liveness probe for the backend container. Set `enabled: false` to omit.
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /livez
+      port: http
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 5
+  # -- Readiness probe for the backend container. Set `enabled: false` to omit.
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /readyz
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
 
 # -- Next.js web frontend
 web:

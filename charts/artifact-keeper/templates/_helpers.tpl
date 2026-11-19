@@ -1317,3 +1317,34 @@ Call: include "artifact-keeper.proxyEnv" (dict "proxy" .Values.<component>.proxy
   value: {{ $p.noProxy | quote }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Render one backend container probe from .Values.backend.<name>.
+Falls back to .default when absent, and fills in .default under a map with no
+handler, as with `helm upgrade --reuse-values` from a release without these keys.
+*/}}
+{{- define "artifact-keeper.backend.probe" -}}
+{{- $val := index .context.Values.backend .name -}}
+{{- if kindIs "invalid" $val -}}
+  {{- toYaml .default -}}
+{{- else if not (kindIs "map" $val) -}}
+  {{- fail (printf "backend.%s must be a map" .name) -}}
+{{- else -}}
+  {{- $enabled := true -}}
+  {{- if hasKey $val "enabled" -}}
+    {{- if not (kindIs "bool" $val.enabled) -}}
+      {{- fail (printf "backend.%s.enabled must be a boolean" .name) -}}
+    {{- end -}}
+    {{- $enabled = $val.enabled -}}
+  {{- end -}}
+  {{- if $enabled -}}
+    {{- $probe := omit $val "enabled" -}}
+    {{- if not (or (hasKey $probe "httpGet") (hasKey $probe "tcpSocket") (hasKey $probe "exec") (hasKey $probe "grpc")) -}}
+      {{- $probe = mergeOverwrite (deepCopy .default) $probe -}}
+    {{- end -}}
+    {{- if $probe -}}
+      {{- toYaml $probe -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}

@@ -1320,7 +1320,8 @@ Call: include "artifact-keeper.proxyEnv" (dict "proxy" .Values.<component>.proxy
 
 {{/*
 Render one backend container probe from .Values.backend.<name>.
-Falls back to .default when absent (e.g. `helm upgrade --reuse-values`).
+Falls back to .default when absent, and fills in .default under a map with no
+handler, as with `helm upgrade --reuse-values` from a release without these keys.
 */}}
 {{- define "artifact-keeper.backend.probe" -}}
 {{- $val := index .context.Values.backend .name -}}
@@ -1338,6 +1339,9 @@ Falls back to .default when absent (e.g. `helm upgrade --reuse-values`).
   {{- end -}}
   {{- if $enabled -}}
     {{- $probe := omit $val "enabled" -}}
+    {{- if not (or (hasKey $probe "httpGet") (hasKey $probe "tcpSocket") (hasKey $probe "exec") (hasKey $probe "grpc")) -}}
+      {{- $probe = mergeOverwrite (deepCopy .default) $probe -}}
+    {{- end -}}
     {{- if $probe -}}
       {{- toYaml $probe -}}
     {{- end -}}

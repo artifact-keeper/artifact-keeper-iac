@@ -1,0 +1,30 @@
+{{/*
+Metrics-only Service for the scan worker.
+
+The worker serves no client traffic, so this exists purely to give Prometheus
+something to select. It matters because the queue gauges
+(ak_scan_queue_depth, ak_scan_queue_oldest_pending_seconds) are emitted by the
+worker loop, and that loop is off on the API pods whenever this Deployment
+exists. Without this Service nothing scrapes them.
+
+Headless: there is nothing to load-balance.
+*/}}
+{{- if and .Values.scanWorker.enabled .Values.backend.metricsListener.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-scan-worker-metrics
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scan-worker
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: {{ .Values.backend.metricsListener.port }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "artifact-keeper.scanWorker.selectorLabels" . | nindent 4 }}
+{{- end }}

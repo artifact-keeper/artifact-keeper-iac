@@ -44,6 +44,23 @@ backend:
   podDisruptionBudget:
     enabled: false
 
+# Actually RUN a worker: its failure mode is "the pod does not start", which
+# only an install catches. k3d's local-path PVs are node-affine, so co-location
+# is safe here.
+scanWorker:
+  enabled: true
+  replicaCount: 1
+  colocateWithBackend: true
+  concurrency: 1
+  scanWorkspaceSizeLimit: 1Gi
+  env: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
 web:
   enabled: true
   replicaCount: 1

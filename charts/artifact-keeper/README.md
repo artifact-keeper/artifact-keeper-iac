@@ -1,6 +1,6 @@
 # artifact-keeper
 
-![Version: 1.9.54](https://img.shields.io/badge/Version-1.9.54-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.10](https://img.shields.io/badge/AppVersion-1.11.10-informational?style=flat-square)
+![Version: 1.9.58](https://img.shields.io/badge/Version-1.9.58-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.11.10](https://img.shields.io/badge/AppVersion-1.11.10-informational?style=flat-square)
 
 ## TL;DR
 
@@ -282,6 +282,24 @@ kubectl delete pvc -l app.kubernetes.io/instance=ak -n artifact-keeper
 | route.tls.enabled | bool | `true` | Serve the Routes over TLS. edge termination uses the router's default certificate unless you supply your own via annotations/secret. |
 | route.tls.insecureEdgeTerminationPolicy | string | `"Redirect"` | What to do with plain-HTTP requests. Redirect sends them to HTTPS. |
 | route.tls.termination | string | `"edge"` | TLS termination. Only `edge` is supported: the chart's Services speak plain HTTP (so reencrypt has nothing to re-encrypt to), and passthrough Routes cannot carry the per-path spec.path this chart relies on. |
+| scanWorker | object | `{"affinity":{},"colocateWithBackend":false,"concurrency":8,"containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"enabled":false,"env":{"MAX_CONCURRENT_SCAN_EXTRACTIONS":"8"},"extraVolumeMounts":[],"extraVolumes":[],"nodeSelector":{},"podSecurityContext":{"fsGroup":0,"runAsNonRoot":true,"runAsUser":1001},"replicaCount":2,"resources":{"limits":{"cpu":"2","memory":"4Gi"},"requests":{"cpu":"1","memory":"4Gi"}},"scanWorkspaceSizeLimit":"20Gi","tolerations":[],"topologySpreadConstraints":[]}` | Dedicated scan-worker Deployment, so grype never execs on a pod serving requests. Enabling it sets SCAN_QUEUE_ENABLED=true on the backend and the worker, and SCAN_WORKER_ENABLED=false on the backend. Needs object storage, RWX or colocateWithBackend, the render says which |
+| scanWorker.affinity | object | `{}` | Overrides global.affinity. Cannot be combined with colocateWithBackend, the render says so |
+| scanWorker.colocateWithBackend | bool | `false` | Pin workers to the backend's node to share a ReadWriteOnce PVC (RWO scopes to a node, not a pod). UNSAFE on multi-node zone-scoped storage: nothing pins the backend, so a rescheduled one hangs. Pin both, or use RWX. |
+| scanWorker.concurrency | int | `8` | Scan jobs per pod. Keep at or below MAX_CONCURRENT_SCAN_EXTRACTIONS: a claimed job is invisible to other replicas, so over-claiming parks work. |
+| scanWorker.containerSecurityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Container securityContext of the worker |
+| scanWorker.enabled | bool | `false` | Render the scan-worker Deployment and switch the backend to the durable scan queue. Needs backend 1.12.0 or later, an older image ignores both flags and the worker idles |
+| scanWorker.env | object | `{"MAX_CONCURRENT_SCAN_EXTRACTIONS":"8"}` | Extra environment for the worker only. A name that backend.env also sets replaces it here instead of rendering twice |
+| scanWorker.env.MAX_CONCURRENT_SCAN_EXTRACTIONS | string | `"8"` | The default 4 is sized for pods that also serve traffic, this one does not |
+| scanWorker.extraVolumeMounts | list | `[]` | Mounts for the worker container, rendered verbatim |
+| scanWorker.extraVolumes | list | `[]` | Files the inherited backend env expects. The worker shares backend.env, so a path-valued var with no volume behind it CrashLoops the pod at startup. Rendered verbatim, like backend.extraVolumes. |
+| scanWorker.nodeSelector | object | `{}` | Overrides global.nodeSelector |
+| scanWorker.podSecurityContext | object | `{"fsGroup":0,"runAsNonRoot":true,"runAsUser":1001}` | Pod securityContext of the worker |
+| scanWorker.podSecurityContext.runAsUser | int | `1001` | MUST be 1001: the image bakes the Grype vulnerability DB owned by 1001:0, and grype hits EACCES on it under any other UID. |
+| scanWorker.replicaCount | int | `2` | Worker pods. Static, the chart renders no autoscaler for the worker |
+| scanWorker.resources | object | `{"limits":{"cpu":"2","memory":"4Gi"},"requests":{"cpu":"1","memory":"4Gi"}}` | The CPU limit caps scan throughput: a busy worker uses every core it gets, and at the limit it scans at a flat rate while the queue grows. Raise it with concurrency, or leave it out where nodes have spare CPU |
+| scanWorker.scanWorkspaceSizeLimit | string | `"20Gi"` | Scratch for archive extraction and OCI reassembly. emptyDir, since the workspace is per-scan and the backend already cleans it up. |
+| scanWorker.tolerations | list | `[]` | Per-component scheduling (overrides global) |
+| scanWorker.topologySpreadConstraints | list | `[]` | Overrides global.topologySpreadConstraints |
 | scannerAdapter | object | `{"affinity":{},"cacheSizeLimit":"2Gi","containerSecurityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"enabled":true,"env":{"SCANNER_TRIVY_INSECURE":"true"},"image":{"pullPolicy":"IfNotPresent","repository":"ghcr.io/artifact-keeper/artifact-keeper-scanner-adapter","tag":"1.5.2"},"nodeSelector":{},"podSecurityContext":{"fsGroup":10000,"runAsNonRoot":true,"runAsUser":10000},"proxy":{"enabled":true,"existingSecret":"","httpProxy":"","httpsProxy":"","noProxy":""},"resources":{"limits":{"cpu":"1","ephemeral-storage":"2Gi","memory":"1Gi"},"requests":{"cpu":"100m","ephemeral-storage":"128Mi","memory":"128Mi"}},"tmpSizeLimit":"1Gi","tolerations":[],"topologySpreadConstraints":[]}` | In-house Trivy scanner-adapter Stateless Harbor-protocol scanner-adapter (image artifact-keeper-scanner-adapter) that the backend calls over HTTP via TRIVY_ADAPTER_URL for container-image Trivy scans. It pulls the target image from the AK registry per request and runs Trivy in-process, so it needs no Redis and no persistent storage — a single replica is fine. The image is multi-arch (amd64 + arm64), so there is no arch-pinned nodeSelector; leave it enabled on arm64 clusters too. Default enabled: true (recommended for amd64 and supported on arm64). This is separate from the `trivy` server above, which stays on TRIVY_URL for the fs/incus scan path. |
 | scannerAdapter.cacheSizeLimit | string | `"2Gi"` | Writable scratch for image-layer extraction and the Trivy DB cache. emptyDir (no PVC) because the adapter is stateless. |
 | scannerAdapter.env | object | `{"SCANNER_TRIVY_INSECURE":"true"}` | Extra environment for the adapter. SCANNER_TRIVY_INSECURE defaults to "true" because the adapter reaches the AK registry over the plain-HTTP in-cluster Service endpoint; set to "false" if the adapter pulls from a TLS-terminated registry it can verify. |
@@ -697,6 +715,16 @@ To pin any total by hand, set the matching key under
 `fleet.guardrails.quotaOverrides` (for example `limitsMemory: 32Gi`); an override
 replaces the computed value outright while the remaining totals stay
 component-aware.
+
+### Scan worker
+
+`scanWorker.enabled: true` moves vulnerability scans off the pods that serve requests ([artifact-keeper#5784](https://github.com/artifact-keeper/artifact-keeper/pull/5784), backend 1.12.0 or later). The backend pods get `SCAN_QUEUE_ENABLED=true` and `SCAN_WORKER_ENABLED=false` and only queue scans, a separate `<fullname>-scan-worker` Deployment runs the backend image with `SCAN_WORKER_ENABLED=true` and claims them, `scanWorker.concurrency` at a time per pod. Off by default, the backend then scans in-process as before.
+
+- The worker reads the artifacts the backend pods wrote, so the render needs one of: object storage (`backend.env.STORAGE_BACKEND` s3, gcs or azure), `ReadWriteMany` in `backend.persistence.accessModes`, or `scanWorker.colocateWithBackend: true` to share a `ReadWriteOnce` volume on the backend's node
+- It shares the backend's env (`backend.env`, secrets, `backend.proxy`), `scanWorker.env` adds to or replaces it. Files a `backend.env` path points at need `scanWorker.extraVolumes` and `extraVolumeMounts`
+- With `backend.metricsListener.enabled` it gets a metrics Service and, with `serviceMonitor.enabled`, an endpoint in the ServiceMonitor. The `ak_scan_queue_*` gauges come from the worker only
+- The CPU limit caps scan throughput: at the limit a worker scans at a flat rate while the queue grows. Size `replicaCount`, `concurrency` and `resources` together
+- An older backend image ignores both flags: the API pods keep scanning in-process and the worker idles
 
 ### Component Diagram
 

@@ -250,6 +250,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+        {{- if .Values.scanWorker.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.scanWorker.selectorLabels" . | nindent 14 }}
+        {{- end }}
       ports:
         - port: 8090
           protocol: TCP
@@ -283,6 +288,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+        {{- if .Values.scanWorker.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.scanWorker.selectorLabels" . | nindent 14 }}
+        {{- end }}
       ports:
         - port: 8090
           protocol: TCP
@@ -323,6 +333,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+        {{- if .Values.scanWorker.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.scanWorker.selectorLabels" . | nindent 14 }}
+        {{- end }}
         # dtrack-init Job uses dtrack selector labels
         - podSelector:
             matchLabels:
@@ -370,6 +385,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+        {{- if .Values.scanWorker.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.scanWorker.selectorLabels" . | nindent 14 }}
+        {{- end }}
         - podSelector:
             matchLabels:
               {{- include "artifact-keeper.dtrack.selectorLabels" . | nindent 14 }}
@@ -407,6 +427,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "artifact-keeper.backend.selectorLabels" . | nindent 14 }}
+        {{- if .Values.scanWorker.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "artifact-keeper.scanWorker.selectorLabels" . | nindent 14 }}
+        {{- end }}
         {{- with (dig "networkPolicy" "extraFrom" list .Values.opensearch) }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

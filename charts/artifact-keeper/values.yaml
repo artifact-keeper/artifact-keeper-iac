@@ -1286,6 +1286,75 @@ trivy:
   nodeSelector: {}
   topologySpreadConstraints: []
 
+# -- Dedicated scan-worker Deployment, so grype never execs on a pod serving
+# requests. Enabling it sets SCAN_QUEUE_ENABLED=true on the backend and the
+# worker, and SCAN_WORKER_ENABLED=false on the backend.
+# Needs object storage, RWX or colocateWithBackend, the render says which
+scanWorker:
+  # -- Render the scan-worker Deployment and switch the backend to the durable scan queue. Needs backend 1.12.0 or later, an older image ignores both flags and the worker idles
+  enabled: false
+  # Egress: the worker takes backend.proxy (and through it global.proxy), it is
+  # the same image running the same code. backend.proxy.enabled: false cuts off both.
+  # -- Worker pods. Static, the chart renders no autoscaler for the worker
+  replicaCount: 2
+  # -- Pin workers to the backend's node to share a ReadWriteOnce PVC (RWO scopes
+  # to a node, not a pod). UNSAFE on multi-node zone-scoped storage: nothing pins
+  # the backend, so a rescheduled one hangs. Pin both, or use RWX.
+  colocateWithBackend: false
+  # -- Scan jobs per pod. Keep at or below MAX_CONCURRENT_SCAN_EXTRACTIONS: a
+  # claimed job is invisible to other replicas, so over-claiming parks work.
+  concurrency: 8
+  # -- Scratch for archive extraction and OCI reassembly. emptyDir, since the
+  # workspace is per-scan and the backend already cleans it up.
+  scanWorkspaceSizeLimit: 20Gi
+  # -- Files the inherited backend env expects. The worker shares backend.env, so
+  # a path-valued var with no volume behind it CrashLoops the pod at startup.
+  # Rendered verbatim, like backend.extraVolumes.
+  extraVolumes: []
+  #   - name: custom-ca
+  #     secret: { secretName: my-ca-bundle }
+  # -- Mounts for the worker container, rendered verbatim
+  extraVolumeMounts: []
+  #   - name: custom-ca
+  #     mountPath: /app/ca.crt
+  #     subPath: ca-bundle.crt
+  # -- Extra environment for the worker only. A name that backend.env also sets replaces it here instead of rendering twice
+  env:
+    # -- The default 4 is sized for pods that also serve traffic, this one does not
+    MAX_CONCURRENT_SCAN_EXTRACTIONS: "8"
+  # -- The CPU limit caps scan throughput: a busy worker uses every core it gets,
+  # and at the limit it scans at a flat rate while the queue grows. Raise it with
+  # concurrency, or leave it out where nodes have spare CPU
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  # -- Pod securityContext of the worker
+  podSecurityContext:
+    runAsNonRoot: true
+    # -- MUST be 1001: the image bakes the Grype vulnerability DB owned by
+    # 1001:0, and grype hits EACCES on it under any other UID.
+    runAsUser: 1001
+    fsGroup: 0
+  # -- Container securityContext of the worker
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  # -- Per-component scheduling (overrides global)
+  tolerations: []
+  # -- Overrides global.affinity. Cannot be combined with colocateWithBackend, the render says so
+  affinity: {}
+  # -- Overrides global.nodeSelector
+  nodeSelector: {}
+  # -- Overrides global.topologySpreadConstraints
+  topologySpreadConstraints: []
+
 # -- In-house Trivy scanner-adapter
 # Stateless Harbor-protocol scanner-adapter (image
 # artifact-keeper-scanner-adapter) that the backend calls over HTTP via

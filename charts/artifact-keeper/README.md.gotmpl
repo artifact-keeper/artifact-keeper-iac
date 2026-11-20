@@ -468,6 +468,16 @@ To pin any total by hand, set the matching key under
 replaces the computed value outright while the remaining totals stay
 component-aware.
 
+### Scan worker
+
+`scanWorker.enabled: true` moves vulnerability scans off the pods that serve requests ([artifact-keeper#5784](https://github.com/artifact-keeper/artifact-keeper/pull/5784), backend 1.12.0 or later). The backend pods get `SCAN_QUEUE_ENABLED=true` and `SCAN_WORKER_ENABLED=false` and only queue scans, a separate `<fullname>-scan-worker` Deployment runs the backend image with `SCAN_WORKER_ENABLED=true` and claims them, `scanWorker.concurrency` at a time per pod. Off by default, the backend then scans in-process as before.
+
+- The worker reads the artifacts the backend pods wrote, so the render needs one of: object storage (`backend.env.STORAGE_BACKEND` s3, gcs or azure), `ReadWriteMany` in `backend.persistence.accessModes`, or `scanWorker.colocateWithBackend: true` to share a `ReadWriteOnce` volume on the backend's node
+- It shares the backend's env (`backend.env`, secrets, `backend.proxy`), `scanWorker.env` adds to or replaces it. Files a `backend.env` path points at need `scanWorker.extraVolumes` and `extraVolumeMounts`
+- With `backend.metricsListener.enabled` it gets a metrics Service and, with `serviceMonitor.enabled`, an endpoint in the ServiceMonitor. The `ak_scan_queue_*` gauges come from the worker only
+- The CPU limit caps scan throughput: at the limit a worker scans at a flat rate while the queue grows. Size `replicaCount`, `concurrency` and `resources` together
+- An older backend image ignores both flags: the API pods keep scanning in-process and the worker idles
+
 ### Component Diagram
 
 ```

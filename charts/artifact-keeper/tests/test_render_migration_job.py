@@ -41,7 +41,17 @@ def env_names(env):
     return [e["name"] for e in env]
 
 
-ENABLED = {"backend": {"migrationJob": {"enabled": True}}}
+# db-migrate ships in backend 1.13.0 (artifact-keeper#6298)
+NEW = {"tag": "1.13.0"}
+ENABLED = {"backend": {"migrationJob": {"enabled": True}, "image": NEW}}
+
+
+def render_error(values, *args):
+    values = {"secrets": {"existingSecret": "migrate-render-test"}, **values}
+    return subprocess.run(
+        [HELM, "template", "ak", str(CHART), "-f", "-", *args],
+        input=yaml.safe_dump(values), capture_output=True, text=True,
+    )
 
 
 class MigrationJobRenderTests(unittest.TestCase):
@@ -78,14 +88,14 @@ class MigrationJobRenderTests(unittest.TestCase):
         self.assertNotIn("SKIP_MIGRATIONS", env_names(backend_env(docs)))
 
     def test_backend_env_skip_migrations_renders_once(self):
-        values = {"backend": {"migrationJob": {"enabled": True}, "env": {"SKIP_MIGRATIONS": "false"}}}
+        values = {"backend": {"migrationJob": {"enabled": True}, "image": NEW, "env": {"SKIP_MIGRATIONS": "false"}}}
         names = env_names(backend_env(render(values, "--is-upgrade")))
         self.assertEqual(names.count("SKIP_MIGRATIONS"), 1)
         self.assertIn({"name": "SKIP_MIGRATIONS", "value": "true"}, backend_env(render(values, "--is-upgrade")))
 
     def test_external_database_secret(self):
         values = {
-            "backend": {"migrationJob": {"enabled": True}},
+            "backend": {"migrationJob": {"enabled": True}, "image": NEW},
             "postgres": {"enabled": False},
             "externalDatabase": {"existingSecret": "ext-db", "existingSecretKey": "url"},
         }
@@ -94,10 +104,23 @@ class MigrationJobRenderTests(unittest.TestCase):
         self.assertEqual(env["valueFrom"]["secretKeyRef"], {"name": "ext-db", "key": "url"})
 
     def test_deadline_and_backoff_are_configurable(self):
-        values = {"backend": {"migrationJob": {"enabled": True, "activeDeadlineSeconds": 7200, "backoffLimit": 0}}}
+        values = {"backend": {"migrationJob": {"enabled": True, "activeDeadlineSeconds": 7200, "backoffLimit": 0}, "image": NEW}}
         (job,) = jobs(render(values, "--is-upgrade"))
         self.assertEqual(job["spec"]["activeDeadlineSeconds"], 7200)
         self.assertEqual(job["spec"]["backoffLimit"], 0)
+
+    def test_refuses_a_backend_without_db_migrate(self):
+        for tag in ("1.12.3", "v1.12.0", "1.12.4-rc.1", "1.12.3@sha256:" + "0" * 64):
+            with self.subTest(tag=tag):
+                result = render_error({"backend": {"migrationJob": {"enabled": True}, "image": {"tag": tag}}})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("needs backend 1.13.0 or later", result.stderr)
+
+    def test_accepts_new_and_unversioned_tags(self):
+        for tag in ("1.13.0", "1.13.0-rc.1", "1.14.2", "dev", "sha-0123abc"):
+            with self.subTest(tag=tag):
+                (job,) = jobs(render({"backend": {"migrationJob": {"enabled": True}, "image": {"tag": tag}}}, "--is-upgrade"))
+                self.assertTrue(job["spec"]["template"]["spec"]["containers"][0]["image"].endswith(":" + tag))
 
 
 if __name__ == "__main__":

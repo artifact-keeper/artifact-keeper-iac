@@ -1,0 +1,74 @@
+{{- /*
+Schema migrations as a pre-upgrade hook (backend.migrationJob). The Job runs
+`artifact-keeper db-migrate` with the new backend image before the Deployment
+changes, and the Deployment then starts with SKIP_MIGRATIONS=true, so a long
+migration is bounded by activeDeadlineSeconds instead of the startup probe.
+
+pre-upgrade only: on a first install the database Secret and the bundled
+PostgreSQL do not exist yet when pre-install hooks run, so the backend
+migrates the empty database itself.
+
+The pod carries the backend selector labels, like the dtrack-init Job carries
+the dtrack ones, so the backend and PostgreSQL NetworkPolicies admit it. It
+declares no ports, so the backend Service never routes to it.
+*/}}
+{{- if and .Values.backend.enabled .Values.backend.migrationJob.enabled }}
+{{- $tag := (.Values.backend.image.tag | default .Chart.AppVersion | toString | splitList "@" | first) }}
+{{- if and (regexMatch `^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$` $tag) (semverCompare "<1.13.0-0" $tag) }}
+{{- fail (printf "backend.migrationJob.enabled needs backend 1.13.0 or later for the db-migrate subcommand (artifact-keeper#6298), backend.image.tag resolves to %s. An older image runs the server in the hook Job instead, and the upgrade waits on it" $tag) }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "artifact-keeper.fullname" . }}-backend-migrate
+  labels:
+    {{- include "artifact-keeper.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.backend.migrationJob.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.backend.migrationJob.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "artifact-keeper.backend.selectorLabels" . | nindent 8 }}
+        {{- range $key, $value := .Values.backend.podLabels }}
+        {{ $key }}: {{ $value | quote }}
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      {{- with (.Values.backend.tolerations | default .Values.global.tolerations) }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.backend.nodeSelector | default .Values.global.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "artifact-keeper.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.backend.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "artifact-keeper.image" (dict "image" .Values.backend.image "defaultTag" .Chart.AppVersion "context" .) | quote }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command: ["artifact-keeper", "db-migrate"]
+          {{- with .Values.backend.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.backend.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            {{- include "artifact-keeper.backend.databaseUrlEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.backend.migrationJob.resources | nindent 12 }}
+{{- end }}

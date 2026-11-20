@@ -883,6 +883,15 @@ The [mesh bootstrap guide](../../docs/mesh-bootstrap.md) walks through a two-pee
 
 ## Upgrading
 
+### Schema migrations in a pre-upgrade Job
+
+By default each backend pod applies pending schema migrations at startup, before it answers `/readyz`, so a long migration (a `CREATE INDEX CONCURRENTLY` on a large table) runs inside the startup probe budget and the pod can be restarted halfway ([artifact-keeper#6194](https://github.com/artifact-keeper/artifact-keeper/issues/6194)). With `backend.migrationJob.enabled: true` a `pre-upgrade` hook Job runs `artifact-keeper db-migrate` with the new backend image first, and the backend Deployment starts with `SKIP_MIGRATIONS=true`.
+
+- Needs backend 1.13.0 or later (`db-migrate`, [artifact-keeper#6298](https://github.com/artifact-keeper/artifact-keeper/pull/6298)). The render fails when `backend.image.tag` is an older release
+- Upgrades only. A first install migrates the empty database from the backend pods, because the database Secret and the bundled PostgreSQL do not exist yet when pre-install hooks run
+- `helm upgrade` waits for the Job only as long as its `--timeout` (5 minutes by default). For a long migration raise `--timeout` along with `backend.migrationJob.activeDeadlineSeconds`
+- The Job reads only `DATABASE_URL`. It runs with the backend's service account, security contexts, tolerations, node selector and `extraEnvFrom`
+
 ### Upgrading to 1.11.1
 
 **`RATE_LIMIT_TRUSTED_PROXY_CIDRS` is no longer set by default.** Chart 1.9.28 and earlier put `RATE_LIMIT_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"` in `backend.env`. Those ranges cover every pod in a typical cluster, so any pod could send a forged `X-Forwarded-For` and be treated as another client. Backend 1.11.1 already stops using such addresses for authorization ([artifact-keeper#4681](https://github.com/artifact-keeper/artifact-keeper/pull/4681)), but the default still trusted too much for rate limiting and `traceparent`. The trusted list now comes from `backend.clientIp.trustedProxyCidrs`, which is empty by default. An explicit `RATE_LIMIT_TRUSTED_PROXY_CIDRS` in `backend.env` still wins. `helm upgrade --reuse-values` keeps the previous chart's default values, including the old RFC1918 list, so drop that flag or pass `--set backend.env.RATE_LIMIT_TRUSTED_PROXY_CIDRS=null` to pick up the new default. The install notes show the list in effect.

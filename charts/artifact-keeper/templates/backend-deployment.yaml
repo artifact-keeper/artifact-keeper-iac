@@ -227,24 +227,19 @@ spec:
                    NO_PROXY (and lowercase) whenever it emits them, so a copy
                    left in backend.env does not define the variable twice. */}}
             {{- $proxyEnv := splitList " " (include "artifact-keeper.proxyEnvNames" (dict "proxy" .Values.backend.proxy "ctx" $)) }}
+            {{- /* On upgrades the migration Job owns SKIP_MIGRATIONS too. */}}
+            {{- $skipMigrations := and .Values.backend.migrationJob.enabled .Release.IsUpgrade }}
             {{- range $key, $value := .Values.backend.env }}
-            {{- if not (or (has $key $secretEnv) (has $key $proxyEnv)) }}
+            {{- if not (or (has $key $secretEnv) (has $key $proxyEnv) (and $skipMigrations (eq $key "SKIP_MIGRATIONS"))) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
             {{- end }}
-            - name: DATABASE_URL
-              {{- if and (not .Values.postgres.enabled) .Values.externalDatabase.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.externalDatabase.existingSecret }}
-                  key: {{ .Values.externalDatabase.existingSecretKey }}
-              {{- else }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "artifact-keeper.secretName" . }}
-                  key: DATABASE_URL
-              {{- end }}
+            {{- include "artifact-keeper.backend.databaseUrlEnv" . | nindent 12 }}
+            {{- if $skipMigrations }}
+            - name: SKIP_MIGRATIONS
+              value: "true"
+            {{- end }}
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:

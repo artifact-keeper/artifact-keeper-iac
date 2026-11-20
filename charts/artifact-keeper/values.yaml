@@ -764,6 +764,33 @@ backend:
     create: true
     annotations: {}
     name: ""
+  # -- Run the schema migrations in a pre-upgrade hook Job
+  # (`artifact-keeper db-migrate`) instead of in the backend pods at startup.
+  # On upgrades the Deployment then starts with SKIP_MIGRATIONS=true, so a long
+  # migration is bounded by activeDeadlineSeconds, not by the startup probe.
+  # A first install has no Job and the backend migrates the empty database
+  # itself. Needs a backend image with the db-migrate subcommand
+  # (artifact-keeper#6298, backend 1.13.0). The render fails when
+  # backend.image.tag is an older release, because an older image runs the
+  # server in the Job and the upgrade waits on it. Tags that are not a version
+  # (dev, a digest only) are not checked.
+  migrationJob:
+    # -- Render the pre-upgrade migration Job and set SKIP_MIGRATIONS=true on the backend during upgrades
+    enabled: false
+    # -- Seconds the migration Job may run before Kubernetes stops it and the upgrade fails. helm upgrade waits for the hook only as long as its timeout flag (5m by default), so raise that too for a long migration
+    activeDeadlineSeconds: 3600
+    # -- Retries of a failed migration pod before the Job, and with it the upgrade, fails
+    backoffLimit: 1
+    # -- Resources for the migration container. The migrations run in PostgreSQL, the container only drives them
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+        ephemeral-storage: 32Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+        ephemeral-storage: 64Mi
 
 # -- Next.js web frontend
 web:

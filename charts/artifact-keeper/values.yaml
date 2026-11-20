@@ -1291,9 +1291,11 @@ trivy:
 # worker, and SCAN_WORKER_ENABLED=false on the backend.
 # Needs object storage, RWX or colocateWithBackend, the render says which
 scanWorker:
+  # -- Render the scan-worker Deployment and switch the backend to the durable scan queue. Needs backend 1.12.0 or later, an older image ignores both flags and the worker idles
   enabled: false
-  # Egress: inherits global.proxy, same as the backend, it is the same image
-  # running the same code. Set proxy.enabled: false to cut off its egress.
+  # Egress: the worker takes backend.proxy (and through it global.proxy), it is
+  # the same image running the same code. backend.proxy.enabled: false cuts off both.
+  # -- Worker pods. Static, the chart renders no autoscaler for the worker
   replicaCount: 2
   # -- Pin workers to the backend's node to share a ReadWriteOnce PVC (RWO scopes
   # to a node, not a pod). UNSAFE on multi-node zone-scoped storage: nothing pins
@@ -1307,13 +1309,16 @@ scanWorker:
   scanWorkspaceSizeLimit: 20Gi
   # -- Files the inherited backend env expects. The worker shares backend.env, so
   # a path-valued var with no volume behind it CrashLoops the pod at startup.
+  # Rendered verbatim, like backend.extraVolumes.
   extraVolumes: []
   #   - name: custom-ca
   #     secret: { secretName: my-ca-bundle }
+  # -- Mounts for the worker container, rendered verbatim
   extraVolumeMounts: []
   #   - name: custom-ca
   #     mountPath: /app/ca.crt
   #     subPath: ca-bundle.crt
+  # -- Extra environment for the worker only. A name that backend.env also sets replaces it here instead of rendering twice
   env:
     # -- The default 4 is sized for pods that also serve traffic, this one does not
     MAX_CONCURRENT_SCAN_EXTRACTIONS: "8"
@@ -1327,21 +1332,27 @@ scanWorker:
     limits:
       cpu: "2"
       memory: 4Gi
+  # -- Pod securityContext of the worker
   podSecurityContext:
+    runAsNonRoot: true
     # -- MUST be 1001: the image bakes the Grype vulnerability DB owned by
     # 1001:0, and grype hits EACCES on it under any other UID.
-    runAsNonRoot: true
     runAsUser: 1001
     fsGroup: 0
+  # -- Container securityContext of the worker
   containerSecurityContext:
     readOnlyRootFilesystem: true
     allowPrivilegeEscalation: false
     capabilities:
       drop:
         - ALL
+  # -- Per-component scheduling (overrides global)
   tolerations: []
+  # -- Overrides global.affinity. Cannot be combined with colocateWithBackend, the render says so
   affinity: {}
+  # -- Overrides global.nodeSelector
   nodeSelector: {}
+  # -- Overrides global.topologySpreadConstraints
   topologySpreadConstraints: []
 
 # -- In-house Trivy scanner-adapter

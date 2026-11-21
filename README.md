@@ -4,6 +4,8 @@
   <img alt="Artifact Keeper" src="https://raw.githubusercontent.com/artifact-keeper/.github/main/brand/banners/github-readme_1600x600.png" width="100%">
 </p>
 
+[![Discord](https://img.shields.io/discord/1527760136456900748?label=Discord&logo=discord&logoColor=white)](https://discord.gg/8T7NW2PeS2)
+
 Infrastructure as Code for [Artifact Keeper](https://github.com/artifact-keeper/artifact-keeper) — production-grade Helm charts, Terraform modules, ArgoCD GitOps, and monitoring stack.
 
 > **Note:** All files in this repository are **example configurations** provided as getting-started templates. Review and modify them to match your specific infrastructure requirements, security policies, and operational needs before use in production.
@@ -307,6 +309,13 @@ The deployment includes two open-source security scanning tools:
 | [artifact-keeper-web](https://github.com/artifact-keeper/artifact-keeper-web) | Web frontend (Next.js) |
 | [artifact-keeper-api](https://github.com/artifact-keeper/artifact-keeper-api) | OpenAPI spec + generated SDKs |
 | [artifact-keeper-site](https://github.com/artifact-keeper/artifact-keeper-site) | Documentation site |
+
+## Community
+
+- **Discord**: chat, quick help and per-ecosystem channels at [discord.gg/8T7NW2PeS2](https://discord.gg/8T7NW2PeS2)
+- **GitHub Discussions**: [ideas and Q&A](https://github.com/artifact-keeper/artifact-keeper/discussions)
+- **Issues**: confirmed bugs go in the [issue tracker](https://github.com/artifact-keeper/artifact-keeper-iac/issues)
+- **Security**: report vulnerabilities privately as described in [SECURITY.md](https://github.com/artifact-keeper/artifact-keeper/blob/main/SECURITY.md), never in Discord or public issues
 
 ## License
 

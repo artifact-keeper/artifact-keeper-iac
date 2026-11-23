@@ -9,6 +9,43 @@ security policies, and operational needs before use in production.
 */}}
 {{- if .Values.backend.enabled }}
 {{- include "artifact-keeper.validateBackendEnvCredentials" . }}
+{{- /*
+Graceful shutdown (backend.shutdown, backend 1.13.0): the drain, an optional
+preStop sleep and the pod's grace period, which must cover
+preStop + drain + longest request + 5 s of telemetry flush.
+*/}}
+{{- $shutdown := .Values.backend.shutdown | default dict }}
+{{- range $key := list "drainSecs" "preStopSleepSecs" "longestRequestSecs" "terminationGracePeriodSeconds" }}
+{{- $v := index $shutdown $key }}
+{{- if and (not (kindIs "invalid" $v)) (or (not (or (kindIs "float64" $v) (kindIs "int" $v) (kindIs "int64" $v))) (lt (float64 $v) 0.0) (ne (float64 (int64 $v)) (float64 $v))) }}
+{{- fail (printf "backend.shutdown.%s must be a whole number of seconds, 0 or more (got %v)" $key $v) }}
+{{- end }}
+{{- end }}
+{{- $envDrain := index .Values.backend.env "SHUTDOWN_DRAIN_SECS" }}
+{{- if and (not (kindIs "invalid" $shutdown.drainSecs)) (gt (int64 $shutdown.drainSecs) 300) }}
+{{- fail (printf "backend.shutdown.drainSecs must be at most 300 (got %v)" $shutdown.drainSecs) }}
+{{- end }}
+{{- if and (not (kindIs "invalid" $shutdown.drainSecs)) (hasKey .Values.backend.env "SHUTDOWN_DRAIN_SECS") (ne (toString (int64 $shutdown.drainSecs)) (toString $envDrain)) }}
+{{- fail (printf "backend.env.SHUTDOWN_DRAIN_SECS (%v) conflicts with backend.shutdown.drainSecs (%v): remove the backend.env entry or set both to the same value" $envDrain $shutdown.drainSecs) }}
+{{- end }}
+{{- $drain := 0 }}
+{{- if not (kindIs "invalid" $shutdown.drainSecs) }}
+{{- $drain = int64 $shutdown.drainSecs }}
+{{- else if and $envDrain (regexMatch "^[0-9]+$" (toString $envDrain)) }}
+{{- $drain = int64 (toString $envDrain) }}
+{{- end }}
+{{- $preStop := int64 ($shutdown.preStopSleepSecs | default 0) }}
+{{- $longest := int64 (default 15 $shutdown.longestRequestSecs) }}
+{{- $minGrace := add $preStop $drain 5 }}
+{{- $grace := 0 }}
+{{- if not (kindIs "invalid" $shutdown.terminationGracePeriodSeconds) }}
+{{- $grace = int64 $shutdown.terminationGracePeriodSeconds }}
+{{- if le $grace $minGrace }}
+{{- fail (printf "backend.shutdown.terminationGracePeriodSeconds (%d) must exceed preStopSleepSecs + drain + 5 (%d): the pod would be killed before the drain ends" $grace $minGrace) }}
+{{- end }}
+{{- else if or (gt $drain 0) (gt $preStop 0) }}
+{{- $grace = max 30 (add $minGrace $longest) }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -59,6 +96,9 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "artifact-keeper.serviceAccountName" . }}
       automountServiceAccountToken: false
+      {{- if gt $grace 0 }}
+      terminationGracePeriodSeconds: {{ $grace }}
+      {{- end }}
       {{- with .Values.backend.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -177,6 +217,12 @@ spec:
           {{- with .Values.backend.containerSecurityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if gt $preStop 0 }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", {{ $preStop | quote }}]
           {{- end }}
           ports:
             - name: http
@@ -378,6 +424,10 @@ spec:
             - name: METRICS_BIND_IP
               value: {{ .Values.backend.metricsListener.bindIP | quote }}
             {{- end }}
+            {{- end }}
+            {{- if and (not (kindIs "invalid" $shutdown.drainSecs)) (not (hasKey .Values.backend.env "SHUTDOWN_DRAIN_SECS")) }}
+            - name: SHUTDOWN_DRAIN_SECS
+              value: {{ int64 $shutdown.drainSecs | quote }}
             {{- end }}
             {{- /*
             Client-IP resolution behind a proxy (backend.clientIp). Explicit

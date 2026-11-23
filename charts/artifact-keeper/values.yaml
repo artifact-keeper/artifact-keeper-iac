@@ -308,6 +308,34 @@ backend:
     # not; `true` or `false` forces it, for example for `kubectl logs` against
     # a TTY-attached debug container. Any other value fails the render.
     ansi: auto
+  # -- Graceful shutdown (backend 1.13.0). On SIGTERM the backend fails
+  # /readyz at once and keeps serving for the drain before it closes its
+  # listeners, so the Service and the ingress stop routing to the pod first.
+  # The pod's grace period must cover the whole stop:
+  # preStop sleep + drain + longest request + up to 5 s telemetry flush.
+  # Everything here is unset by default, which renders nothing: no drain
+  # (the backend closes at once), no preStop hook, Kubernetes' 30 s grace.
+  shutdown:
+    # -- (int) Rendered as SHUTDOWN_DRAIN_SECS: seconds the backend keeps
+    # serving after SIGTERM. null renders nothing (backend default 0, close
+    # at once); 5-10 is recommended behind a Service or ingress. 0-300. A
+    # backend.env entry with the same name must match the value here.
+    drainSecs: null
+    # -- (int) Seconds of a preStop `sleep` hook; 0 renders none. Not needed
+    # with a drain. Kubernetes sends SIGTERM only when the hook returns, so it
+    # adds to the drain.
+    preStopSleepSecs: 0
+    # -- (int) The longest request that must still finish after the listeners
+    # close, in seconds (a large upload or download). Used only to derive
+    # terminationGracePeriodSeconds.
+    longestRequestSecs: 15
+    # -- (int) Rendered as the pod's terminationGracePeriodSeconds. null
+    # derives it when a drain or a preStop hook is set:
+    # preStopSleepSecs + drain + longestRequestSecs + 5, and at least 30. With
+    # neither set nothing is rendered and Kubernetes' default 30 s applies.
+    # An explicit value must exceed preStopSleepSecs + drain + 5, or the
+    # render fails.
+    terminationGracePeriodSeconds: null
   # -- Stuck-scan janitor, which reaps security scans left in `running` (for
   # example by a backend pod that died mid-scan). Both values are null by default, which renders nothing and keeps the
   # backend defaults. When set, each must be a positive integer; the backend
@@ -352,7 +380,7 @@ backend:
     # METRICS_BIND_IP: "0.0.0.0"            # (1.11.0) metrics-only listener IP (only with METRICS_PORT); prefer backend.metricsListener.bindIP.
     # HTTP_HEADER_READ_TIMEOUT_SECS: "10"  # (1.11.1) seconds an HTTP/1 client has to send the request line and headers; also closes idle keep-alive connections. 0 disables. Keep the ingress/gateway upstream idle timeout below it.
     # GLOBAL_REQUEST_TIMEOUT_SECS: "120"   # wall-clock limit for a non-transfer request once its head has arrived; 0 disables.
-    # SHUTDOWN_DRAIN_SECS: "10"           # (1.13.0) after SIGTERM keep serving this many seconds with /readyz answering 503 before closing the listeners, so the Service and ingress stop routing here first (no 502 on rollouts). Default 0 closes at once; 5-10 recommended. The pod's grace period (Kubernetes default 30 s; this chart sets none) must exceed drain + longest request + up to 5 s telemetry flush. Replaces a preStop sleep; with one, the two add up.
+    # SHUTDOWN_DRAIN_SECS: "10"           # (1.13.0) prefer backend.shutdown.drainSecs, which also derives terminationGracePeriodSeconds. After SIGTERM keep serving this many seconds with /readyz answering 503 before closing the listeners (no 502 on rollouts). Default 0 closes at once; 5-10 recommended. Set here, it still counts toward the derived grace period.
 
     # -- Storage
     # STORAGE_BACKEND: "filesystem"

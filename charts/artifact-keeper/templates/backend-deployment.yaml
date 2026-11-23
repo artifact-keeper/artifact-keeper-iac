@@ -503,7 +503,7 @@ spec:
       volumes:
         - name: tmp
           emptyDir:
-            sizeLimit: 256Mi
+            sizeLimit: {{ .Values.backend.tmpSizeLimit | default "256Mi" }}
         - name: storage
           {{- if .Values.backend.persistence.enabled }}
           {{- if .Values.backend.persistence.ephemeral.enabled }}

@@ -43,9 +43,13 @@ def deployment(result):
     )
 
 
-def storage_volume(result):
+def volume_named(result, name):
     volumes = deployment(result)["spec"]["template"]["spec"]["volumes"]
-    return next(volume for volume in volumes if volume["name"] == "storage")
+    return next(volume for volume in volumes if volume["name"] == name)
+
+
+def storage_volume(result):
+    return volume_named(result, "storage")
 
 
 class BackendStorageTests(unittest.TestCase):
@@ -111,6 +115,18 @@ class BackendStorageTests(unittest.TestCase):
             "backend.persistence.ephemeral.enabled cannot both be true",
             result.stderr,
         )
+
+    def test_tmp_size_limit_defaults_to_256mi(self):
+        volume = volume_named(render(), "tmp")
+        self.assertEqual(volume["emptyDir"]["sizeLimit"], "256Mi")
+
+    def test_tmp_size_limit_is_configurable(self):
+        volume = volume_named(render({"backend": {"tmpSizeLimit": "4Gi"}}), "tmp")
+        self.assertEqual(volume["emptyDir"]["sizeLimit"], "4Gi")
+
+    def test_empty_tmp_size_limit_falls_back_to_256mi(self):
+        volume = volume_named(render({"backend": {"tmpSizeLimit": ""}}), "tmp")
+        self.assertEqual(volume["emptyDir"]["sizeLimit"], "256Mi")
 
 
 if __name__ == "__main__":

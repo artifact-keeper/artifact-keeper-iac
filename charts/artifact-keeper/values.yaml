@@ -352,6 +352,7 @@ backend:
     # METRICS_BIND_IP: "0.0.0.0"            # (1.11.0) metrics-only listener IP (only with METRICS_PORT); prefer backend.metricsListener.bindIP.
     # HTTP_HEADER_READ_TIMEOUT_SECS: "10"  # (1.11.1) seconds an HTTP/1 client has to send the request line and headers; also closes idle keep-alive connections. 0 disables. Keep the ingress/gateway upstream idle timeout below it.
     # GLOBAL_REQUEST_TIMEOUT_SECS: "120"   # wall-clock limit for a non-transfer request once its head has arrived; 0 disables.
+    # SHUTDOWN_DRAIN_SECS: "10"           # (1.13.0) after SIGTERM keep serving this many seconds with /readyz answering 503 before closing the listeners, so the Service and ingress stop routing here first (no 502 on rollouts). Default 0 closes at once; 5-10 recommended. The pod's grace period (Kubernetes default 30 s; this chart sets none) must exceed drain + longest request + up to 5 s telemetry flush. Replaces a preStop sleep; with one, the two add up.
 
     # -- Storage
     # STORAGE_BACKEND: "filesystem"
@@ -402,6 +403,7 @@ backend:
     # DATABASE_ACQUIRE_TIMEOUT_SECS: "30"
     # DATABASE_IDLE_TIMEOUT_SECS: "600"
     # DATABASE_MAX_LIFETIME_SECS: "1800"
+    # DATABASE_READ_RETRY: "true"         # (1.13.0) replay a bodiless GET/HEAD once (250-500 ms later) when it lost its database connection to a switchover or failover and wrote nothing; counted in ak_db_read_retries_total. false disables.
 
     # -- Authentication
     # JWT_EXPIRATION_SECS: "86400"
